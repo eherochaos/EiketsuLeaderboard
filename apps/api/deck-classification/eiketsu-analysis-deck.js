@@ -447,7 +447,7 @@ function inferPlanType(row = {}) {
     row.stratDetailText,
     row.description,
   ];
-  const text = [...categoryValues, ...textValues]
+  const categoryText = categoryValues
     .map((value) => {
       if (value && typeof value === "object") {
         return Object.values(value).join(" ");
@@ -456,14 +456,42 @@ function inferPlanType(row = {}) {
     })
     .join(" ");
 
-  if (/号令|號令/.test(text)) {
+  const detailText = textValues
+    .map((value) => {
+      if (value && typeof value === "object") {
+        return Object.values(value).join(" ");
+      }
+      return String(value || "");
+    })
+    .join(" ")
+    .split(/エラッタ前|修正前|変更前/, 1)[0];
+  const text = [categoryText, detailText].join(" ");
+
+  if (/号令|號令/.test(categoryText)) {
     return "号令";
   }
-  if (/陣形|陣型|阵型|formation/i.test(text)) {
+  if (/陣形|陣型|阵型|formation/i.test(categoryText)) {
     return "陣形";
   }
-  if (/全体|全軍|味方.*全|allies|all ally|team/i.test(text)) {
-    return "全体強化";
+  if (/全体強化/.test(categoryText)) {
+    if (/武力(が|と|を)?[^。]*上が|武力[^。]*上昇/.test(detailText)) {
+      return "全体強化";
+    }
+
+    return "全体補助";
+  }
+  if (/号令|號令/.test(detailText)) {
+    return "号令";
+  }
+  if (/陣形|陣型|阵型|formation/i.test(detailText)) {
+    return "陣形";
+  }
+  if (/全体|全軍|味方.*全|allies|all ally|team/i.test(detailText)) {
+    if (/武力(が|と|を)?[^。]*上が|武力[^。]*上昇/.test(detailText)) {
+      return "全体強化";
+    }
+
+    return "全体補助";
   }
   if (/ダメージ|傷害|伤害|damage/i.test(text)) {
     return "ダメージ";
@@ -557,7 +585,7 @@ function strategyTypeForCard(cardId, cardCatalog, strategyTypesByKey, rule) {
 }
 
 function isCommandPlanType(mainPlanType) {
-  return /号令|全体|陣形|陣型|阵型|formation/i.test(String(mainPlanType || ""));
+  return /号令|全体強化|陣形|陣型|阵型|formation/i.test(String(mainPlanType || ""));
 }
 
 function isBalancePlanType(mainPlanType) {
@@ -1173,6 +1201,18 @@ function applySecondaryAxes(items, cardCatalog) {
   const supportByCard = secondaryAxisSupport(items);
 
   return items.map((item) => {
+    if (item.deckType === DECK_TYPE_MANY) {
+      return {
+        ...item,
+        secondaryAxisCardId: "",
+        secondaryAxisCardName: "",
+        secondaryAxisReason: "",
+        secondaryAxisSupport: 0,
+        secondaryAxisCandidates: [],
+        secondaryAxisRejectedCandidates: [],
+      };
+    }
+
     const secondary = selectSecondaryAxis(item, supportByCard, cardCatalog);
     const selected = secondary.selected;
 
@@ -1192,7 +1232,18 @@ function applySecondaryAxes(items, cardCatalog) {
 function categoryName(primaryCoreCardId, secondaryAxisCardId, deckType, cardCatalog, rule) {
   const coreName = shortCardName(primaryCoreCardId, cardCatalog, rule) || "Unknown Deck";
   const secondaryName = secondaryAxisCardId ? shortCardName(secondaryAxisCardId, cardCatalog) : "";
-  const axisName = secondaryName ? `${coreName}や${secondaryName}` : coreName;
+  const primaryCost = cardCost(cardCatalog[primaryCoreCardId]);
+  const secondaryCost = cardCost(cardCatalog[secondaryAxisCardId]);
+  const secondaryFirst = Boolean(
+    secondaryName
+      && deckType === DECK_TYPE_BALANCE
+      && secondaryCost >= 3
+      && primaryCost <= LOW_COST_THRESHOLD
+      && secondaryCost - primaryCost >= 2,
+  );
+  const axisName = secondaryName
+    ? (secondaryFirst ? `${secondaryName}や${coreName}` : `${coreName}や${secondaryName}`)
+    : coreName;
   return deckType && deckType !== UNKNOWN_DECK_TYPE ? `${axisName}${deckType}デッキ` : `${axisName}デッキ`;
 }
 

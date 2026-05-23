@@ -25,6 +25,7 @@ function cardCatalog() {
   return {
     "core-command": { name: "Core Command", cost: "3.0", unitType: "spear", card_code: "蒼001" },
     "core-balance": { name: "Core Balance", cost: "2.0", unitType: "spear", card_code: "緋001" },
+    "core-low-balance": { name: "Core Low Balance", cost: "1.0", unitType: "bow", card_code: "緋004" },
     "core-damage": { name: "Core Damage", cost: "2.5", unitType: "gun", card_code: "碧001" },
     "core-formation": { name: "Core Formation", cost: "3.5", unitType: "spear", card_code: "玄001" },
     "tie-low": { name: "Tie Low", cost: "2.0", unitType: "bow", card_code: "紫001" },
@@ -34,6 +35,8 @@ function cardCatalog() {
     "second-freq": { name: "Second Freq", cost: "2.0", unitType: "bow", card_code: "蒼010" },
     "second-gray": { name: "Second Gray", cost: "2.5", unitType: "gun", card_code: "蒼011" },
     "second-command": { name: "Second Command", cost: "2.5", unitType: "spear", card_code: "蒼013" },
+    "support-all": { name: "Support All", cost: "2.0", unitType: "spear", card_code: "蒼014" },
+    "big-balance": { name: "Big Balance", cost: "4.0", unitType: "spear", card_code: "蒼015" },
     "low-common": { name: "Low Common", cost: "1.0", unitType: "spear", card_code: "蒼012" },
     "low-a": { name: "Low A", cost: "1.0", unitType: "spear", card_code: "蒼004" },
     "low-b": { name: "Low B", cost: "1.0", unitType: "spear", card_code: "蒼005" },
@@ -48,6 +51,7 @@ function strategyTypes() {
   return [
     { cardId: "core-command", mainPlanType: "号令" },
     { cardId: "core-balance", mainPlanType: "単体強化" },
+    { cardId: "core-low-balance", mainPlanType: "単体強化" },
     { cardId: "core-damage", mainPlanType: "ダメージ" },
     { cardId: "core-formation", mainPlanType: "陣形" },
     { cardId: "tie-low", mainPlanType: "単体強化" },
@@ -57,6 +61,12 @@ function strategyTypes() {
     { cardId: "second-freq", mainPlanType: "単体強化" },
     { cardId: "second-gray", mainPlanType: "特殊" },
     { cardId: "second-command", mainPlanType: "号令" },
+    {
+      cardId: "support-all",
+      categories: ["全体強化"],
+      strategyText: "味方の知力が上がる。エラッタ前計略内容 号令",
+    },
+    { cardId: "big-balance", mainPlanType: "ダメージ" },
   ];
 }
 
@@ -126,6 +136,8 @@ function testSevenCardsAreManyCardDeck() {
   const result = output.results[0];
   assert.strictEqual(result.deckType, "多枚数");
   assert.strictEqual(result.categoryName.endsWith("多枚数デッキ"), true);
+  assert.strictEqual(result.secondaryAxisCardId, "");
+  assert.strictEqual(result.categoryName.includes("や"), false);
   assert.strictEqual(result.evidence.deckCardCount, 7);
 }
 
@@ -279,6 +291,31 @@ function testCommandDeckRejectsBalanceSecondaryAxis() {
   assert.strictEqual(result.evidence.secondaryAxisRejectedCandidates[0].rejectionReason, "typeConflict");
 }
 
+function testCommandDeckRejectsAllSupportSecondaryAxis() {
+  const output = classify(
+    [deck("reject-support", ["core-command", "support-all", "low-a", "low-b"])],
+    [usage("reject-support", "core-command", 1.5)],
+  );
+
+  const result = output.results[0];
+  assert.strictEqual(result.secondaryAxisCardId, "");
+  assert.strictEqual(result.categoryName, "Core Command号令デッキ");
+  assert.strictEqual(result.evidence.secondaryAxisRejectedCandidates[0].cardId, "support-all");
+  assert.strictEqual(result.evidence.secondaryAxisRejectedCandidates[0].rejectionReason, "typeConflict");
+}
+
+function testBalanceNamePutsLargeSecondaryAxisFirst() {
+  const output = classify(
+    [deck("large-second", ["core-low-balance", "big-balance", "low-a", "low-b"])],
+    [usage("large-second", "core-low-balance", 1.5)],
+  );
+
+  const result = output.results[0];
+  assert.strictEqual(result.primaryCoreCardId, "core-low-balance");
+  assert.strictEqual(result.secondaryAxisCardId, "big-balance");
+  assert.strictEqual(result.categoryName, "Big BalanceやCore Low Balanceバランスデッキ");
+}
+
 function testSamePrimaryDifferentSecondAxesSplitCategories() {
   const output = classify(
     [
@@ -408,6 +445,8 @@ testBalanceDeckRejectsLowFrequencyCommandSecondaryAxis();
 testBalanceDeckPromotesHighFrequencyCommandToPrimaryAxis();
 testCompatibleHighCostPartnerBecomesSecondaryAxis();
 testCommandDeckRejectsBalanceSecondaryAxis();
+testCommandDeckRejectsAllSupportSecondaryAxis();
+testBalanceNamePutsLargeSecondaryAxisFirst();
 testSamePrimaryDifferentSecondAxesSplitCategories();
 testLowCostCommonCardCannotBecomeSecondaryAxis();
 testSecondCardStrategyFrequencyCanBecomeSecondaryAxis();
