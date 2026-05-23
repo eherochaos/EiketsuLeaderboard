@@ -3,10 +3,10 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  DEFAULT_SIMILAR_COST,
   classifyAnalysisDecks,
   loadAnalysisDeckCsv,
   loadCardCatalog,
+  loadCoreRules,
 } = require("./eiketsu-analysis-deck");
 
 function getArgValue(args, name) {
@@ -17,7 +17,7 @@ function getArgValue(args, name) {
 function usage() {
   return [
     "Usage:",
-    "node apps/api/deck-classification/classify-eiketsu-analysis-decks.js --input <analysis_deck.csv> --card-catalog <card_catalog.json> --output <results.json>",
+    "node apps/api/deck-classification/classify-eiketsu-analysis-decks.js --input <analysis_deck.csv> --card-catalog <card_catalog.json> --output <results.json> [--core-rules <coreRules.json>]",
   ].join("\n");
 }
 
@@ -25,8 +25,8 @@ function main() {
   const args = process.argv.slice(2);
   const inputPath = getArgValue(args, "--input");
   const cardCatalogPath = getArgValue(args, "--card-catalog");
+  const coreRulesPath = getArgValue(args, "--core-rules");
   const outputPath = getArgValue(args, "--output");
-  const similarCost = Number(getArgValue(args, "--similar-cost") || DEFAULT_SIMILAR_COST);
 
   if (!inputPath || !cardCatalogPath || !outputPath) {
     console.error(usage());
@@ -36,13 +36,14 @@ function main() {
 
   const decks = loadAnalysisDeckCsv(inputPath);
   const cardCatalog = loadCardCatalog(cardCatalogPath);
-  const output = classifyAnalysisDecks(decks, cardCatalog, { similarCost });
+  const coreRules = loadCoreRules(coreRulesPath);
+  const output = classifyAnalysisDecks(decks, cardCatalog, { coreRules });
 
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, `${JSON.stringify(output, null, 2)}\n`, "utf8");
 
   console.log(
-    `processed=${output.stats.total} classified=${output.stats.classified} unclassified=${output.stats.unclassified} categories=${output.stats.categoryCount}`,
+    `processed=${output.stats.total} classified=${output.stats.classified} unclassified=${output.stats.unclassified} categories=${output.stats.categoryCount} needsReview=${output.stats.needsReviewCount}`,
   );
 }
 

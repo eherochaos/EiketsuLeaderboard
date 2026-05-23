@@ -1,8 +1,12 @@
 # 卡组分类数据处理
 
 - 必须手动运行分类流程。
-- 必须输出 `deckId`、`categoryId`、`categoryName`。
-- 必须输出 `status`、`confidence`、`classifierVersion`。
-- 必须把未知卡组标记为 `unclassified`。
+- 必须按 `deck_fingerprint` 识别精确卡组。
+- 必须按核心武将轴分类。
+- 必须统计固定搭配卡。
+- 必须优先使用 `coreRules.json` 标注卡组类型。
+- 必须在无规则时按结构兜底分类。
+- 必须输出分类证据。
+- 必须标记 `needsReview`。
 - 必须重复运行不产生重复结果。
 - 禁止修改 `apps/web/`。

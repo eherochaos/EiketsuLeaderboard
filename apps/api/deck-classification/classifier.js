@@ -54,6 +54,7 @@ function classifyDeck(deck, rules, options = {}) {
         categoryId: rule.categoryId,
         categoryName: rule.categoryName,
         confidence,
+        ruleCards,
       };
     }
   }
@@ -63,8 +64,21 @@ function classifyDeck(deck, rules, options = {}) {
       deckId: deck.deckId,
       categoryId: UNCLASSIFIED_CATEGORY_ID,
       categoryName: UNCLASSIFIED_CATEGORY_NAME,
+      primaryFaction: "unknown",
+      primaryCoreCardId: "",
+      primaryCoreCardName: "",
+      partnerCardIds: [],
+      deckType: "unknown",
       status: CLASSIFICATION_STATUS.UNCLASSIFIED,
       confidence: 0,
+      needsReview: true,
+      evidence: {
+        sampleCount: 0,
+        winRate: 0,
+        coreSupport: 0,
+        partnerSupport: 0,
+        rankScope: null,
+      },
       classifierVersion,
       classifiedAt: now,
     };
@@ -74,8 +88,21 @@ function classifyDeck(deck, rules, options = {}) {
     deckId: deck.deckId,
     categoryId: bestMatch.categoryId,
     categoryName: bestMatch.categoryName,
+    primaryFaction: "unknown",
+    primaryCoreCardId: bestMatch.ruleCards[0] || "",
+    primaryCoreCardName: bestMatch.ruleCards[0] || "",
+    partnerCardIds: bestMatch.ruleCards.slice(1, 3),
+    deckType: "unknown",
     status: CLASSIFICATION_STATUS.CLASSIFIED,
     confidence: bestMatch.confidence,
+    needsReview: false,
+    evidence: {
+      sampleCount: 0,
+      winRate: 0,
+      coreSupport: bestMatch.confidence,
+      partnerSupport: 0,
+      rankScope: null,
+    },
     classifierVersion,
     classifiedAt: now,
   };

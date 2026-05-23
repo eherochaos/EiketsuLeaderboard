@@ -7,14 +7,21 @@ const CLASSIFICATION_STATUS = Object.freeze({
 
 const UNCLASSIFIED_CATEGORY_ID = "unclassified";
 const UNCLASSIFIED_CATEGORY_NAME = "Unclassified";
-const CURRENT_CLASSIFIER_VERSION = "deck-classifier-v1";
+const CURRENT_CLASSIFIER_VERSION = "deck-classifier-v2";
 
 const DECK_CLASSIFICATION_FIELDS = Object.freeze([
   "deckId",
   "categoryId",
   "categoryName",
+  "primaryFaction",
+  "primaryCoreCardId",
+  "primaryCoreCardName",
+  "partnerCardIds",
+  "deckType",
   "status",
   "confidence",
+  "needsReview",
+  "evidence",
   "classifierVersion",
   "classifiedAt",
 ]);
