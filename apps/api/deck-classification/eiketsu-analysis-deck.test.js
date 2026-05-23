@@ -6,6 +6,8 @@ const {
   parseCsvObjects,
 } = require("./eiketsu-analysis-deck");
 
+const NOW = "2026-05-23T00:00:00.000Z";
+
 function testParseCsvObjects() {
   const rows = parseCsvObjects(
     [
@@ -21,19 +23,40 @@ function testParseCsvObjects() {
 
 function cardCatalog() {
   return {
-    "core-a": { name: "Core A", cost: "3.0", unitType: "spear", card_code: "玄001" },
-    "core-b": { name: "Core B", cost: "3.5", unitType: "spear", card_code: "緋001" },
-    "partner-a": { name: "Partner A", cost: "2.0", unitType: "gun", card_code: "玄002" },
-    "low-x": { name: "Low X", cost: "1.0", unitType: "spear", card_code: "玄003" },
-    "flex-a": { name: "Flex A", cost: "1.5", unitType: "bow", card_code: "玄004" },
-    "flex-b": { name: "Flex B", cost: "1.5", unitType: "bow", card_code: "玄005" },
-    "flex-c": { name: "Flex C", cost: "2.0", unitType: "gun", card_code: "緋002" },
-    "flex-d": { name: "Flex D", cost: "1.5", unitType: "bow", card_code: "緋003" },
-    "horse-a": { name: "Horse A", cost: "2.0", unitType: "cavalry", card_code: "蒼001" },
-    "horse-b": { name: "Horse B", cost: "2.0", unitType: "cavalry", card_code: "蒼002" },
-    "horse-c": { name: "Horse C", cost: "1.5", unitType: "cavalry", card_code: "蒼003" },
-    "tie-a": { name: "Tie A", cost: "3.0", unitType: "spear", card_code: "碧001" },
-    "tie-b": { name: "Tie B", cost: "3.0", unitType: "gun", card_code: "碧002" },
+    "core-command": { name: "Core Command", cost: "3.0", unitType: "spear", card_code: "蒼001" },
+    "core-balance": { name: "Core Balance", cost: "2.0", unitType: "spear", card_code: "緋001" },
+    "core-damage": { name: "Core Damage", cost: "2.5", unitType: "gun", card_code: "碧001" },
+    "core-formation": { name: "Core Formation", cost: "3.5", unitType: "spear", card_code: "玄001" },
+    "tie-low": { name: "Tie Low", cost: "2.0", unitType: "bow", card_code: "紫001" },
+    "tie-high": { name: "Tie High", cost: "3.5", unitType: "spear", card_code: "紫002" },
+    "partner-a": { name: "Partner A", cost: "2.0", unitType: "gun", card_code: "蒼002" },
+    "partner-b": { name: "Partner B", cost: "1.5", unitType: "bow", card_code: "蒼003" },
+    "low-a": { name: "Low A", cost: "1.0", unitType: "spear", card_code: "蒼004" },
+    "low-b": { name: "Low B", cost: "1.0", unitType: "spear", card_code: "蒼005" },
+    "low-c": { name: "Low C", cost: "1.5", unitType: "bow", card_code: "蒼006" },
+    "low-d": { name: "Low D", cost: "1.5", unitType: "bow", card_code: "蒼007" },
+    "flex-a": { name: "Flex A", cost: "2.0", unitType: "gun", card_code: "緋002" },
+    "flex-b": { name: "Flex B", cost: "1.5", unitType: "bow", card_code: "緋003" },
+  };
+}
+
+function strategyTypes() {
+  return [
+    { cardId: "core-command", mainPlanType: "号令" },
+    { cardId: "core-balance", mainPlanType: "単体強化" },
+    { cardId: "core-damage", mainPlanType: "ダメージ" },
+    { cardId: "core-formation", mainPlanType: "陣形" },
+    { cardId: "tie-low", mainPlanType: "単体強化" },
+    { cardId: "tie-high", mainPlanType: "号令" },
+  ];
+}
+
+function usage(deckId, cardId, strategyFrequency, matchCount = 10) {
+  return {
+    deckId,
+    cardId,
+    matchCount,
+    strategyCount: strategyFrequency * matchCount,
   };
 }
 
@@ -50,86 +73,179 @@ function deck(deckId, cards, sampleCount = 10, winCount = 6) {
   };
 }
 
-function testCoreAxisAndLowCostCommonCard() {
-  const output = classifyAnalysisDecks(
-    [
-      deck("deck-1", ["core-a", "partner-a", "low-x", "flex-a"], 10, 7),
-      deck("deck-2", ["core-a", "partner-a", "low-x", "flex-b"], 8, 5),
-      deck("deck-3", ["core-b", "low-x", "flex-c", "flex-d"], 9, 5),
-    ],
-    cardCatalog(),
-    {
-      now: "2026-05-23T00:00:00.000Z",
-      coreRules: [
-        {
-          cardId: "core-a",
-          deckType: "号令",
-          priority: 100,
-          displayName: "Official Core A",
-        },
-      ],
-    },
-  );
-
-  const byDeck = Object.fromEntries(output.results.map((result) => [result.deckId, result]));
-
-  assert.strictEqual(output.stats.total, 3);
-  assert.strictEqual(output.stats.categoryCount, 2);
-  assert.strictEqual(byDeck["deck-1"].categoryId, byDeck["deck-2"].categoryId);
-  assert.notStrictEqual(byDeck["deck-1"].categoryId, byDeck["deck-3"].categoryId);
-  assert.strictEqual(byDeck["deck-1"].primaryCoreCardId, "core-a");
-  assert.strictEqual(byDeck["deck-1"].primaryCoreCardName, "Official Core A");
-  assert.strictEqual(byDeck["deck-1"].deckType, "号令");
-  assert.strictEqual(byDeck["deck-3"].primaryCoreCardId, "core-b");
-  assert.notStrictEqual(byDeck["deck-3"].primaryCoreCardId, "low-x");
+function classify(decks, strategyUsage = []) {
+  return classifyAnalysisDecks(decks, cardCatalog(), {
+    now: NOW,
+    strategyTypes: strategyTypes(),
+    strategyUsage,
+  });
 }
 
-function testFallbackDeckTypes() {
-  const output = classifyAnalysisDecks(
-    [
-      deck("many", ["core-a", "partner-a", "low-x", "flex-a", "flex-b", "flex-c"], 6, 3),
-      deck("cavalry", ["horse-a", "horse-b", "horse-c", "flex-a"], 6, 3),
-      deck("balance", ["core-b", "partner-a", "flex-c", "flex-d"], 6, 3),
-    ],
-    cardCatalog(),
-    { now: "2026-05-23T00:00:00.000Z" },
-  );
-
-  const byDeck = Object.fromEntries(output.results.map((result) => [result.deckId, result]));
-  assert.strictEqual(byDeck.many.deckType, "多枚数");
-  assert.strictEqual(byDeck.cavalry.deckType, "騎兵主体");
-  assert.strictEqual(byDeck.balance.deckType, "バランス");
-}
-
-function testCloseCoreScoresNeedReview() {
-  const output = classifyAnalysisDecks(
-    [deck("close", ["tie-a", "tie-b", "low-x"], 5, 3)],
-    cardCatalog(),
-    { now: "2026-05-23T00:00:00.000Z" },
-  );
-
-  assert.strictEqual(output.results[0].needsReview, true);
-  assert.strictEqual(output.stats.needsReviewCount, 1);
+function resultByDeck(output) {
+  return Object.fromEntries(output.results.map((result) => [result.deckId, result]));
 }
 
 function testDuplicateFingerprintDoesNotDuplicateResults() {
-  const output = classifyAnalysisDecks(
+  const output = classify(
     [
-      deck("same-fingerprint", ["core-a", "partner-a", "low-x"], 4, 2),
-      deck("same-fingerprint", ["core-a", "partner-a", "low-x"], 6, 4),
+      deck("same-fingerprint", ["core-command", "partner-a", "low-a"], 4, 2),
+      deck("same-fingerprint", ["core-command", "partner-a", "low-a"], 6, 4),
     ],
-    cardCatalog(),
-    { now: "2026-05-23T00:00:00.000Z" },
+    [usage("same-fingerprint", "core-command", 1.5)],
   );
 
   assert.strictEqual(output.results.length, 1);
   assert.strictEqual(output.results[0].evidence.sampleCount, 10);
 }
 
+function testSevenCardsAreManyCardDeck() {
+  const output = classify(
+    [
+      deck("many-7", [
+        "core-command",
+        "partner-a",
+        "partner-b",
+        "low-a",
+        "low-b",
+        "low-c",
+        "flex-a",
+      ]),
+    ],
+    [usage("many-7", "core-command", 2.0)],
+  );
+
+  const result = output.results[0];
+  assert.strictEqual(result.deckType, "多枚数");
+  assert.strictEqual(result.categoryName, "Core Command多枚数デッキ");
+  assert.strictEqual(result.evidence.deckCardCount, 7);
+}
+
+function testSixLowCostCardsAreManyCardDeck() {
+  const output = classify(
+    [
+      deck("many-6", [
+        "core-command",
+        "partner-a",
+        "low-a",
+        "low-b",
+        "low-c",
+        "low-d",
+      ]),
+    ],
+    [usage("many-6", "core-command", 2.0)],
+  );
+
+  const result = output.results[0];
+  assert.strictEqual(result.deckType, "多枚数");
+  assert.strictEqual(result.evidence.deckSizeReason, "cardCount=6 lowCostCount>=4");
+}
+
+function testCommandAndFormationBecomeCommandDecks() {
+  const output = classify(
+    [
+      deck("command", ["core-command", "partner-a", "low-a", "flex-a"]),
+      deck("formation", ["core-formation", "partner-a", "low-a", "flex-a"]),
+    ],
+    [
+      usage("command", "core-command", 1.8),
+      usage("formation", "core-formation", 1.6),
+    ],
+  );
+
+  const byDeck = resultByDeck(output);
+  assert.strictEqual(byDeck.command.deckType, "号令");
+  assert.strictEqual(byDeck.command.categoryName, "Core Command号令デッキ");
+  assert.strictEqual(byDeck.command.evidence.mainPlanType, "号令");
+  assert.strictEqual(byDeck.formation.deckType, "号令");
+  assert.strictEqual(byDeck.formation.evidence.mainPlanType, "陣形");
+}
+
+function testSingleBuffAndDamageBecomeBalanceDecks() {
+  const output = classify(
+    [
+      deck("single-buff", ["core-balance", "partner-a", "low-a", "flex-a"]),
+      deck("damage", ["core-damage", "partner-a", "low-a", "flex-a"]),
+    ],
+    [
+      usage("single-buff", "core-balance", 1.5),
+      usage("damage", "core-damage", 1.4),
+    ],
+  );
+
+  const byDeck = resultByDeck(output);
+  assert.strictEqual(byDeck["single-buff"].deckType, "バランス");
+  assert.strictEqual(byDeck["single-buff"].categoryName, "Core Balanceバランスデッキ");
+  assert.strictEqual(byDeck.damage.deckType, "バランス");
+  assert.strictEqual(byDeck.damage.evidence.mainPlanType, "ダメージ");
+}
+
+function testHigherStrategyFrequencyBeatsCost() {
+  const output = classify(
+    [deck("frequency", ["core-balance", "core-formation", "low-a", "flex-a"])],
+    [
+      usage("frequency", "core-balance", 1.7),
+      usage("frequency", "core-formation", 0.8),
+    ],
+  );
+
+  const result = output.results[0];
+  assert.strictEqual(result.primaryCoreCardId, "core-balance");
+  assert.strictEqual(result.evidence.strategyFrequency, 1.7);
+}
+
+function testCloseStrategyFrequencyUsesHigherCostAndNeedsReview() {
+  const output = classify(
+    [deck("close", ["tie-low", "tie-high", "low-a", "flex-a"])],
+    [
+      usage("close", "tie-low", 1.0),
+      usage("close", "tie-high", 0.92),
+    ],
+  );
+
+  const result = output.results[0];
+  assert.strictEqual(result.primaryCoreCardId, "tie-high");
+  assert.strictEqual(result.needsReview, true);
+}
+
+function testLowCostCommonCardDoesNotMergeDifferentAxes() {
+  const output = classify(
+    [
+      deck("axis-a", ["core-command", "low-a", "partner-a", "flex-a"], 10, 7),
+      deck("axis-b", ["core-balance", "low-a", "partner-b", "flex-b"], 8, 5),
+    ],
+    [
+      usage("axis-a", "core-command", 1.7),
+      usage("axis-b", "core-balance", 1.6),
+    ],
+  );
+
+  const byDeck = resultByDeck(output);
+  assert.notStrictEqual(byDeck["axis-a"].categoryId, byDeck["axis-b"].categoryId);
+  assert.notStrictEqual(byDeck["axis-a"].primaryCoreCardId, "low-a");
+  assert.notStrictEqual(byDeck["axis-b"].primaryCoreCardId, "low-a");
+}
+
+function testMissingStrategyDataFallsBackAndNeedsReview() {
+  const output = classify(
+    [deck("fallback", ["core-command", "partner-a", "low-a", "flex-a"])],
+    [],
+  );
+
+  const result = output.results[0];
+  assert.strictEqual(result.needsReview, true);
+  assert.strictEqual(result.evidence.strategyFrequency, 0);
+  assert.ok(result.evidence.axisCandidates.length > 0);
+}
+
 testParseCsvObjects();
-testCoreAxisAndLowCostCommonCard();
-testFallbackDeckTypes();
-testCloseCoreScoresNeedReview();
 testDuplicateFingerprintDoesNotDuplicateResults();
+testSevenCardsAreManyCardDeck();
+testSixLowCostCardsAreManyCardDeck();
+testCommandAndFormationBecomeCommandDecks();
+testSingleBuffAndDamageBecomeBalanceDecks();
+testHigherStrategyFrequencyBeatsCost();
+testCloseStrategyFrequencyUsesHigherCostAndNeedsReview();
+testLowCostCommonCardDoesNotMergeDifferentAxes();
+testMissingStrategyDataFallsBackAndNeedsReview();
 
 console.log("eiketsu analysis deck tests passed");

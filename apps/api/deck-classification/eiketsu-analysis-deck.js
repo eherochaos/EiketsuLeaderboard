@@ -2,6 +2,7 @@
 
 const crypto = require("crypto");
 const fs = require("fs");
+const path = require("path");
 const {
   CLASSIFICATION_STATUS,
   CURRENT_CLASSIFIER_VERSION,
@@ -9,10 +10,17 @@ const {
   UNCLASSIFIED_CATEGORY_NAME,
 } = require("../../../packages/contracts/deck-classification");
 
-const DEFAULT_REVIEW_MARGIN = 0.08;
+const DEFAULT_REVIEW_MARGIN = 0.15;
+const DEFAULT_STRATEGY_CLOSE_MARGIN = 0.15;
 const UNKNOWN_DECK_TYPE = "unknown";
 const UNKNOWN_FACTION = "unknown";
-const FACTION_PREFIXES = new Set(["玄", "緋", "碧", "蒼", "紫", "琥", "黄"]);
+const UNKNOWN_PLAN_TYPE = "unknown";
+const DECK_TYPE_COMMAND = "号令";
+const DECK_TYPE_BALANCE = "バランス";
+const DECK_TYPE_MANY = "多枚数";
+const LOW_COST_THRESHOLD = 1.5;
+const SIX_CARD_LOW_COST_MIN_COUNT = 4;
+const FACTION_PREFIXES = new Set(["蒼", "緋", "碧", "玄", "紫", "琥"]);
 
 function parseCsv(text) {
   const rows = [];
@@ -108,14 +116,50 @@ function loadAnalysisDeckCsv(filePath) {
     });
 }
 
-function loadCoreRules(filePath) {
+function rowsFromPayload(payload, preferredKeys = []) {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  for (const key of preferredKeys) {
+    if (Array.isArray(payload[key])) {
+      return payload[key];
+    }
+  }
+
+  for (const key of ["rows", "cards", "rules", "strategyTypes", "strategyUsage", "data"]) {
+    if (Array.isArray(payload[key])) {
+      return payload[key];
+    }
+  }
+
+  return [];
+}
+
+function loadRowsFile(filePath, preferredKeys = []) {
   if (!filePath) {
     return [];
   }
 
-  const payload = JSON.parse(fs.readFileSync(filePath, "utf8"));
-  const rules = Array.isArray(payload) ? payload : payload.rules || [];
-  return normalizeCoreRules(rules);
+  const text = fs.readFileSync(filePath, "utf8");
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  if (path.extname(filePath).toLowerCase() === ".json" || trimmed[0] === "{" || trimmed[0] === "[") {
+    return rowsFromPayload(JSON.parse(trimmed), preferredKeys);
+  }
+
+  return parseCsvObjects(text);
+}
+
+function loadCoreRules(filePath) {
+  return normalizeCoreRules(loadRowsFile(filePath, ["rules"]));
 }
 
 function normalizeCoreRules(rules) {
@@ -127,7 +171,7 @@ function normalizeCoreRules(rules) {
       displayName: String(rule.displayName || rule.display_name || "").trim(),
       index,
     }))
-    .filter((rule) => rule.cardId && rule.deckType);
+    .filter((rule) => rule.cardId);
 }
 
 function coreRuleMap(coreRules) {
@@ -149,6 +193,10 @@ function cardHashIds(card) {
     card.hashId,
     card.card_hash,
     card.cardHash,
+    card.canonical_hash,
+    card.canonicalHash,
+    card.gameplay_hash,
+    card.gameplayHash,
     card.id,
     ...(Array.isArray(card.hash_ids) ? card.hash_ids : []),
   ];
@@ -173,6 +221,28 @@ function loadCardCatalog(filePath) {
   return byHash;
 }
 
+function loadStrategyTypes(filePath) {
+  return normalizeStrategyTypes(loadRowsFile(filePath, ["strategyTypes", "cards", "rows"]));
+}
+
+function loadStrategyUsage(filePath) {
+  if (!filePath) {
+    return [];
+  }
+
+  const text = fs.readFileSync(filePath, "utf8");
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  if (path.extname(filePath).toLowerCase() === ".json" || trimmed[0] === "{" || trimmed[0] === "[") {
+    return JSON.parse(trimmed);
+  }
+
+  return parseCsvObjects(text);
+}
+
 function cardCost(card) {
   if (!card) {
     return 0;
@@ -193,7 +263,7 @@ function cardFaction(card) {
 }
 
 function cardUnitType(card) {
-  return String(card?.unitType || card?.unit_type || "").trim();
+  return String(card?.unitType || card?.unit_type || card?.unitTypeName || "").trim();
 }
 
 function cardLabel(cardHash, cardCatalog) {
@@ -308,49 +378,457 @@ function strongestPartnerRatio(cardId, deck, cardStats) {
   return strongest / stat.sampleCount;
 }
 
-function scoreCoreCandidate(cardId, deck, cardCatalog, cardStats, rulesByCard) {
+function fallbackCoreScore(cardId, deck, cardCatalog, cardStats, rule) {
   const stat = cardStats.get(cardId) || { sampleCount: 0, highRankerSampleCount: 0 };
-  const rule = rulesByCard.get(cardId);
   const usageScore = Math.log1p(stat.sampleCount) * 100;
   const stabilityScore = strongestPartnerRatio(cardId, deck, cardStats) * 50;
   const rankScore = Math.log1p(stat.highRankerSampleCount || 0) * 20;
   const costScore = cardCost(cardCatalog[cardId]) * 50;
   const ruleScore = rule ? rule.priority : 0;
+  return usageScore + stabilityScore + rankScore + costScore + ruleScore;
+}
+
+function parseMaybeJsonArray(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string") {
+    return value ? [value] : [];
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  if (trimmed[0] === "[" || trimmed[0] === "{") {
+    try {
+      const parsed = JSON.parse(trimmed);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch {
+      return [trimmed];
+    }
+  }
+
+  return trimmed.split(/[,:;|]/).map((item) => item.trim()).filter(Boolean);
+}
+
+function inferPlanType(row = {}) {
+  const categoryValues = [
+    row.mainPlanType,
+    row.main_plan_type,
+    row.planType,
+    row.plan_type,
+    row.strategyType,
+    row.strategy_type,
+    row.stratCategory,
+    row.strat_category,
+    row.category,
+    row.deckType,
+    row.deck_type,
+    ...parseMaybeJsonArray(row.categories),
+    ...parseMaybeJsonArray(row.strat_categories_json),
+    ...parseMaybeJsonArray(row.stratCategories),
+    ...parseMaybeJsonArray(row.effectCategories),
+  ];
+  const textValues = [
+    row.strategyText,
+    row.strategy_text,
+    row.strat_caption,
+    row.stratCaption,
+    row.strat_detail_text,
+    row.stratDetailText,
+    row.description,
+  ];
+  const text = [...categoryValues, ...textValues]
+    .map((value) => {
+      if (value && typeof value === "object") {
+        return Object.values(value).join(" ");
+      }
+      return String(value || "");
+    })
+    .join(" ");
+
+  if (/号令|號令/.test(text)) {
+    return "号令";
+  }
+  if (/陣形|陣型|阵型|formation/i.test(text)) {
+    return "陣形";
+  }
+  if (/全体|全軍|味方.*全|allies|all ally|team/i.test(text)) {
+    return "全体強化";
+  }
+  if (/ダメージ|傷害|伤害|damage/i.test(text)) {
+    return "ダメージ";
+  }
+  if (/単体|單体|单体|自身|一部隊|1部隊|強化|强化|buff/i.test(text)) {
+    return "単体強化";
+  }
+
+  return String(categoryValues.find(Boolean) || "").trim() || UNKNOWN_PLAN_TYPE;
+}
+
+function cardAliases(cardId, card) {
+  return [
+    cardId,
+    card?.hash_id,
+    card?.hashId,
+    card?.card_hash,
+    card?.cardHash,
+    card?.canonical_hash,
+    card?.canonicalHash,
+    card?.gameplay_hash,
+    card?.gameplayHash,
+    card?.card_code,
+    card?.cardCode,
+    card?.code,
+  ].map((value) => String(value || "").trim()).filter(Boolean);
+}
+
+function addStrategyType(typesByKey, row) {
+  if (!row || typeof row !== "object") {
+    return;
+  }
+
+  const planType = inferPlanType(row);
+  const aliases = [
+    row.cardId,
+    row.card_id,
+    row.cardHash,
+    row.card_hash,
+    row.hashId,
+    row.hash_id,
+    row.canonical_hash,
+    row.gameplay_hash,
+    row.id,
+    row.cardCode,
+    row.card_code,
+    row.code,
+  ].map((value) => String(value || "").trim()).filter(Boolean);
+
+  for (const alias of aliases) {
+    typesByKey.set(alias, {
+      mainPlanType: planType,
+      sourceCategory: String(row.category || row.stratCategory || row.strategyType || "").trim(),
+    });
+  }
+}
+
+function normalizeStrategyTypes(strategyTypes) {
+  if (strategyTypes instanceof Map) {
+    return strategyTypes;
+  }
+
+  const typesByKey = new Map();
+  for (const row of rowsFromPayload(strategyTypes, ["strategyTypes", "cards", "rows"])) {
+    addStrategyType(typesByKey, row);
+  }
+  return typesByKey;
+}
+
+function strategyTypeForCard(cardId, cardCatalog, strategyTypesByKey, rule) {
+  const card = cardCatalog[cardId];
+  const aliases = cardAliases(cardId, card);
+
+  for (const alias of aliases) {
+    const found = strategyTypesByKey.get(alias);
+    if (found?.mainPlanType) {
+      return found;
+    }
+  }
+
+  const cardPlanType = inferPlanType(card || {});
+  if (cardPlanType !== UNKNOWN_PLAN_TYPE) {
+    return { mainPlanType: cardPlanType, sourceCategory: "cardCatalog" };
+  }
+
+  if (rule?.deckType) {
+    return { mainPlanType: inferPlanType(rule), sourceCategory: "coreRule" };
+  }
+
+  return { mainPlanType: UNKNOWN_PLAN_TYPE, sourceCategory: "" };
+}
+
+function deckTypeFromPlanType(mainPlanType) {
+  if (/号令|全体|陣形|陣型|阵型|formation/i.test(mainPlanType)) {
+    return { deckType: DECK_TYPE_COMMAND, known: true };
+  }
+  if (/単体|單体|单体|強化|强化|ダメージ|傷害|伤害|damage/i.test(mainPlanType)) {
+    return { deckType: DECK_TYPE_BALANCE, known: true };
+  }
+  return { deckType: DECK_TYPE_BALANCE, known: false };
+}
+
+function strategyUsageRowsFromObject(payload) {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  const directRows = rowsFromPayload(payload, ["strategyUsage", "rows"]);
+  if (directRows.length > 0) {
+    return directRows;
+  }
+
+  const rows = [];
+  for (const [deckId, cards] of Object.entries(payload)) {
+    if (Array.isArray(cards)) {
+      for (const row of cards) {
+        rows.push({ deckId, ...row });
+      }
+      continue;
+    }
+
+    if (cards && typeof cards === "object") {
+      for (const [cardId, stat] of Object.entries(cards)) {
+        if (stat && typeof stat === "object") {
+          rows.push({ deckId, cardId, ...stat });
+        } else {
+          rows.push({ deckId, cardId, strategyFrequency: stat });
+        }
+      }
+    }
+  }
+  return rows;
+}
+
+function usageStatFromRow(row) {
+  const matchCount = toNumber(
+    row.matchCount || row.match_count || row.sampleCount || row.sample_count || row.games,
+  );
+  const strategyCount = toNumber(
+    row.strategyCount || row.strategy_count || row.totalStrategyCount || row.total_strategy_count || row.count,
+  );
+  const explicitFrequency = row.strategyFrequency
+    || row.strategy_frequency
+    || row.avgStrategyCount
+    || row.avg_strategy_count
+    || row.perMatch
+    || row.per_match;
+  const strategyFrequency = explicitFrequency !== undefined && explicitFrequency !== ""
+    ? toNumber(explicitFrequency)
+    : (matchCount > 0 ? strategyCount / matchCount : 0);
+
+  return {
+    matchCount,
+    strategyCount,
+    strategyFrequency: round4(strategyFrequency),
+    hasData: true,
+  };
+}
+
+function mergeUsageStat(left, right) {
+  if (!left) {
+    return right;
+  }
+
+  const matchCount = (left.matchCount || 0) + (right.matchCount || 0);
+  const strategyCount = (left.strategyCount || 0) + (right.strategyCount || 0);
+
+  if (matchCount > 0 && strategyCount > 0) {
+    return {
+      matchCount,
+      strategyCount,
+      strategyFrequency: round4(strategyCount / matchCount),
+      hasData: true,
+    };
+  }
+
+  const leftWeight = left.matchCount || 1;
+  const rightWeight = right.matchCount || 1;
+  return {
+    matchCount,
+    strategyCount,
+    strategyFrequency: round4(
+      ((left.strategyFrequency || 0) * leftWeight + (right.strategyFrequency || 0) * rightWeight)
+        / (leftWeight + rightWeight),
+    ),
+    hasData: true,
+  };
+}
+
+function normalizeStrategyUsage(strategyUsage) {
+  if (strategyUsage instanceof Map) {
+    return strategyUsage;
+  }
+
+  const usageByDeck = new Map();
+  for (const row of strategyUsageRowsFromObject(strategyUsage)) {
+    if (!row || typeof row !== "object") {
+      continue;
+    }
+
+    const deckId = String(row.deckId || row.deck_id || row.deckFingerprint || row.deck_fingerprint || "").trim();
+    const cardAliasesForRow = [
+      row.cardId,
+      row.card_id,
+      row.cardHash,
+      row.card_hash,
+      row.hashId,
+      row.hash_id,
+      row.cardCode,
+      row.card_code,
+      row.code,
+      row.id,
+    ].map((value) => String(value || "").trim()).filter(Boolean);
+
+    if (!deckId || cardAliasesForRow.length === 0) {
+      continue;
+    }
+
+    if (!usageByDeck.has(deckId)) {
+      usageByDeck.set(deckId, new Map());
+    }
+
+    const deckUsage = usageByDeck.get(deckId);
+    const stat = usageStatFromRow(row);
+    for (const alias of cardAliasesForRow) {
+      deckUsage.set(alias, mergeUsageStat(deckUsage.get(alias), stat));
+    }
+  }
+
+  return usageByDeck;
+}
+
+function strategyUsageForCard(deck, cardId, cardCatalog, strategyUsageByDeck) {
+  const deckUsage = strategyUsageByDeck.get(deck.deckId);
+  if (!deckUsage) {
+    return null;
+  }
+
+  for (const alias of cardAliases(cardId, cardCatalog[cardId])) {
+    const stat = deckUsage.get(alias);
+    if (stat) {
+      return stat;
+    }
+  }
+
+  return {
+    matchCount: deck.sampleCount || 0,
+    strategyCount: 0,
+    strategyFrequency: 0,
+    hasData: true,
+  };
+}
+
+function scoreCoreCandidate(
+  cardId,
+  deck,
+  cardCatalog,
+  cardStats,
+  rulesByCard,
+  strategyTypesByKey,
+  strategyUsageByDeck,
+) {
+  const rule = rulesByCard.get(cardId);
+  const usage = strategyUsageForCard(deck, cardId, cardCatalog, strategyUsageByDeck);
+  const strategyType = strategyTypeForCard(cardId, cardCatalog, strategyTypesByKey, rule);
+  const fallbackScore = fallbackCoreScore(cardId, deck, cardCatalog, cardStats, rule);
 
   return {
     cardId,
     rule,
-    score: usageScore + stabilityScore + rankScore + costScore + ruleScore,
     cost: cardCost(cardCatalog[cardId]),
+    fallbackScore,
+    score: usage ? usage.strategyFrequency : fallbackScore,
+    hasStrategyData: Boolean(usage?.hasData),
+    strategyFrequency: usage ? usage.strategyFrequency : 0,
+    strategyCount: usage ? usage.strategyCount : 0,
+    strategyMatchCount: usage ? usage.matchCount : 0,
+    mainPlanType: strategyType.mainPlanType,
+    planTypeSource: strategyType.sourceCategory,
   };
 }
 
-function selectCore(deck, cardCatalog, cardStats, rulesByCard, reviewMargin) {
+function compareCoreCandidates(left, right, strategyCloseMargin) {
+  if (left.hasStrategyData || right.hasStrategyData) {
+    if (left.hasStrategyData !== right.hasStrategyData) {
+      return left.hasStrategyData ? -1 : 1;
+    }
+
+    const frequencyDiff = right.strategyFrequency - left.strategyFrequency;
+    if (Math.abs(frequencyDiff) > strategyCloseMargin) {
+      return frequencyDiff;
+    }
+
+    const costDiff = right.cost - left.cost;
+    if (costDiff) {
+      return costDiff;
+    }
+
+    if (frequencyDiff) {
+      return frequencyDiff;
+    }
+  }
+
+  const scoreDiff = right.fallbackScore - left.fallbackScore;
+  if (scoreDiff) {
+    return scoreDiff;
+  }
+
+  return right.cost - left.cost || left.cardId.localeCompare(right.cardId);
+}
+
+function coreMargin(best, second) {
+  if (!best || !second) {
+    return 1;
+  }
+
+  if (best.hasStrategyData && second.hasStrategyData) {
+    const denominator = Math.max(best.strategyFrequency, second.strategyFrequency, 1);
+    return round4(Math.abs(best.strategyFrequency - second.strategyFrequency) / denominator);
+  }
+
+  const denominator = Math.max(best.fallbackScore, second.fallbackScore, 1);
+  return round4(Math.abs(best.fallbackScore - second.fallbackScore) / denominator);
+}
+
+function selectCore(
+  deck,
+  cardCatalog,
+  cardStats,
+  rulesByCard,
+  strategyTypesByKey,
+  strategyUsageByDeck,
+  reviewMargin,
+  strategyCloseMargin,
+) {
   const candidates = uniqueCards(deck.cards)
-    .map((cardId) => scoreCoreCandidate(cardId, deck, cardCatalog, cardStats, rulesByCard))
-    .sort((left, right) => {
-      const scoreCompare = right.score - left.score;
-      if (scoreCompare) {
-        return scoreCompare;
-      }
-
-      const priorityCompare = (right.rule?.priority || 0) - (left.rule?.priority || 0);
-      if (priorityCompare) {
-        return priorityCompare;
-      }
-
-      return right.cost - left.cost || left.cardId.localeCompare(right.cardId);
-    });
+    .map((cardId) => scoreCoreCandidate(
+      cardId,
+      deck,
+      cardCatalog,
+      cardStats,
+      rulesByCard,
+      strategyTypesByKey,
+      strategyUsageByDeck,
+    ))
+    .sort((left, right) => compareCoreCandidates(left, right, strategyCloseMargin));
 
   const best = candidates[0] || null;
   const second = candidates[1] || null;
-  const margin = best && second && best.score > 0 ? (best.score - second.score) / best.score : 1;
+  const margin = coreMargin(best, second);
+  const hasAnyStrategyData = candidates.some((candidate) => candidate.hasStrategyData);
+  const closeStrategyCandidates = Boolean(
+    best
+      && second
+      && best.hasStrategyData
+      && second.hasStrategyData
+      && (Math.abs(best.strategyFrequency - second.strategyFrequency) <= strategyCloseMargin
+        || margin <= reviewMargin),
+  );
 
   return {
     best,
     second,
-    margin: round4(margin),
-    needsReview: Boolean(best && second && margin <= reviewMargin),
+    candidates,
+    margin,
+    hasStrategyData: hasAnyStrategyData,
+    needsReview: !hasAnyStrategyData || Boolean(best?.strategyFrequency === 0 && hasAnyStrategyData) || closeStrategyCandidates,
   };
 }
 
@@ -370,50 +848,61 @@ function primaryFaction(deck, cardCatalog) {
   return sorted[0]?.[0] || UNKNOWN_FACTION;
 }
 
-function highestRuleForDeck(deck, rulesByCard) {
-  return uniqueCards(deck.cards)
-    .map((cardId) => rulesByCard.get(cardId))
-    .filter(Boolean)
-    .sort((left, right) => right.priority - left.priority || left.index - right.index)[0] || null;
-}
-
-function fallbackDeckType(deck, cardCatalog) {
+function deckSizeRule(deck, cardCatalog) {
   const cards = uniqueCards(deck.cards);
-  if (cards.length >= 6) {
-    return "多枚数";
+  const lowCostCount = cards.filter((cardId) => cardCost(cardCatalog[cardId]) <= LOW_COST_THRESHOLD).length;
+
+  if (cards.length >= 7) {
+    return {
+      deckType: DECK_TYPE_MANY,
+      deckSizeReason: "cardCount>=7",
+      lowCostCount,
+    };
   }
 
-  const totalCost = cards.reduce((sum, cardId) => sum + cardCost(cardCatalog[cardId]), 0);
-  const cavalryCards = cards.filter((cardId) => /騎兵|cavalry/i.test(cardUnitType(cardCatalog[cardId])));
-  const cavalryCost = cavalryCards.reduce((sum, cardId) => sum + cardCost(cardCatalog[cardId]), 0);
-
-  if (cavalryCards.length >= 3 || (totalCost > 0 && cavalryCost / totalCost >= 0.5)) {
-    return "騎兵主体";
+  if (cards.length === 6 && lowCostCount >= SIX_CARD_LOW_COST_MIN_COUNT) {
+    return {
+      deckType: DECK_TYPE_MANY,
+      deckSizeReason: "cardCount=6 lowCostCount>=4",
+      lowCostCount,
+    };
   }
 
-  if (cards.length >= 4 && cards.length <= 5) {
-    return "バランス";
-  }
-
-  return UNKNOWN_DECK_TYPE;
+  return {
+    deckType: "",
+    deckSizeReason: "",
+    lowCostCount,
+  };
 }
 
-function selectDeckType(deck, core, rulesByCard, cardCatalog) {
-  const rule = core?.best?.rule || highestRuleForDeck(deck, rulesByCard);
-  if (rule) {
-    return { deckType: rule.deckType, rule };
+function selectDeckType(deck, core, cardCatalog) {
+  const sizeRule = deckSizeRule(deck, cardCatalog);
+  const mainPlanType = core?.best?.mainPlanType || UNKNOWN_PLAN_TYPE;
+
+  if (sizeRule.deckType) {
+    return {
+      deckType: sizeRule.deckType,
+      mainPlanType,
+      deckSizeReason: sizeRule.deckSizeReason,
+      lowCostCount: sizeRule.lowCostCount,
+      needsReview: false,
+      typeKnown: true,
+    };
   }
 
-  return { deckType: fallbackDeckType(deck, cardCatalog), rule: null };
+  const inferred = deckTypeFromPlanType(mainPlanType);
+  return {
+    deckType: inferred.deckType,
+    mainPlanType,
+    deckSizeReason: "",
+    lowCostCount: sizeRule.lowCostCount,
+    needsReview: !inferred.known,
+    typeKnown: inferred.known,
+  };
 }
 
-function categoryHash(primaryFactionValue, primaryCoreCardId, deckType, partnerCardIds) {
-  const raw = [
-    primaryFactionValue,
-    primaryCoreCardId,
-    deckType,
-    ...(partnerCardIds || []),
-  ].join("|");
+function categoryHash(primaryFactionValue, primaryCoreCardId, deckType) {
+  const raw = [primaryFactionValue, primaryCoreCardId, deckType].join("|");
   const hash = crypto.createHash("sha256").update(raw).digest("hex");
   return `archetype-${hash.slice(0, 16)}`;
 }
@@ -460,19 +949,32 @@ function axisPartnerSupport(items, partnerCardIds) {
   return round4(partnerSampleCount / sampleCount);
 }
 
-function categoryName(primaryCoreCardId, partnerCardIds, deckType, cardCatalog, rule) {
-  const names = [
-    shortCardName(primaryCoreCardId, cardCatalog, rule),
-    ...partnerCardIds.map((cardId) => shortCardName(cardId, cardCatalog)),
-  ].filter(Boolean);
-  const base = names.join(" / ") || "Unknown Deck";
-  return deckType && deckType !== UNKNOWN_DECK_TYPE ? `${base} (${deckType})` : base;
+function categoryName(primaryCoreCardId, deckType, cardCatalog, rule) {
+  const coreName = shortCardName(primaryCoreCardId, cardCatalog, rule) || "Unknown Deck";
+  return deckType && deckType !== UNKNOWN_DECK_TYPE ? `${coreName}${deckType}デッキ` : `${coreName}デッキ`;
 }
 
-function confidence(coreMargin, partnerSupport, hasRule, deckType) {
-  const typePenalty = deckType === UNKNOWN_DECK_TYPE ? -0.15 : 0;
-  const value = 0.45 + Math.min(coreMargin, 1) * 0.35 + partnerSupport * 0.15 + (hasRule ? 0.05 : 0) + typePenalty;
+function confidence(coreMarginValue, partnerSupport, hasStrategyData, typeKnown, needsReview) {
+  const value =
+    0.35
+    + Math.min(coreMarginValue, 1) * 0.35
+    + partnerSupport * 0.1
+    + (hasStrategyData ? 0.15 : 0)
+    + (typeKnown ? 0.05 : 0)
+    - (needsReview ? 0.1 : 0);
   return round4(Math.max(0, Math.min(1, value)));
+}
+
+function candidateEvidence(candidate, cardCatalog) {
+  return {
+    cardId: candidate.cardId,
+    cardName: cardLabel(candidate.cardId, cardCatalog),
+    cost: candidate.cost,
+    strategyFrequency: candidate.strategyFrequency,
+    mainPlanType: candidate.mainPlanType,
+    hasStrategyData: candidate.hasStrategyData,
+    score: round4(candidate.score),
+  };
 }
 
 function unclassifiedDeck(deck, options = {}) {
@@ -484,6 +986,7 @@ function unclassifiedDeck(deck, options = {}) {
     primaryCoreCardId: "",
     primaryCoreCardName: "",
     partnerCardIds: [],
+    partnerCardNames: [],
     deckType: UNKNOWN_DECK_TYPE,
     status: CLASSIFICATION_STATUS.UNCLASSIFIED,
     confidence: 0,
@@ -491,6 +994,10 @@ function unclassifiedDeck(deck, options = {}) {
     evidence: {
       sampleCount: deck.sampleCount || 0,
       winRate: winRate(deck),
+      strategyFrequency: 0,
+      axisCandidates: [],
+      deckCardCount: uniqueCards(deck.cards).length,
+      mainPlanType: UNKNOWN_PLAN_TYPE,
       coreSupport: 0,
       partnerSupport: 0,
       rankScope: deck.rankScope || null,
@@ -500,25 +1007,48 @@ function unclassifiedDeck(deck, options = {}) {
   };
 }
 
+function weightedStrategyFrequency(items) {
+  const sampleCount = items.reduce((sum, item) => sum + item.deck.sampleCount, 0);
+  if (!sampleCount) {
+    return 0;
+  }
+
+  return round4(
+    items.reduce((sum, item) => sum + item.strategyFrequency * item.deck.sampleCount, 0) / sampleCount,
+  );
+}
+
 function classifyAnalysisDecks(decks, cardCatalog, options = {}) {
   const now = options.now || new Date().toISOString();
   const classifierVersion = options.classifierVersion || CURRENT_CLASSIFIER_VERSION;
   const reviewMargin = options.reviewMargin ?? DEFAULT_REVIEW_MARGIN;
+  const strategyCloseMargin = options.strategyCloseMargin ?? DEFAULT_STRATEGY_CLOSE_MARGIN;
   const coreRules = normalizeCoreRules(options.coreRules || []);
   const rulesByCard = coreRuleMap(coreRules);
+  const strategyTypesByKey = normalizeStrategyTypes(options.strategyTypes || options.planTypes || []);
+  const strategyUsageByDeck = normalizeStrategyUsage(options.strategyUsage || []);
   const normalizedDecks = dedupeDecks(decks);
   const { stats: cardStats, totalSampleCount } = buildCardStats(normalizedDecks);
   const initialItems = [];
   const results = [];
 
   for (const deck of normalizedDecks) {
-    const core = selectCore(deck, cardCatalog, cardStats, rulesByCard, reviewMargin);
+    const core = selectCore(
+      deck,
+      cardCatalog,
+      cardStats,
+      rulesByCard,
+      strategyTypesByKey,
+      strategyUsageByDeck,
+      reviewMargin,
+      strategyCloseMargin,
+    );
     if (!core.best) {
       results.push(unclassifiedDeck(deck, { now, classifierVersion }));
       continue;
     }
 
-    const type = selectDeckType(deck, core, rulesByCard, cardCatalog);
+    const type = selectDeckType(deck, core, cardCatalog);
     const coreStat = cardStats.get(core.best.cardId);
     const coreSupport = totalSampleCount > 0 ? round4((coreStat?.sampleCount || 0) / totalSampleCount) : 0;
 
@@ -529,9 +1059,15 @@ function classifyAnalysisDecks(decks, cardCatalog, options = {}) {
       primaryCoreCardName: cardDisplayName(core.best.cardId, cardCatalog, core.best.rule),
       coreRule: core.best.rule,
       deckType: type.deckType,
-      deckTypeRule: type.rule,
+      mainPlanType: type.mainPlanType,
+      deckSizeReason: type.deckSizeReason,
+      lowCostCount: type.lowCostCount,
+      typeKnown: type.typeKnown,
       coreMargin: core.margin,
-      needsReview: core.needsReview || type.deckType === UNKNOWN_DECK_TYPE,
+      hasStrategyData: core.hasStrategyData,
+      strategyFrequency: core.best.strategyFrequency,
+      axisCandidates: core.candidates.slice(0, 5).map((candidate) => candidateEvidence(candidate, cardCatalog)),
+      needsReview: core.needsReview || type.needsReview,
       coreSupport,
     });
   }
@@ -552,23 +1088,13 @@ function classifyAnalysisDecks(decks, cardCatalog, options = {}) {
     const first = items[0];
     const partnerCardIds = selectAxisPartners(items, cardStats, cardCatalog);
     const partnerSupport = axisPartnerSupport(items, partnerCardIds);
-    const categoryId = categoryHash(
-      first.primaryFaction,
-      first.primaryCoreCardId,
-      first.deckType,
-      partnerCardIds,
-    );
-    const name = categoryName(
-      first.primaryCoreCardId,
-      partnerCardIds,
-      first.deckType,
-      cardCatalog,
-      first.coreRule,
-    );
+    const categoryId = categoryHash(first.primaryFaction, first.primaryCoreCardId, first.deckType);
+    const name = categoryName(first.primaryCoreCardId, first.deckType, cardCatalog, first.coreRule);
     const sampleCount = items.reduce((sum, item) => sum + item.deck.sampleCount, 0);
     const winCount = items.reduce((sum, item) => sum + item.deck.winCount, 0);
     const lossCount = items.reduce((sum, item) => sum + item.deck.lossCount, 0);
     const drawCount = items.reduce((sum, item) => sum + item.deck.drawCount, 0);
+    const partnerCardNames = partnerCardIds.map((cardId) => cardLabel(cardId, cardCatalog));
     const category = {
       categoryId,
       categoryName: name,
@@ -576,7 +1102,10 @@ function classifyAnalysisDecks(decks, cardCatalog, options = {}) {
       primaryCoreCardId: first.primaryCoreCardId,
       primaryCoreCardName: first.primaryCoreCardName,
       partnerCardIds,
+      partnerCardNames,
       deckType: first.deckType,
+      mainPlanType: first.mainPlanType,
+      strategyFrequency: weightedStrategyFrequency(items),
       memberCount: items.length,
       sampleCount,
       winCount,
@@ -606,21 +1135,29 @@ function classifyAnalysisDecks(decks, cardCatalog, options = {}) {
         primaryCoreCardId: item.primaryCoreCardId,
         primaryCoreCardName: item.primaryCoreCardName,
         partnerCardIds,
+        partnerCardNames,
         deckType: item.deckType,
         status: CLASSIFICATION_STATUS.CLASSIFIED,
         confidence: confidence(
           item.coreMargin,
           partnerSupport,
-          Boolean(item.coreRule || item.deckTypeRule),
-          item.deckType,
+          item.hasStrategyData,
+          item.typeKnown,
+          item.needsReview,
         ),
         needsReview: item.needsReview,
         evidence: {
           sampleCount: item.deck.sampleCount,
           winRate: winRate(item.deck),
+          strategyFrequency: item.strategyFrequency,
+          axisCandidates: item.axisCandidates,
+          deckCardCount: uniqueCards(item.deck.cards).length,
+          mainPlanType: item.mainPlanType,
           coreSupport: item.coreSupport,
           partnerSupport,
           rankScope: item.deck.rankScope || null,
+          deckSizeReason: item.deckSizeReason,
+          lowCostCount: item.lowCostCount,
         },
         classifierVersion,
         classifiedAt: now,
@@ -653,6 +1190,7 @@ function classifyAnalysisDecks(decks, cardCatalog, options = {}) {
 
 module.exports = {
   DEFAULT_REVIEW_MARGIN,
+  DEFAULT_STRATEGY_CLOSE_MARGIN,
   UNKNOWN_DECK_TYPE,
   cardLabel,
   classifyAnalysisDecks,
@@ -660,7 +1198,11 @@ module.exports = {
   loadAnalysisDeckCsv,
   loadCardCatalog,
   loadCoreRules,
+  loadStrategyTypes,
+  loadStrategyUsage,
   normalizeCoreRules,
+  normalizeStrategyTypes,
+  normalizeStrategyUsage,
   parseCsvObjects,
   unclassifiedDeck,
 };

@@ -1,12 +1,24 @@
 # 卡组分类数据处理
 
-- 必须手动运行分类流程。
-- 必须按 `deck_fingerprint` 识别精确卡组。
-- 必须按核心武将轴分类。
-- 必须统计固定搭配卡。
-- 必须优先使用 `coreRules.json` 标注卡组类型。
-- 必须在无规则时按结构兜底分类。
-- 必须输出分类证据。
-- 必须标记 `needsReview`。
-- 必须重复运行不产生重复结果。
+- 必须只改 `apps/api/`、`packages/contracts/`、`specs/`、`docs/`。
 - 禁止修改 `apps/web/`。
+- 禁止修改 `.github/`。
+- 禁止修改 `package.json`。
+- 必须输出 `deckId`、`categoryId`、`categoryName`。
+- 必须输出 `primaryCoreCardId`、`primaryCoreCardName`。
+- 必须输出 `deckType`、`partnerCardIds`、`partnerCardNames`。
+- 必须输出 `confidence`、`needsReview`、`evidence`。
+- 必须输出 `classifierVersion`、`classifiedAt`。
+- `evidence` 必须包含 `sampleCount`、`winRate`。
+- `evidence` 必须包含 `strategyFrequency`。
+- `evidence` 必须包含 `axisCandidates`。
+- `evidence` 必须包含 `deckCardCount`。
+- `evidence` 必须包含 `mainPlanType`。
+- CLI 必须接受 `analysis_deck.csv`。
+- CLI 必须接受卡牌基础数据。
+- CLI 必须接受可选计略类型数据。
+- CLI 必须接受可选计略频率数据。
+- CLI 必须输出分类统计。
+- CLI 必须输出前 10 分类摘要。
+- 缺少计略频率时必须兜底并复核。
+- 重复运行禁止产生重复结果。

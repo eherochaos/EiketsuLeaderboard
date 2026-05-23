@@ -75,6 +75,10 @@ function classifyDeck(deck, rules, options = {}) {
       evidence: {
         sampleCount: 0,
         winRate: 0,
+        strategyFrequency: 0,
+        axisCandidates: [],
+        deckCardCount: normalizeCards(deck.cards).length,
+        mainPlanType: "unknown",
         coreSupport: 0,
         partnerSupport: 0,
         rankScope: null,
@@ -99,6 +103,10 @@ function classifyDeck(deck, rules, options = {}) {
     evidence: {
       sampleCount: 0,
       winRate: 0,
+      strategyFrequency: 0,
+      axisCandidates: [],
+      deckCardCount: normalizeCards(deck.cards).length,
+      mainPlanType: "unknown",
       coreSupport: bestMatch.confidence,
       partnerSupport: 0,
       rankScope: null,
