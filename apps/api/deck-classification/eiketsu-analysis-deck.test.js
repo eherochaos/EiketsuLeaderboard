@@ -64,7 +64,7 @@ function strategyTypes() {
     {
       cardId: "support-all",
       categories: ["全体強化"],
-      strategyText: "味方の知力が上がる。エラッタ前計略内容 号令",
+      strategyText: "味方の武力が上がる。",
     },
     { cardId: "big-balance", mainPlanType: "ダメージ" },
   ];
@@ -291,10 +291,10 @@ function testCommandDeckRejectsBalanceSecondaryAxis() {
   assert.strictEqual(result.evidence.secondaryAxisRejectedCandidates[0].rejectionReason, "typeConflict");
 }
 
-function testCommandDeckRejectsAllSupportSecondaryAxis() {
+function testCommandDeckRejectsAllBuffSecondaryAxis() {
   const output = classify(
-    [deck("reject-support", ["core-command", "support-all", "low-a", "low-b"])],
-    [usage("reject-support", "core-command", 1.5)],
+    [deck("reject-all-buff", ["core-command", "support-all", "low-a", "low-b"])],
+    [usage("reject-all-buff", "core-command", 1.5)],
   );
 
   const result = output.results[0];
@@ -445,7 +445,7 @@ testBalanceDeckRejectsLowFrequencyCommandSecondaryAxis();
 testBalanceDeckPromotesHighFrequencyCommandToPrimaryAxis();
 testCompatibleHighCostPartnerBecomesSecondaryAxis();
 testCommandDeckRejectsBalanceSecondaryAxis();
-testCommandDeckRejectsAllSupportSecondaryAxis();
+testCommandDeckRejectsAllBuffSecondaryAxis();
 testBalanceNamePutsLargeSecondaryAxisFirst();
 testSamePrimaryDifferentSecondAxesSplitCategories();
 testLowCostCommonCardCannotBecomeSecondaryAxis();

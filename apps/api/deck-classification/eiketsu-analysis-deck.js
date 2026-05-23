@@ -474,11 +474,7 @@ function inferPlanType(row = {}) {
     return "陣形";
   }
   if (/全体強化/.test(categoryText)) {
-    if (/武力(が|と|を)?[^。]*上が|武力[^。]*上昇/.test(detailText)) {
-      return "全体強化";
-    }
-
-    return "全体補助";
+    return "全体強化";
   }
   if (/号令|號令/.test(detailText)) {
     return "号令";
@@ -487,11 +483,7 @@ function inferPlanType(row = {}) {
     return "陣形";
   }
   if (/全体|全軍|味方.*全|allies|all ally|team/i.test(detailText)) {
-    if (/武力(が|と|を)?[^。]*上が|武力[^。]*上昇/.test(detailText)) {
-      return "全体強化";
-    }
-
-    return "全体補助";
+    return "全体強化";
   }
   if (/ダメージ|傷害|伤害|damage/i.test(text)) {
     return "ダメージ";
@@ -586,6 +578,10 @@ function strategyTypeForCard(cardId, cardCatalog, strategyTypesByKey, rule) {
 
 function isCommandPlanType(mainPlanType) {
   return /号令|全体強化|陣形|陣型|阵型|formation/i.test(String(mainPlanType || ""));
+}
+
+function isCommandSecondaryPlanType(mainPlanType) {
+  return /号令|陣形|陣型|阵型|formation/i.test(String(mainPlanType || ""));
 }
 
 function isBalancePlanType(mainPlanType) {
@@ -1064,7 +1060,7 @@ function secondaryAxisCompatibility(deckType, mainPlanType) {
   }
 
   if (deckType === DECK_TYPE_COMMAND) {
-    return isCommandPlanType(mainPlanType) ? "" : "typeConflict";
+    return isCommandSecondaryPlanType(mainPlanType) ? "" : "typeConflict";
   }
 
   if (deckType === DECK_TYPE_BALANCE) {
