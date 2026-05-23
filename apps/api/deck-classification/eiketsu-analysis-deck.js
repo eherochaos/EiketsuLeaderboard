@@ -4,7 +4,9 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const {
+  CATEGORY_REGISTRY_STATUS,
   CLASSIFICATION_STATUS,
+  CURRENT_CATEGORY_REGISTRY_VERSION,
   CURRENT_CLASSIFIER_VERSION,
   UNCLASSIFIED_CATEGORY_ID,
   UNCLASSIFIED_CATEGORY_NAME,
@@ -999,6 +1001,152 @@ function categoryHash(primaryFactionValue, primaryCoreCardId, secondaryAxisCardI
   return `archetype-${hash.slice(0, 16)}`;
 }
 
+function uniqueStrings(values) {
+  return Array.from(new Set((values || []).map((value) => String(value || "").trim()).filter(Boolean)));
+}
+
+function registryCategories(categoryRegistry) {
+  if (Array.isArray(categoryRegistry)) {
+    return categoryRegistry;
+  }
+
+  if (categoryRegistry && Array.isArray(categoryRegistry.categories)) {
+    return categoryRegistry.categories;
+  }
+
+  return [];
+}
+
+function registrySeenRunCount(existing) {
+  if (!existing) {
+    return 0;
+  }
+
+  const seenRunCount = toNumber(existing.seenRunCount);
+  return seenRunCount > 0 ? seenRunCount : 1;
+}
+
+function categoryRegistryRecord(category, existing, now, classifierVersion) {
+  const previousName = String(existing?.categoryName || "").trim();
+  const categoryNameValue = String(category.categoryName || "").trim();
+  const aliases = uniqueStrings(existing?.aliases);
+
+  if (previousName && previousName !== categoryNameValue && !aliases.includes(previousName)) {
+    aliases.push(previousName);
+  }
+
+  return {
+    categoryId: category.categoryId,
+    categoryName: categoryNameValue,
+    aliases,
+    primaryCoreCardId: category.primaryCoreCardId || "",
+    primaryCoreCardName: category.primaryCoreCardName || "",
+    secondaryAxisCardId: category.secondaryAxisCardId || "",
+    secondaryAxisCardName: category.secondaryAxisCardName || "",
+    deckType: category.deckType || UNKNOWN_DECK_TYPE,
+    status: CATEGORY_REGISTRY_STATUS.ACTIVE,
+    firstSeenAt: existing?.firstSeenAt || existing?.lastSeenAt || now,
+    lastSeenAt: now,
+    lastSampleCount: category.sampleCount || 0,
+    lastWinRate: category.winRate || 0,
+    seenRunCount: registrySeenRunCount(existing) + 1,
+    inactiveSince: null,
+    classifierVersion,
+  };
+}
+
+function inactiveRegistryRecord(existing, now, classifierVersion) {
+  return {
+    categoryId: String(existing.categoryId || "").trim(),
+    categoryName: String(existing.categoryName || "").trim(),
+    aliases: uniqueStrings(existing.aliases),
+    primaryCoreCardId: String(existing.primaryCoreCardId || "").trim(),
+    primaryCoreCardName: String(existing.primaryCoreCardName || "").trim(),
+    secondaryAxisCardId: String(existing.secondaryAxisCardId || "").trim(),
+    secondaryAxisCardName: String(existing.secondaryAxisCardName || "").trim(),
+    deckType: String(existing.deckType || UNKNOWN_DECK_TYPE).trim(),
+    status: CATEGORY_REGISTRY_STATUS.INACTIVE,
+    firstSeenAt: existing.firstSeenAt || existing.lastSeenAt || now,
+    lastSeenAt: existing.lastSeenAt || existing.firstSeenAt || now,
+    lastSampleCount: toNumber(existing.lastSampleCount || existing.sampleCount),
+    lastWinRate: toNumber(existing.lastWinRate || existing.winRate),
+    seenRunCount: registrySeenRunCount(existing),
+    inactiveSince: existing.inactiveSince || now,
+    classifierVersion: existing.classifierVersion || classifierVersion,
+  };
+}
+
+function sortRegistryRecords(left, right) {
+  const leftActive = left.status === CATEGORY_REGISTRY_STATUS.ACTIVE ? 0 : 1;
+  const rightActive = right.status === CATEGORY_REGISTRY_STATUS.ACTIVE ? 0 : 1;
+  if (leftActive !== rightActive) {
+    return leftActive - rightActive;
+  }
+
+  return (right.lastSampleCount || 0) - (left.lastSampleCount || 0)
+    || left.categoryName.localeCompare(right.categoryName)
+    || left.categoryId.localeCompare(right.categoryId);
+}
+
+function categoryRegistryStats(categoryRegistry) {
+  const categories = registryCategories(categoryRegistry);
+  const activeCategoryCount = categories.filter(
+    (category) => category.status === CATEGORY_REGISTRY_STATUS.ACTIVE,
+  ).length;
+  const inactiveCategoryCount = categories.filter(
+    (category) => category.status === CATEGORY_REGISTRY_STATUS.INACTIVE,
+  ).length;
+
+  return {
+    activeCategoryCount,
+    inactiveCategoryCount,
+    registryCategoryCount: categories.length,
+  };
+}
+
+function mergeCategoryRegistry(currentCategories, previousRegistry, options = {}) {
+  const now = options.now || new Date().toISOString();
+  const classifierVersion = options.classifierVersion || CURRENT_CLASSIFIER_VERSION;
+  const previousById = new Map();
+
+  for (const category of registryCategories(previousRegistry)) {
+    const categoryId = String(category?.categoryId || "").trim();
+    if (categoryId) {
+      previousById.set(categoryId, category);
+    }
+  }
+
+  const currentIds = new Set();
+  const categories = [];
+
+  for (const category of currentCategories || []) {
+    if (!category?.categoryId) {
+      continue;
+    }
+
+    currentIds.add(category.categoryId);
+    categories.push(categoryRegistryRecord(
+      category,
+      previousById.get(category.categoryId),
+      now,
+      classifierVersion,
+    ));
+  }
+
+  for (const [categoryId, category] of previousById.entries()) {
+    if (!currentIds.has(categoryId)) {
+      categories.push(inactiveRegistryRecord(category, now, classifierVersion));
+    }
+  }
+
+  return {
+    categoryRegistryVersion: CURRENT_CATEGORY_REGISTRY_VERSION,
+    classifierVersion,
+    updatedAt: now,
+    categories: categories.sort(sortRegistryRecords),
+  };
+}
+
 function baseAxisKey(item) {
   return [item.primaryFaction, item.primaryCoreCardId, item.deckType].join("|");
 }
@@ -1505,22 +1653,44 @@ function classifyAnalysisDecks(decks, cardCatalog, options = {}) {
     (result) => result.status === CLASSIFICATION_STATUS.UNCLASSIFIED,
   ).length;
   const needsReviewCount = results.filter((result) => result.needsReview).length;
-
-  return {
+  const sortedCategories = categories.sort(
+    (left, right) => right.sampleCount - left.sampleCount || left.categoryId.localeCompare(right.categoryId),
+  );
+  const shouldBuildRegistry =
+    Object.prototype.hasOwnProperty.call(options, "categoryRegistry")
+    || options.includeCategoryRegistry;
+  const categoryRegistry = shouldBuildRegistry
+    ? mergeCategoryRegistry(sortedCategories, options.categoryRegistry, { now, classifierVersion })
+    : null;
+  const registryStatValues = categoryRegistry
+    ? categoryRegistryStats(categoryRegistry)
+    : {
+      activeCategoryCount: sortedCategories.length,
+      inactiveCategoryCount: 0,
+      registryCategoryCount: sortedCategories.length,
+    };
+  const output = {
     classifierVersion,
     stats: {
       total: results.length,
       classified: results.length - unclassified,
       unclassified,
-      categoryCount: categories.length,
+      categoryCount: sortedCategories.length,
+      activeCategoryCount: registryStatValues.activeCategoryCount,
+      inactiveCategoryCount: registryStatValues.inactiveCategoryCount,
+      registryCategoryCount: registryStatValues.registryCategoryCount,
       needsReviewCount,
       primaryFactionCounts: factionCounts,
     },
-    categories: categories.sort(
-      (left, right) => right.sampleCount - left.sampleCount || left.categoryId.localeCompare(right.categoryId),
-    ),
+    categories: sortedCategories,
     results: results.sort((left, right) => left.deckId.localeCompare(right.deckId)),
   };
+
+  if (categoryRegistry) {
+    output.categoryRegistry = categoryRegistry;
+  }
+
+  return output;
 }
 
 module.exports = {
@@ -1530,6 +1700,7 @@ module.exports = {
   cardLabel,
   classifyAnalysisDecks,
   dedupeDecks,
+  mergeCategoryRegistry,
   loadAnalysisDeckCsv,
   loadCardCatalog,
   loadCoreRules,

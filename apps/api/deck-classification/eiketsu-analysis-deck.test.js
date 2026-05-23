@@ -92,16 +92,25 @@ function deck(deckId, cards, sampleCount = 10, winCount = 6) {
   };
 }
 
-function classify(decks, strategyUsage = []) {
+function classify(decks, strategyUsage = [], options = {}) {
   return classifyAnalysisDecks(decks, cardCatalog(), {
-    now: NOW,
+    now: options.now || NOW,
     strategyTypes: strategyTypes(),
     strategyUsage,
+    ...(Object.prototype.hasOwnProperty.call(options, "categoryRegistry")
+      ? { categoryRegistry: options.categoryRegistry }
+      : {}),
   });
 }
 
 function resultByDeck(output) {
   return Object.fromEntries(output.results.map((result) => [result.deckId, result]));
+}
+
+function registryById(output) {
+  return Object.fromEntries(
+    (output.categoryRegistry?.categories || []).map((category) => [category.categoryId, category]),
+  );
 }
 
 function testDuplicateFingerprintDoesNotDuplicateResults() {
@@ -433,6 +442,98 @@ function testMissingStrategyDataFallsBackAndNeedsReview() {
   assert.ok(result.evidence.axisCandidates.length > 0);
 }
 
+function testRegistryIsNotIncludedByDefault() {
+  const output = classify(
+    [deck("registry-default", ["core-command", "second-command", "low-a", "flex-a"])],
+    [usage("registry-default", "core-command", 1.5)],
+  );
+
+  assert.strictEqual(output.categoryRegistry, undefined);
+  assert.strictEqual(output.stats.activeCategoryCount, 1);
+  assert.strictEqual(output.stats.inactiveCategoryCount, 0);
+  assert.strictEqual(output.stats.registryCategoryCount, 1);
+}
+
+function testRegistryKeepsInactiveAndReactivatesCategories() {
+  const first = classify(
+    [deck("registry-old", ["core-command", "second-command", "low-a", "flex-a"])],
+    [usage("registry-old", "core-command", 1.5)],
+    { categoryRegistry: { categories: [] } },
+  );
+  const oldCategoryId = first.categories[0].categoryId;
+
+  const second = classify(
+    [deck("registry-new", ["core-balance", "second-balance", "low-a", "flex-a"])],
+    [usage("registry-new", "core-balance", 1.5)],
+    {
+      now: "2026-05-24T00:00:00.000Z",
+      categoryRegistry: first.categoryRegistry,
+    },
+  );
+  const secondRegistry = registryById(second);
+  const newCategoryId = second.categories[0].categoryId;
+
+  assert.notStrictEqual(oldCategoryId, newCategoryId);
+  assert.strictEqual(second.stats.activeCategoryCount, 1);
+  assert.strictEqual(second.stats.inactiveCategoryCount, 1);
+  assert.strictEqual(second.stats.registryCategoryCount, 2);
+  assert.strictEqual(secondRegistry[oldCategoryId].status, "inactive");
+  assert.strictEqual(secondRegistry[oldCategoryId].lastSampleCount, 10);
+  assert.strictEqual(secondRegistry[oldCategoryId].inactiveSince, "2026-05-24T00:00:00.000Z");
+
+  const third = classify(
+    [deck("registry-old", ["core-command", "second-command", "low-a", "flex-a"])],
+    [usage("registry-old", "core-command", 1.5)],
+    {
+      now: "2026-05-25T00:00:00.000Z",
+      categoryRegistry: second.categoryRegistry,
+    },
+  );
+  const thirdRegistry = registryById(third);
+
+  assert.strictEqual(thirdRegistry[oldCategoryId].status, "active");
+  assert.strictEqual(thirdRegistry[oldCategoryId].inactiveSince, null);
+  assert.strictEqual(thirdRegistry[oldCategoryId].seenRunCount, 2);
+  assert.strictEqual(thirdRegistry[newCategoryId].status, "inactive");
+}
+
+function testRegistryTracksAliasesWhenCategoryNameChanges() {
+  const firstCatalog = cardCatalog();
+  const first = classifyAnalysisDecks(
+    [deck("registry-alias", ["core-command", "second-command", "low-a", "flex-a"])],
+    firstCatalog,
+    {
+      now: NOW,
+      strategyTypes: strategyTypes(),
+      strategyUsage: [usage("registry-alias", "core-command", 1.5)],
+      categoryRegistry: { categories: [] },
+    },
+  );
+  const firstCategoryId = first.categories[0].categoryId;
+  const firstName = first.categories[0].categoryName;
+  const nextCatalog = cardCatalog();
+  nextCatalog["core-command"] = {
+    ...nextCatalog["core-command"],
+    name: "Renamed Command",
+  };
+
+  const second = classifyAnalysisDecks(
+    [deck("registry-alias", ["core-command", "second-command", "low-a", "flex-a"])],
+    nextCatalog,
+    {
+      now: "2026-05-24T00:00:00.000Z",
+      strategyTypes: strategyTypes(),
+      strategyUsage: [usage("registry-alias", "core-command", 1.5)],
+      categoryRegistry: first.categoryRegistry,
+    },
+  );
+  const record = registryById(second)[firstCategoryId];
+
+  assert.strictEqual(second.categories[0].categoryId, firstCategoryId);
+  assert.notStrictEqual(record.categoryName, firstName);
+  assert.ok(record.aliases.includes(firstName));
+}
+
 testParseCsvObjects();
 testDuplicateFingerprintDoesNotDuplicateResults();
 testSevenCardsAreManyCardDeck();
@@ -454,5 +555,8 @@ testSecondaryAxisSupportGrayZoneNeedsReview();
 testUnknownPlanTypeCannotBecomeSecondaryAxis();
 testLowCostCommonCardDoesNotMergeDifferentAxes();
 testMissingStrategyDataFallsBackAndNeedsReview();
+testRegistryIsNotIncludedByDefault();
+testRegistryKeepsInactiveAndReactivatesCategories();
+testRegistryTracksAliasesWhenCategoryNameChanges();
 
 console.log("eiketsu analysis deck tests passed");

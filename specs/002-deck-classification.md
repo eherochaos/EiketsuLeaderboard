@@ -6,23 +6,25 @@
 - 禁止修改 `package.json`。
 - 必须输出 `deckId`、`categoryId`、`categoryName`。
 - 必须输出 `primaryCoreCardId`、`primaryCoreCardName`。
-- 必须输出 `secondaryAxisCardId`、`secondaryAxisCardName`。
-- 必须输出 `secondaryAxisReason`。
+- 必须输出 `secondaryAxisCardId`、`secondaryAxisCardName`、`secondaryAxisReason`。
 - 必须输出 `deckType`、`partnerCardIds`、`partnerCardNames`。
 - 必须输出 `confidence`、`needsReview`、`evidence`。
 - 必须输出 `classifierVersion`、`classifiedAt`。
 - `evidence` 必须包含 `sampleCount`、`winRate`。
-- `evidence` 必须包含 `strategyFrequency`。
-- `evidence` 必须包含 `axisCandidates`、`primaryAxisOverrideReason`。
+- `evidence` 必须包含 `strategyFrequency`、`axisCandidates`。
+- `evidence` 必须包含 `primaryAxisOverrideReason`。
 - `evidence` 必须包含 `secondaryAxisCandidates`、`secondaryAxisRejectedCandidates`。
-- `evidence` 必须包含 `secondaryAxisSupport`。
-- `evidence` 必须包含 `deckCardCount`。
-- `evidence` 必须包含 `mainPlanType`。
+- `evidence` 必须包含 `secondaryAxisSupport`、`deckCardCount`、`mainPlanType`。
 - CLI 必须接受 `analysis_deck.csv`。
 - CLI 必须接受卡牌基础数据。
 - CLI 必须接受可选计略类型数据。
 - CLI 必须接受可选计略频率数据。
-- CLI 必须输出分类统计。
-- CLI 必须输出前 10 分类摘要。
+- CLI 必须接受可选 Registry 输入路径。
+- CLI 必须接受可选 Registry 输出路径。
+- CLI 必须输出分类统计和前 10 分类摘要。
+- Registry 顶层必须包含 `categoryRegistryVersion`、`classifierVersion`、`updatedAt`、`categories`。
+- Registry 分类必须包含 `categoryId`、`categoryName`、`aliases`、`status`。
+- Registry 分类必须包含 `firstSeenAt`、`lastSeenAt`、`inactiveSince`。
+- Registry 分类必须包含 `lastSampleCount`、`lastWinRate`、`seenRunCount`。
 - 缺少计略频率时必须兜底并复核。
 - 重复运行禁止产生重复结果。
