@@ -6,12 +6,16 @@
 - 禁止修改 `package.json`。
 - 必须输出 `deckId`、`categoryId`、`categoryName`。
 - 必须输出 `primaryCoreCardId`、`primaryCoreCardName`。
+- 必须输出 `secondaryAxisCardId`、`secondaryAxisCardName`。
+- 必须输出 `secondaryAxisReason`。
 - 必须输出 `deckType`、`partnerCardIds`、`partnerCardNames`。
 - 必须输出 `confidence`、`needsReview`、`evidence`。
 - 必须输出 `classifierVersion`、`classifiedAt`。
 - `evidence` 必须包含 `sampleCount`、`winRate`。
 - `evidence` 必须包含 `strategyFrequency`。
 - `evidence` 必须包含 `axisCandidates`。
+- `evidence` 必须包含 `secondaryAxisCandidates`。
+- `evidence` 必须包含 `secondaryAxisSupport`。
 - `evidence` 必须包含 `deckCardCount`。
 - `evidence` 必须包含 `mainPlanType`。
 - CLI 必须接受 `analysis_deck.csv`。

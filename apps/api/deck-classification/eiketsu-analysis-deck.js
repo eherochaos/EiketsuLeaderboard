@@ -20,6 +20,10 @@ const DECK_TYPE_BALANCE = "バランス";
 const DECK_TYPE_MANY = "多枚数";
 const LOW_COST_THRESHOLD = 1.5;
 const SIX_CARD_LOW_COST_MIN_COUNT = 4;
+const SECONDARY_AXIS_SUPPORT_THRESHOLD = 0.35;
+const SECONDARY_AXIS_SUPPORT_REVIEW_MIN = 0.3;
+const SECONDARY_AXIS_STRATEGY_RATIO_THRESHOLD = 0.55;
+const SECONDARY_AXIS_STRATEGY_MIN_FREQUENCY = 0.35;
 const FACTION_PREFIXES = new Set(["蒼", "緋", "碧", "玄", "紫", "琥"]);
 
 function parseCsv(text) {
@@ -901,14 +905,23 @@ function selectDeckType(deck, core, cardCatalog) {
   };
 }
 
-function categoryHash(primaryFactionValue, primaryCoreCardId, deckType) {
-  const raw = [primaryFactionValue, primaryCoreCardId, deckType].join("|");
+function categoryHash(primaryFactionValue, primaryCoreCardId, secondaryAxisCardId, deckType) {
+  const raw = [primaryFactionValue, primaryCoreCardId, secondaryAxisCardId || "", deckType].join("|");
   const hash = crypto.createHash("sha256").update(raw).digest("hex");
   return `archetype-${hash.slice(0, 16)}`;
 }
 
-function axisKey(item) {
+function baseAxisKey(item) {
   return [item.primaryFaction, item.primaryCoreCardId, item.deckType].join("|");
+}
+
+function categoryAxisKey(item) {
+  return [
+    item.primaryFaction,
+    item.primaryCoreCardId,
+    item.secondaryAxisCardId || "",
+    item.deckType,
+  ].join("|");
 }
 
 function selectAxisPartners(items, cardStats, cardCatalog) {
@@ -949,9 +962,138 @@ function axisPartnerSupport(items, partnerCardIds) {
   return round4(partnerSampleCount / sampleCount);
 }
 
-function categoryName(primaryCoreCardId, deckType, cardCatalog, rule) {
+function planTypeRecognized(mainPlanType) {
+  return Boolean(mainPlanType && mainPlanType !== UNKNOWN_PLAN_TYPE);
+}
+
+function secondaryAxisSupport(items) {
+  const sampleCount = items.reduce((sum, item) => sum + item.deck.sampleCount, 0);
+  const samplesByCard = new Map();
+
+  for (const item of items) {
+    for (const cardId of uniqueCards(item.deck.cards)) {
+      if (cardId !== item.primaryCoreCardId) {
+        samplesByCard.set(cardId, (samplesByCard.get(cardId) || 0) + item.deck.sampleCount);
+      }
+    }
+  }
+
+  const supportByCard = new Map();
+  for (const [cardId, cardSampleCount] of samplesByCard.entries()) {
+    supportByCard.set(cardId, {
+      sampleCount: cardSampleCount,
+      support: sampleCount > 0 ? round4(cardSampleCount / sampleCount) : 0,
+    });
+  }
+
+  return supportByCard;
+}
+
+function secondaryAxisReason(candidate) {
+  if (candidate.support >= SECONDARY_AXIS_SUPPORT_THRESHOLD) {
+    return "support>=0.35";
+  }
+
+  if (candidate.strategyRatio >= SECONDARY_AXIS_STRATEGY_RATIO_THRESHOLD) {
+    return "strategyFrequency>=55%primary";
+  }
+
+  return "";
+}
+
+function evaluateSecondaryAxisCandidate(item, candidate, supportByCard, cardCatalog) {
+  const supportInfo = supportByCard.get(candidate.cardId) || { sampleCount: 0, support: 0 };
+  const strategyRatio = item.strategyFrequency > 0
+    ? round4(candidate.strategyFrequency / item.strategyFrequency)
+    : 0;
+  const supportQualified = supportInfo.support >= SECONDARY_AXIS_SUPPORT_THRESHOLD;
+  const frequencyQualified = Boolean(
+    candidate.hasStrategyData
+      && item.strategyFrequency > 0
+      && strategyRatio >= SECONDARY_AXIS_STRATEGY_RATIO_THRESHOLD,
+  );
+  const typeRecognized = planTypeRecognized(candidate.mainPlanType);
+  const qualityQualified =
+    candidate.cost >= 2
+    || candidate.strategyFrequency >= SECONDARY_AXIS_STRATEGY_MIN_FREQUENCY
+    || typeRecognized;
+  const lowCostGeneric =
+    candidate.cost <= LOW_COST_THRESHOLD
+    && !typeRecognized
+    && candidate.strategyFrequency < SECONDARY_AXIS_STRATEGY_MIN_FREQUENCY;
+  const qualifies = (supportQualified || frequencyQualified) && qualityQualified && !lowCostGeneric;
+
+  return {
+    cardId: candidate.cardId,
+    cardName: cardLabel(candidate.cardId, cardCatalog),
+    cost: candidate.cost,
+    support: supportInfo.support,
+    supportSampleCount: supportInfo.sampleCount,
+    strategyFrequency: candidate.strategyFrequency,
+    strategyRatio,
+    mainPlanType: candidate.mainPlanType,
+    typeRecognized,
+    qualifies,
+    reason: qualifies ? secondaryAxisReason({ support: supportInfo.support, strategyRatio }) : "",
+  };
+}
+
+function selectSecondaryAxis(item, supportByCard, cardCatalog) {
+  const candidates = (item.coreCandidates || [])
+    .filter((candidate) => candidate.cardId !== item.primaryCoreCardId)
+    .map((candidate) => evaluateSecondaryAxisCandidate(item, candidate, supportByCard, cardCatalog))
+    .sort((left, right) => {
+      const supportCompare = right.support - left.support;
+      if (supportCompare) {
+        return supportCompare;
+      }
+
+      const strategyCompare = right.strategyFrequency - left.strategyFrequency;
+      if (strategyCompare) {
+        return strategyCompare;
+      }
+
+      return right.cost - left.cost || left.cardId.localeCompare(right.cardId);
+    });
+
+  const selected = candidates.find((candidate) => candidate.qualifies) || null;
+  const supportNeedsReview = Boolean(
+    selected
+      && selected.support >= SECONDARY_AXIS_SUPPORT_REVIEW_MIN
+      && selected.support < SECONDARY_AXIS_SUPPORT_THRESHOLD,
+  );
+
+  return {
+    selected,
+    candidates: candidates.slice(0, 5),
+    needsReview: supportNeedsReview,
+  };
+}
+
+function applySecondaryAxes(items, cardCatalog) {
+  const supportByCard = secondaryAxisSupport(items);
+
+  return items.map((item) => {
+    const secondary = selectSecondaryAxis(item, supportByCard, cardCatalog);
+    const selected = secondary.selected;
+
+    return {
+      ...item,
+      secondaryAxisCardId: selected?.cardId || "",
+      secondaryAxisCardName: selected?.cardName || "",
+      secondaryAxisReason: selected?.reason || "",
+      secondaryAxisSupport: selected?.support || 0,
+      secondaryAxisCandidates: secondary.candidates,
+      needsReview: item.needsReview || secondary.needsReview,
+    };
+  });
+}
+
+function categoryName(primaryCoreCardId, secondaryAxisCardId, deckType, cardCatalog, rule) {
   const coreName = shortCardName(primaryCoreCardId, cardCatalog, rule) || "Unknown Deck";
-  return deckType && deckType !== UNKNOWN_DECK_TYPE ? `${coreName}${deckType}デッキ` : `${coreName}デッキ`;
+  const secondaryName = secondaryAxisCardId ? shortCardName(secondaryAxisCardId, cardCatalog) : "";
+  const axisName = secondaryName ? `${coreName}や${secondaryName}` : coreName;
+  return deckType && deckType !== UNKNOWN_DECK_TYPE ? `${axisName}${deckType}デッキ` : `${axisName}デッキ`;
 }
 
 function confidence(coreMarginValue, partnerSupport, hasStrategyData, typeKnown, needsReview) {
@@ -985,6 +1127,9 @@ function unclassifiedDeck(deck, options = {}) {
     primaryFaction: UNKNOWN_FACTION,
     primaryCoreCardId: "",
     primaryCoreCardName: "",
+    secondaryAxisCardId: "",
+    secondaryAxisCardName: "",
+    secondaryAxisReason: "",
     partnerCardIds: [],
     partnerCardNames: [],
     deckType: UNKNOWN_DECK_TYPE,
@@ -996,6 +1141,8 @@ function unclassifiedDeck(deck, options = {}) {
       winRate: winRate(deck),
       strategyFrequency: 0,
       axisCandidates: [],
+      secondaryAxisCandidates: [],
+      secondaryAxisSupport: 0,
       deckCardCount: uniqueCards(deck.cards).length,
       mainPlanType: UNKNOWN_PLAN_TYPE,
       coreSupport: 0,
@@ -1067,14 +1214,29 @@ function classifyAnalysisDecks(decks, cardCatalog, options = {}) {
       hasStrategyData: core.hasStrategyData,
       strategyFrequency: core.best.strategyFrequency,
       axisCandidates: core.candidates.slice(0, 5).map((candidate) => candidateEvidence(candidate, cardCatalog)),
+      coreCandidates: core.candidates,
       needsReview: core.needsReview || type.needsReview,
       coreSupport,
     });
   }
 
-  const groups = new Map();
+  const baseGroups = new Map();
   for (const item of initialItems) {
-    const key = axisKey(item);
+    const key = baseAxisKey(item);
+    if (!baseGroups.has(key)) {
+      baseGroups.set(key, []);
+    }
+    baseGroups.get(key).push(item);
+  }
+
+  const itemsWithSecondaryAxis = [];
+  for (const items of baseGroups.values()) {
+    itemsWithSecondaryAxis.push(...applySecondaryAxes(items, cardCatalog));
+  }
+
+  const groups = new Map();
+  for (const item of itemsWithSecondaryAxis) {
+    const key = categoryAxisKey(item);
     if (!groups.has(key)) {
       groups.set(key, []);
     }
@@ -1088,8 +1250,19 @@ function classifyAnalysisDecks(decks, cardCatalog, options = {}) {
     const first = items[0];
     const partnerCardIds = selectAxisPartners(items, cardStats, cardCatalog);
     const partnerSupport = axisPartnerSupport(items, partnerCardIds);
-    const categoryId = categoryHash(first.primaryFaction, first.primaryCoreCardId, first.deckType);
-    const name = categoryName(first.primaryCoreCardId, first.deckType, cardCatalog, first.coreRule);
+    const categoryId = categoryHash(
+      first.primaryFaction,
+      first.primaryCoreCardId,
+      first.secondaryAxisCardId,
+      first.deckType,
+    );
+    const name = categoryName(
+      first.primaryCoreCardId,
+      first.secondaryAxisCardId,
+      first.deckType,
+      cardCatalog,
+      first.coreRule,
+    );
     const sampleCount = items.reduce((sum, item) => sum + item.deck.sampleCount, 0);
     const winCount = items.reduce((sum, item) => sum + item.deck.winCount, 0);
     const lossCount = items.reduce((sum, item) => sum + item.deck.lossCount, 0);
@@ -1101,6 +1274,10 @@ function classifyAnalysisDecks(decks, cardCatalog, options = {}) {
       primaryFaction: first.primaryFaction,
       primaryCoreCardId: first.primaryCoreCardId,
       primaryCoreCardName: first.primaryCoreCardName,
+      secondaryAxisCardId: first.secondaryAxisCardId,
+      secondaryAxisCardName: first.secondaryAxisCardName,
+      secondaryAxisReason: first.secondaryAxisReason,
+      secondaryAxisSupport: first.secondaryAxisSupport,
       partnerCardIds,
       partnerCardNames,
       deckType: first.deckType,
@@ -1134,6 +1311,9 @@ function classifyAnalysisDecks(decks, cardCatalog, options = {}) {
         primaryFaction: item.primaryFaction,
         primaryCoreCardId: item.primaryCoreCardId,
         primaryCoreCardName: item.primaryCoreCardName,
+        secondaryAxisCardId: item.secondaryAxisCardId,
+        secondaryAxisCardName: item.secondaryAxisCardName,
+        secondaryAxisReason: item.secondaryAxisReason,
         partnerCardIds,
         partnerCardNames,
         deckType: item.deckType,
@@ -1151,6 +1331,8 @@ function classifyAnalysisDecks(decks, cardCatalog, options = {}) {
           winRate: winRate(item.deck),
           strategyFrequency: item.strategyFrequency,
           axisCandidates: item.axisCandidates,
+          secondaryAxisCandidates: item.secondaryAxisCandidates,
+          secondaryAxisSupport: item.secondaryAxisSupport,
           deckCardCount: uniqueCards(item.deck.cards).length,
           mainPlanType: item.mainPlanType,
           coreSupport: item.coreSupport,
