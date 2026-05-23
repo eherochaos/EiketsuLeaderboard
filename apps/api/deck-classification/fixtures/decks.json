@@ -1,0 +1,16 @@
+{
+  "decks": [
+    {
+      "deckId": "sample-red",
+      "cards": ["volcanic-spear", "scarlet-vanguard", "ember-monk"]
+    },
+    {
+      "deckId": "sample-blue",
+      "cards": ["tide-oracle", "azure-guard", "mist-lancer"]
+    },
+    {
+      "deckId": "sample-unknown",
+      "cards": ["field-ration", "wandering-soldier"]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "rules": [
+    {
+      "categoryId": "red-aggro",
+      "categoryName": "Red Aggro",
+      "signatureCards": ["volcanic-spear", "scarlet-vanguard"],
+      "threshold": 1
+    },
+    {
+      "categoryId": "blue-control",
+      "categoryName": "Blue Control",
+      "signatureCards": ["tide-oracle", "azure-guard"],
+      "threshold": 1
+    }
+  ]
+}
