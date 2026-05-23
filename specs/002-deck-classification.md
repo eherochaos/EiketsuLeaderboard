@@ -13,8 +13,8 @@
 - 必须输出 `classifierVersion`、`classifiedAt`。
 - `evidence` 必须包含 `sampleCount`、`winRate`。
 - `evidence` 必须包含 `strategyFrequency`。
-- `evidence` 必须包含 `axisCandidates`。
-- `evidence` 必须包含 `secondaryAxisCandidates`。
+- `evidence` 必须包含 `axisCandidates`、`primaryAxisOverrideReason`。
+- `evidence` 必须包含 `secondaryAxisCandidates`、`secondaryAxisRejectedCandidates`。
 - `evidence` 必须包含 `secondaryAxisSupport`。
 - `evidence` 必须包含 `deckCardCount`。
 - `evidence` 必须包含 `mainPlanType`。
