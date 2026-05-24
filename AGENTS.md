@@ -63,3 +63,7 @@
 - GitHub API 数据优先用 `gh --json`、`gh --template` 或 `ConvertFrom-Json`。
 - 复杂命令拆成多行 PowerShell 或 `.ps1` 脚本。
 - 不要写容易被 PowerShell 吃掉引号的命令。
+
+修改任何 UI 前，必须先阅读 docs/design/ui-contract.md。
+完成任何 UI 修改后，必须按照 docs/design/visual-acceptance.md 做视觉自检。
+如果自检未通过，必须先修复再提交。

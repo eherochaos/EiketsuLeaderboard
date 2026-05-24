@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Eiketsu Leaderboard 静态原型</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body data-page="home">
+    <header class="top-shell">
+      <nav class="top-nav" aria-label="主要导航">
+        <a class="brand-mark" href="./" aria-current="page">
+          <span class="brand-symbol" aria-hidden="true"></span>
+          <span>Eiketsu Leaderboard</span>
+        </a>
+        <a class="nav-primary" href="./tier-list/">TierList</a>
+      </nav>
+    </header>
+
+    <main id="home-content">
+      <section class="home-hero" aria-labelledby="home-title">
+        <figure class="hero-visual" aria-label="英傑大戦素材视觉">
+          <img data-hero-image src="" alt="英傑大戦卡牌视觉">
+        </figure>
+
+        <div class="hero-inner">
+          <div class="hero-copy">
+            <p class="eyebrow">环境数据概览</p>
+            <h1 id="home-title" data-field="hero-title">环境榜单<br><span>统计区间生成中</span></h1>
+            <p class="lead" data-field="hero-lead">前三势力合计 69%，Top 3 卡组按综合 Rank 自动排序。</p>
+            <dl class="hero-facts" aria-label="环境摘要">
+              <div>
+                <dt>更新时间</dt>
+                <dd data-field="updated-at">2026-05-23 08:40</dd>
+              </div>
+              <div>
+                <dt>主导势力</dt>
+                <dd data-field="dominant-factions">蒼 29% / 碧 22% / 玄 18%</dd>
+              </div>
+            </dl>
+            <div class="hero-actions">
+              <a class="primary-action" href="./tier-list/">查看 TierList →</a>
+            </div>
+            <nav class="section-index" aria-label="页面目录">
+              <a href="#featured-cards">注目单卡</a>
+              <a href="./tier-list/#combo-source">注目组合</a>
+              <a href="#classification-note">字段说明</a>
+            </nav>
+          </div>
+
+          <aside class="hero-feature" aria-label="主导卡组">
+            <div class="hero-deck" data-field="hero-deck"></div>
+            <div class="top-decks" aria-label="Top 3 卡组">
+              <div class="mini-heading">
+                <span>Top 3 卡组</span>
+                <b>综合 Rank</b>
+              </div>
+              <ol data-list="hero-decks"></ol>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="state-toolbar" aria-label="环境筛选">
+        <span>环境状态</span>
+        <div class="segmented" role="group" aria-label="首页数据状态">
+          <button type="button" class="is-active" data-home-state="ready">正常</button>
+          <button type="button" data-home-state="heated">过热中</button>
+          <button type="button" data-home-state="empty">无数据</button>
+          <button type="button" data-home-state="missing-builds">缺乏新构筑</button>
+        </div>
+        <div class="toolbar-selects" aria-label="静态筛选条件">
+          <span>全部势力</span>
+          <span>全部段位</span>
+          <span>最近 7 天</span>
+        </div>
+      </section>
+
+      <section class="state-panel loading-panel" hidden>
+        <div class="skeleton-line wide"></div>
+        <div class="skeleton-line"></div>
+        <div class="skeleton-grid">
+          <span></span><span></span><span></span>
+        </div>
+      </section>
+
+      <section class="state-panel empty-panel" hidden>
+        <h2>暂无环境数据</h2>
+        <p>当前静态样例没有可展示的势力占比、代表卡组和注目单卡。</p>
+      </section>
+
+      <div class="data-content">
+        <section class="content-section signal-section" aria-labelledby="share-title">
+          <div class="section-heading">
+            <h2 id="share-title">势力占比</h2>
+              <p>横向堆叠展示环境构成，直接看主导势力占比。</p>
+          </div>
+
+          <div class="signal-layout">
+            <div class="share-summary" data-list="faction-share"></div>
+          </div>
+        </section>
+
+        <section class="content-section" aria-labelledby="decks-title">
+          <div class="section-heading row-heading">
+            <div>
+              <h2 id="decks-title">代表卡组</h2>
+              <p>按势力聚合展示，优先看核心构成、胜率与使用率。</p>
+            </div>
+            <a class="inline-link" href="./tier-list/">完整榜单</a>
+          </div>
+
+          <div class="deck-rank-list" data-list="representative-decks"></div>
+        </section>
+
+        <section class="content-section" id="featured-cards" aria-labelledby="featured-title">
+          <div class="section-heading">
+            <h2 id="featured-title">注目单卡</h2>
+            <p>综合 Rank 优先，趋势和标签均由指标自动生成。</p>
+          </div>
+
+          <div class="table-wrap featured-table-wrap">
+            <table class="metric-table featured-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>素材</th>
+                  <th>单卡</th>
+                  <th>使用率</th>
+                  <th>胜率</th>
+                  <th>综合 Rank 趋势</th>
+                  <th>指标依据</th>
+                </tr>
+              </thead>
+              <tbody data-list="featured-cards"></tbody>
+            </table>
+          </div>
+          <div class="featured-card-list" data-list="featured-card-list"></div>
+        </section>
+
+        <section class="classification-note" id="classification-note" aria-labelledby="classification-title">
+          <div>
+            <h2 id="classification-title">字段说明</h2>
+          </div>
+          <p>页面内容由综合 Rank、胜率、使用率和样本数生成。</p>
+        </section>
+      </div>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

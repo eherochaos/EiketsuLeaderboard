@@ -1,0 +1,102 @@
+/* 英文小标题：用于 section Common_Eyebrow 和页面状态识别。 */
+.Common_Eyebrow {
+  margin: 0 0 8px;
+  color: var(--color-primary);
+  font-family: var(--font-control);
+  font-size: var(--font-size-sm);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* 主要入口按钮：导航按钮、主 CTA、次 CTA 共用底层形态。 */
+.Common_NavPrimary,
+.Common_ButtonPrimary,
+.Common_ButtonSecondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1px solid #cf8c78;
+  border-radius: var(--radius-md);
+  color: #fffaf0;
+  background: linear-gradient(180deg, #bd4b42, var(--color-primary));
+  font-family: var(--font-control);
+  font-size: 15px;
+  font-weight: 800;
+  white-space: nowrap;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), var(--shadow-sm);
+}
+
+/* 次按钮：用于卡组行里的查看构筑。 */
+.Common_ButtonSecondary {
+  min-height: 38px;
+  width: 112px;
+  padding: 0 12px;
+  font-size: 14px;
+}
+
+/* 按钮悬停：只轻微加深红色。 */
+.Common_NavPrimary:hover,
+.Common_ButtonPrimary:hover,
+.Common_ButtonSecondary:hover {
+  background: linear-gradient(180deg, #cc574d, var(--color-red-dark));
+}
+
+/* 排名数字：榜单 Rank 的通用数字样式。 */
+.Common_RankCell {
+  color: var(--color-gold);
+  font-family: var(--font-number);
+  font-size: 24px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+/* 指标数字：胜率、使用率、样本等核心数值。 */
+.Common_MetricNumber {
+  color: var(--color-brown);
+  font-family: var(--font-number);
+  font-size: var(--font-size-lg);
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+/* 势力标签：卡组和单卡旁边的短标识。 */
+.Common_FactionPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 28px;
+  margin-bottom: var(--space-xs);
+  padding: 0 var(--space-sm);
+  border: 1px solid rgba(185, 133, 36, 0.65);
+  border-radius: 999px;
+  color: #fff7e7;
+  background: #7b531c;
+  font-family: var(--font-control);
+  font-size: var(--font-size-sm);
+  font-weight: 900;
+}
+
+/* 固定布局表格：用于需要稳定列宽的桌面榜单表格。 */
+.Common_TableLayout {
+  table-layout: fixed;
+  width: 100%;
+}
+
+/* 表格列：默认不指定宽度，由具体列类型决定。 */
+.Common_TableColumn {
+  width: var(--Common_TableColumnWidth, auto);
+}
+
+/* 固定表格列：先从整张表里扣除指定宽度。 */
+.Common_TableColumn_Fixed {
+  width: var(--Common_TableColumnWidth);
+}
+
+/* 弹性表格列：在扣除固定列后，按数字比例分配剩余宽度。 */
+.Common_TableColumn_Flex {
+  width: calc((100% - var(--Common_TableFixedWidth)) * var(--Common_TableColumnRatio) / var(--Common_TableFlexTotal));
+}

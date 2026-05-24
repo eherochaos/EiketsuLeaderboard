@@ -15,6 +15,9 @@
 - `--color-gold-fill` 必须为 `rgba(185, 133, 36, 0.22)`。
 - `--color-gold-tag-fill` 必须为 `rgba(185, 133, 36, 0.11)`。
 - `--color-gold-tag-border` 必须为 `rgba(185, 133, 36, 0.34)`。
+- `--color-control-text` 必须为 `#fff8e8`。
+- `--color-control-field-text` 必须为 `#3e2a1a`。
+- `--color-control-link` 必须为 `#7d5420`。
 
 ## 势力颜色
 - 势力颜色必须严格使用 `eiketsu-taisen.net` 的 `BASE_DATA.color`。
@@ -32,8 +35,8 @@
 - `--faction-murasaki` 必须为 `#8c0078`。
 - `--faction-ko-rgb` 必须为 `255 120 0`。
 - `--faction-ko` 必须为 `#ff7800`。
-- `--faction-ki-rgb` 必须为 `255 255 0`。
-- `--faction-ki` 必须为 `#ffff00`。
+- `--faction-ki-rgb` 必须为 `201 162 39`。
+- `--faction-ki` 必须为 `#c9a227`。
 - 蒼只能使用 `--faction-sou`。
 - 緋只能使用 `--faction-hi`。
 - 碧只能使用 `--faction-midori`。
@@ -49,19 +52,22 @@
 
 ## 字体
 - 禁止在组件内直接写 `font-family`。
-- 禁止新增字体 token。
+- 字体 token 只能包含 `--font-serif`、`--font-content`、`--font-control`、`--font-number`、`--font-ui`。
 - 禁止改变字体栈顺序。
 - `--font-serif` 必须为 `"Yu Mincho", "Hiragino Mincho ProN", "Noto Serif CJK SC", "Songti SC", serif`。
+- `--font-content` 必须为 `"Inter", "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif`。
+- `--font-control` 必须为 `"Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif`。
 - `--font-ui` 必须为 `"Inter", "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif`。
+- `--font-ui` 只能作为 `--font-content` 的兼容别名。
 - `--font-number` 必须为 `"DIN Alternate", "Bahnschrift", "Segoe UI", sans-serif`。
 - H1 必须使用 `--font-serif`。
 - Section 标题必须使用 `--font-serif`。
 - 卡组名必须使用 `--font-serif`。
 - 品牌名必须使用 `--font-serif`。
-- 正文必须使用 `--font-ui`。
-- 控件必须使用 `--font-ui`。
-- 表格文字必须使用 `--font-ui`。
-- 标签文字必须使用 `--font-ui`。
+- 正文必须使用 `--font-content`。
+- 控件必须使用 `--font-control`。
+- 表格文字必须使用 `--font-content`。
+- 标签文字必须使用 `--font-content`。
 - Rank 必须使用 `--font-number`。
 - 百分比必须使用 `--font-number`。
 - 样本数必须使用 `--font-number`。

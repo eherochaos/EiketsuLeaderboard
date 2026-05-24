@@ -116,6 +116,63 @@
 - 分类字段只能复用 `deckId`、`categoryId`、`categoryName`、`status`、`confidence`、`classifierVersion`。
 - 禁止把目标数据写成已存在接口。
 
+## 旧服务数据迁移
+- 数据迁移核心文件夹必须是 `apps/api`。
+- 迁移工具入口必须是 `apps/api/data-migration/legacy_service_migration.py`。
+- 旧库只能作为一次性导入源。
+- 运行时数据必须读取 `apps/api/data/legacy-service`。
+- 卡牌目录必须覆盖 `card_catalog.json` 的 1285 张卡。
+- 卡牌补丁必须覆盖 `card_catalog_overlay.json` 的 120 张卡。
+- 卡牌 lookup 必须保留 `hash_id`、`card_code`、`name`、`faction`、`cost`、`unitType`、`image_keys`。
+- 版本配置必须保留 `target_version`、`date_from`、`date_to`、`include_solo`、`high_ranker_rank`。
+- `collection_runs` 只能作为采集审计参考。
+- `follow_players` 只能作为采集审计参考。
+- 必须迁移 `matches`。
+- 必须迁移 `match_aliases`。
+- 必须迁移 `match_sides`。
+- 必须迁移 `match_decks`。
+- 必须迁移 `match_deck_units`。
+- 必须迁移 `battle_summaries`。
+- 必须迁移 `raw_snapshots` 的元数据。
+- 必须迁移 `replay_assets`。
+- 必须迁移 `analysis_runs`。
+- 必须迁移 `analysis_deck_stats`。
+- 必须迁移 `analysis_card_stats`。
+- 必须迁移 `shared_contribution_packages`。
+- 必须迁移 `shared_contribution_matches`。
+- 必须迁移 `server_share_config`。
+- 必须迁移 `server_users`。
+- 必须迁移 `server_invites`。
+- 必须迁移 `server_api_tokens`。
+- 必须迁移 `server_uploads`。
+- 必须迁移 `server_leaderboard_snapshots`。
+- 必须迁移 `server_leaderboard_runs`。
+- 必须迁移 `server_leaderboard_rows`。
+- `analysis_deck.csv` 只能用于分类输入和校验。
+- `analysis_card.csv` 只能用于校验。
+- `analysis_overview.md` 只能用于样本数校验。
+- 禁止迁移 `data/raw` HTML 到新网页运行时。
+- 禁止迁移浏览器 profile、cookies、`.env`、旧 HTML 页面、部署脚本、PyInstaller 产物。
+
+## API 数据来源
+- 迁移脚本、聚合逻辑、接口适配只能放在 `apps/api`。
+- 首页数据必须由 `apps/api` 统一生成。
+- TierList 数据必须由 `apps/api` 统一生成。
+- 公开榜单必须优先读取 `server_leaderboard_rows.row_json`。
+- 公开榜单必须用 `server_leaderboard_runs` 判断版本、范围、状态。
+- 分类输入必须使用 `analysis_deck.csv`、卡牌目录、可选 Registry。
+- 输出字段必须复用 `packages/contracts`。
+- 禁止在 `apps/web` 实现后端统计规则。
+- 禁止绕过 `packages/contracts` 私自约定字段。
+
+## 敏感字段
+- Token 只能迁移 `token_hash`、`token_prefix`、状态时间。
+- 禁止迁移明文 token。
+- 禁止在 spec 示例写管理口令。
+- 禁止在 spec 示例写 cookies。
+- 禁止在 spec 示例写 raw HTML。
+- 禁止在 spec 示例写本地用户路径。
+
 ## 组件约束
 - Button 必须有 default、hover、active、disabled、focus 状态。
 - Tag / Badge 必须用于状态、势力、指标依据。
@@ -147,3 +204,6 @@
 - TierList 筛选和排序必须正常。
 - 控制台必须 0 JS 错误。
 - 页面不得出现人工理由、人工标题、人工影响说明。
+- 迁移清单必须覆盖旧库 21 张业务表。
+- 文档 diff 只能包含 `docs/web-design-v1.md` 和 `specs/003-web-pages.md`。
+- 文档禁止包含真实 token、邀请码、cookie、管理口令。

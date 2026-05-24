@@ -1,0 +1,89 @@
+/* 全局设计变量：集中定义颜色、字体、字号、间距和页面尺寸。 */
+:root {
+  /* 背景和面板颜色。 */
+  --color-bg: #f6efe2;
+  --color-bg-soft: #f8f2e8;
+  --color-panel: rgba(255, 252, 244, 0.92);
+  --color-panel-strong: #fffaf0;
+  --color-surface: var(--color-panel);
+
+  /* 主体文字、金色强调和红色行动按钮。 */
+  --color-brown: #241610;
+  --color-brown-soft: #4a3427;
+  --color-gold: #b98524;
+  --color-gold-soft: #e9d2a3;
+  --color-red: #a83b34;
+  --color-red-dark: #782620;
+  --color-primary: var(--color-red);
+  --color-border: #d8c097;
+  --color-ink: #2b211b;
+  --color-text: var(--color-ink);
+  --color-muted: #756a5b;
+
+  /* 阴影层级：小阴影用于按钮，大阴影用于内容面板。 */
+  --shadow-soft: 0 12px 28px rgba(72, 48, 25, 0.12);
+  --shadow-tight: 0 6px 16px rgba(72, 48, 25, 0.1);
+  --shadow-sm: var(--shadow-tight);
+  --shadow-md: var(--shadow-soft);
+  --shadow-card: var(--shadow-soft);
+
+  /* 字体族：标题、正文、控件和数字分开控制。 */
+  --font-serif: "Yu Mincho", "Hiragino Mincho ProN", "Noto Serif CJK SC", "Songti SC", serif;
+  --font-content: "Inter", "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-control: "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-number: "DIN Alternate", "Bahnschrift", "Segoe UI", sans-serif;
+
+  /* 固定字号：不使用 clamp，避免不同屏幕产生不可控变化。 */
+  --font-size-sm: 13px;
+  --font-size-md: 16px;
+  --font-size-lg: 21px;
+  --font-size-xl: 28px;
+  --body-size: 16px;
+  --table-size: 15px;
+  --h1-size: 52px;
+  --section-title-size: 28px;
+  --card-title-size: 21px;
+
+  /* 标准间距。 */
+  --space-xs: 6px;
+  --space-sm: 10px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 40px;
+
+  /* 圆角等级。 */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* 页面容器尺寸。 */
+  --page-max: 1180px;
+  --page-pad: 16px;
+  --section-gap: 24px;
+}
+
+/* 平板断点：收紧页面边距和标题尺寸。 */
+@media (max-width: 1099px) {
+  :root {
+    --page-pad: 14px;
+    --section-gap: 20px;
+    --h1-size: 42px;
+    --section-title-size: 25px;
+    --card-title-size: 19px;
+    --body-size: 16px;
+    --table-size: 15px;
+  }
+}
+
+/* 手机断点：进一步压缩页面边距和固定字号。 */
+@media (max-width: 760px) {
+  :root {
+    --page-pad: 12px;
+    --section-gap: 16px;
+    --h1-size: 34px;
+    --section-title-size: 22px;
+    --card-title-size: 18px;
+    --body-size: 15px;
+    --table-size: 14px;
+  }
+}
