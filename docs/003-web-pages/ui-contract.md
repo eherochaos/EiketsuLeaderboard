@@ -1,0 +1,24 @@
+# UI 核心铁律
+
+- 必须先读本文件再改 UI。
+- 必须使用 `docs/design/design-tokens.md`。
+- 必须使用 `docs/design/component-contract.md`。
+- 必须按 `docs/design/page-patterns.md` 组织页面。
+- 完成 UI 修改后必须按 `docs/design/visual-acceptance.md` 自检。
+- 首屏必须出现导航、主标题、核心数据、当前第一、Top 3、筛选入口。
+- 禁止用高 Hero 挤走核心数据。
+- 禁止让装饰图抢过数据。
+- 主容器必须统一 1200px。
+- 桌面 section 左边缘必须对齐。
+- 移动端必须单列展示。
+- 间距只能使用 4 / 8 / 12 / 16 / 24 / 32 / 48。
+- 字间距必须为 0。
+- 卡片圆角必须不超过 8px。
+- 禁止卡片嵌套卡片。
+- 表格指标列必须右对齐。
+- 图表必须可读，禁止 3D 图。
+- 颜色只能来自设计变量。
+- 主 CTA 只能使用暗红色。
+- 状态必须覆盖 hover、active、disabled、loading、empty、error、focus。
+- 文案必须短。
+- 按钮文案必须是明确动作。

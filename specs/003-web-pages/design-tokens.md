@@ -1,0 +1,163 @@
+# Design Tokens
+
+## 颜色
+- `--color-bg` 必须为 `#f6efe2`。
+- `--color-panel` 必须为 `rgba(255, 252, 244, 0.92)`。
+- `--color-text` 必须为 `#24150e`。
+- `--color-muted` 必须为 `#6c5943`。
+- `--color-brown` 必须为 `#24150e`。
+- `--color-brown-soft` 必须为 `#4a3422`。
+- `--color-gold` 必须为 `#b98524`。
+- `--color-red` 必须为 `#a83b34`。
+- `--color-red-dark` 必须为 `#7e2824`。
+- `--color-border` 必须为 `rgba(150, 113, 56, 0.28)`。
+- `--color-panel-border` 必须为 `rgba(150, 113, 56, 0.2)`。
+- `--color-gold-fill` 必须为 `rgba(185, 133, 36, 0.22)`。
+- `--color-gold-tag-fill` 必须为 `rgba(185, 133, 36, 0.11)`。
+- `--color-gold-tag-border` 必须为 `rgba(185, 133, 36, 0.34)`。
+
+## 势力颜色
+- 势力颜色必须严格使用 `eiketsu-taisen.net` 的 `BASE_DATA.color`。
+- 官方来源必须以 `/datalist/` 页面运行时 `BASE_DATA.color` 为准。
+- 势力颜色必须覆盖 7 个势力。
+- `--faction-sou-rgb` 必须为 `30 60 160`。
+- `--faction-sou` 必须为 `#1e3ca0`。
+- `--faction-hi-rgb` 必须为 `180 25 27`。
+- `--faction-hi` 必须为 `#b4191b`。
+- `--faction-midori-rgb` 必须为 `0 115 50`。
+- `--faction-midori` 必须为 `#007332`。
+- `--faction-gen-rgb` 必须为 `99 98 97`。
+- `--faction-gen` 必须为 `#636261`。
+- `--faction-murasaki-rgb` 必须为 `140 0 120`。
+- `--faction-murasaki` 必须为 `#8c0078`。
+- `--faction-ko-rgb` 必须为 `255 120 0`。
+- `--faction-ko` 必须为 `#ff7800`。
+- `--faction-ki-rgb` 必须为 `255 255 0`。
+- `--faction-ki` 必须为 `#ffff00`。
+- 蒼只能使用 `--faction-sou`。
+- 緋只能使用 `--faction-hi`。
+- 碧只能使用 `--faction-midori`。
+- 玄只能使用 `--faction-gen`。
+- 紫只能使用 `--faction-murasaki`。
+- 琥只能使用 `--faction-ko`。
+- 黄只能使用 `--faction-ki`。
+- 禁止把玄做成紫色。
+- 禁止把琥做成金棕色。
+- 官网颜色变化时必须先更新本节 token。
+- 势力色只能用于图表分段、势力标签、势力图例。
+- 禁止用势力色作为页面背景。
+
+## 字体
+- 禁止在组件内直接写 `font-family`。
+- 禁止新增字体 token。
+- 禁止改变字体栈顺序。
+- `--font-serif` 必须为 `"Yu Mincho", "Hiragino Mincho ProN", "Noto Serif CJK SC", "Songti SC", serif`。
+- `--font-ui` 必须为 `"Inter", "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif`。
+- `--font-number` 必须为 `"DIN Alternate", "Bahnschrift", "Segoe UI", sans-serif`。
+- H1 必须使用 `--font-serif`。
+- Section 标题必须使用 `--font-serif`。
+- 卡组名必须使用 `--font-serif`。
+- 品牌名必须使用 `--font-serif`。
+- 正文必须使用 `--font-ui`。
+- 控件必须使用 `--font-ui`。
+- 表格文字必须使用 `--font-ui`。
+- 标签文字必须使用 `--font-ui`。
+- Rank 必须使用 `--font-number`。
+- 百分比必须使用 `--font-number`。
+- 样本数必须使用 `--font-number`。
+- 综合 Rank 数字必须使用 `--font-number`。
+- `--font-weight-regular` 必须为 `400`。
+- `--font-weight-bold` 必须为 `700`。
+- `--font-weight-heavy` 必须为 `900`。
+- 正文必须使用 `--font-weight-regular`。
+- 表格表头必须使用 `--font-weight-heavy`。
+- CTA 必须使用 `--font-weight-heavy`。
+- 标签必须使用 `--font-weight-heavy`。
+- 指标数字必须使用 `--font-weight-heavy`。
+- 字间距必须为 `0`。
+
+## 字号
+- 禁止使用 `clamp()` 定义字号。
+- 禁止使用视口单位定义字号。
+- 禁止使用最小值和最大值形式定义字号。
+- `--font-size-h1-desktop` 必须为 `52px`。
+- `--font-size-h1-tablet` 必须为 `42px`。
+- `--font-size-h1-mobile` 必须为 `34px`。
+- `--font-size-section-title` 必须为 `28px`。
+- `--font-size-card-title` 必须为 `21px`。
+- `--font-size-hero-card-title` 必须为 `25px`。
+- `--font-size-body` 必须为 `16px`。
+- `--font-size-table` 必须为 `15px`。
+- `--font-size-label` 必须为 `12px`。
+- `--font-size-small` 必须为 `13px`。
+- `--font-size-rank` 必须为 `26px`。
+- `--font-size-table-rank` 必须为 `18px`。
+- `--font-size-metric` 必须为 `22px`。
+- `--font-size-share-total` 必须为 `32px`。
+- `--font-size-share-percent` 必须为 `20px`。
+- H1 桌面必须使用 `--font-size-h1-desktop`。
+- H1 平板必须使用 `--font-size-h1-tablet`。
+- H1 手机必须使用 `--font-size-h1-mobile`。
+- Section 标题必须使用 `--font-size-section-title`。
+- 卡组名必须使用 `--font-size-card-title`。
+- 当前第一卡组名必须使用 `--font-size-hero-card-title`。
+- 正文必须使用 `--font-size-body`。
+- 表格正文必须使用 `--font-size-table`。
+- 标签必须使用 `--font-size-label`。
+- 小型辅助文本必须使用 `--font-size-small`。
+- 代表卡组 Rank 必须使用 `--font-size-rank`。
+- 表格 Rank 必须使用 `--font-size-table-rank`。
+- 指标数字必须使用 `--font-size-metric`。
+- Top3 合计数字必须使用 `--font-size-share-total`。
+- 堆叠条百分比必须使用 `--font-size-share-percent`。
+
+## 间距
+- `--space-4` 必须为 `4px`。
+- `--space-8` 必须为 `8px`。
+- `--space-12` 必须为 `12px`。
+- `--space-16` 必须为 `16px`。
+- `--space-24` 必须为 `24px`。
+- `--space-32` 必须为 `32px`。
+- `--space-48` 必须为 `48px`。
+- 禁止使用其它间距数值。
+- `--page-padding-x-desktop` 必须为 `16px`。
+- `--page-padding-x-mobile` 必须为 `12px`。
+- `--section-gap` 必须为 `24px`。
+- `--section-padding-y` 必须为 `22px`。
+- `--section-padding-x` 必须为 `24px`。
+- `--section-padding-mobile` 必须为 `16px`。
+- `--card-padding-sm` 必须为 `14px`。
+- `--card-padding-md` 必须为 `16px`。
+- `--card-padding-lg` 必须为 `18px`。
+- `--title-description-gap` 必须为 `6px`。
+- `--description-content-gap` 必须为 `16px`。
+- `--row-gap` 必须为 `12px`。
+- `--table-cell-padding-y` 必须为 `14px`。
+- `--table-cell-padding-x` 必须为 `10px`。
+
+## 尺寸
+- `--container-max` 必须为 `1180px`。
+- `--header-height` 必须为 `64px`。
+- `--hero-min-height-desktop` 必须为 `390px`。
+- `--hero-card-image` 必须为 `104px`。
+- `--deck-cover-size` 必须为 `88px`。
+- `--featured-thumb-size` 必须为 `52px`。
+- `--nav-button-height` 必须为 `38px`。
+- `--primary-button-height` 必须为 `42px`。
+- `--detail-button-height` 必须为 `36px`。
+- `--tag-min-height` 必须为 `24px`。
+- `--state-toolbar-height` 必须为 `64px`。
+- `--deck-metric-column-width` 必须为 `124px`。
+- `--deck-action-column-width` 必须为 `96px`。
+- `--deck-rail-width` 必须为 `420px`。
+- `--sparkline-width` 必须为 `78px`。
+- `--sparkline-height` 必须为 `36px`。
+
+## 圆角和阴影
+- `--radius-panel` 必须为 `8px`。
+- `--radius-image` 必须为 `8px`。
+- `--radius-table-thumb` 必须为 `7px`。
+- `--radius-card-slot` 必须为 `3px`。
+- `--radius-pill` 必须为 `999px`。
+- `--shadow-soft` 必须为 `0 18px 42px rgba(75, 52, 27, 0.12)`。
+- 除 `--shadow-soft` 外禁止新增页面级阴影。

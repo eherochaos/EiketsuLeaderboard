@@ -1,0 +1,28 @@
+# 组件契约
+
+- Button 高度必须为 36px。
+- Button 主按钮只能使用 `--color-red`。
+- Button 次按钮只能使用边框样式。
+- Button 必须覆盖 hover、active、disabled、loading。
+- Icon Button 必须为 36px × 36px。
+- Card 圆角必须为 8px。
+- Card padding 只能使用 16px 或 24px。
+- 禁止 Card 嵌套 Card。
+- Tag 高度必须为 24px。
+- Tag padding 必须为 0 8px。
+- Metric 数字必须大于标签。
+- Metric 标签必须使用 `--color-muted`。
+- Table 表头必须固定或保持可见。
+- Table 行高必须不小于 48px。
+- Table 指标列必须右对齐。
+- Table 文本列必须左对齐。
+- Chart 只能使用条形、折线、面积、堆叠条、环形占比。
+- Chart 禁止使用 3D 图。
+- Chart 图例必须放在右上或底部。
+- Chart 数值必须标明单位。
+- Tabs 当前项必须有明确 selected 状态。
+- Filter Bar 必须贴近被筛选内容。
+- Deck Row 必须展示名称、分类、Rank、胜率、使用率、样本数。
+- Modal 必须有关闭按钮。
+- Empty State 必须说明当前无数据。
+- Error State 必须说明失败原因。
