@@ -1,0 +1,28 @@
+# Design Tokens
+
+- 颜色只能使用本文件变量。
+- `--color-bg`: `#F7F1E6`。
+- `--color-panel`: `#FFF9EE`。
+- `--color-panel-strong`: `#F0E3D0`。
+- `--color-text`: `#2B2118`。
+- `--color-muted`: `#7A6A58`。
+- `--color-border`: `#D7C6AD`。
+- `--color-brown`: `#4B2F1B`。
+- `--color-gold`: `#B88A32`。
+- `--color-red`: `#9B2F2F`。
+- `--color-success`: `#3E7A4A`。
+- `--color-warning`: `#B87924`。
+- `--color-danger`: `#9B2F2F`。
+- 字体必须使用系统无衬线字体。
+- 字号只能使用 12 / 14 / 16 / 20 / 24 / 32。
+- 正文行高必须使用 1.55。
+- 标题行高必须使用 1.25。
+- 字间距必须为 0。
+- 字重只能使用 400 / 500 / 600 / 700。
+- 间距只能使用 4 / 8 / 12 / 16 / 24 / 32 / 48。
+- 圆角只能使用 4 / 6 / 8。
+- 卡片圆角统一 8px。
+- 按钮圆角统一 6px。
+- 阴影只能使用 `--shadow-soft` 和 `--shadow-pop`。
+- `--shadow-soft`: `0 1px 2px rgba(43, 33, 24, 0.08)`。
+- `--shadow-pop`: `0 8px 24px rgba(43, 33, 24, 0.10)`。
