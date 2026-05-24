@@ -8,6 +8,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
+        leaderboard: resolve(__dirname, "leaderboard/index.html"),
         tierList: resolve(__dirname, "tier-list/index.html")
       }
     }

@@ -1,10 +1,12 @@
 import type { LeaderboardSnapshot } from "../types";
 
+const snapshotUrl = import.meta.env.VITE_LEADERBOARD_SNAPSHOT_URL || "/api/leaderboard-snapshot";
+
 export async function loadSnapshot(): Promise<LeaderboardSnapshot> {
-  const response = await fetch("/data/leaderboard-snapshot.json", { cache: "no-store" });
+  const response = await fetch(snapshotUrl, { cache: "no-store" });
 
   if (!response.ok) {
-    throw new Error(`Failed to load leaderboard snapshot: ${response.status}`);
+    throw new Error(`榜单数据读取失败：${response.status}`);
   }
 
   return await response.json() as LeaderboardSnapshot;

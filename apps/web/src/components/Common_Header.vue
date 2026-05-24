@@ -8,12 +8,12 @@ defineProps<{
 <template>
   <header class="Common_Header">
     <nav class="Common_Header_Nav" aria-label="主要导航">
-      <a class="Common_Header_Brand" href="/">
+      <a class="Common_Header_Brand" href="/leaderboard/">
         <span class="Common_Header_BrandSymbol" aria-hidden="true"></span>
         <span>Eiketsu Leaderboard</span>
       </a>
       <a v-if="current === 'home'" class="Common_NavPrimary" href="/tier-list/">TierList</a>
-      <a v-else class="Common_NavPrimary" href="/">首页</a>
+      <a v-else class="Common_NavPrimary" href="/leaderboard/">首页</a>
     </nav>
   </header>
 </template>

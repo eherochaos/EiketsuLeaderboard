@@ -63,7 +63,7 @@ const shareNote = computed(() => {
       <MainFeaturedCardsSection :cards="featuredCards" />
 
       <footer class="MainPage_Foot">
-        快照来源 {{ metadata.sourceKind || "analysis" }} Run {{ metadata.sourceRunId }}，仅加载构建产物 `/data/leaderboard-snapshot.json`。
+        数据来源 {{ metadata.sourceKind || "analysis" }} Run {{ metadata.sourceRunId }}。
       </footer>
     </template>
   </main>
