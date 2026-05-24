@@ -7,6 +7,9 @@
 - Button 必须有 disabled 状态。
 - Button 必须有 focus 状态。
 - 主 Button 背景必须使用 `--color-red`。
+- Button 字体必须使用 `--font-control`。
+- Button 文字颜色必须使用 `--color-control-text`。
+- Button 文本必须单行完整显示。
 - 次级入口必须使用文字链接。
 - 同一视区只能出现一个 `.primary-action`。
 
@@ -54,8 +57,24 @@
 - Filter Bar 必须支持 focus。
 - Filter Bar 必须支持 disabled。
 - Filter Bar 高度必须使用 `--state-toolbar-height`。
+- Filter Bar 控件字体必须使用 `--font-control`。
+- Filter Bar 控件文字必须使用 `--color-control-field-text`。
 - Filter Bar select 必须设置 `appearance: none`。
 - Filter Bar select 边框必须使用 `--color-panel-border`。
+
+## Text Fit
+- H1 必须允许换行。
+- H1 禁止省略。
+- H1 禁止自动缩字。
+- 卡组名最多显示 `2` 行。
+- 卡组名溢出必须裁切。
+- 表格名称最多显示 `2` 行。
+- 移动行块名称最多显示 `2` 行。
+- Button 文本禁止省略。
+- Select 文本允许省略。
+- Tag 文本禁止自动缩字。
+- Metric 数字禁止换行。
+- 长日文名必须允许在字符边界断行。
 
 ## Deck Row
 - Deck Row 必须对齐 Rank、头像、正文、核心构成、指标、按钮。

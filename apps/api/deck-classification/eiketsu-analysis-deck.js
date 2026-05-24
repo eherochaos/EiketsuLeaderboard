@@ -20,14 +20,19 @@ const UNKNOWN_PLAN_TYPE = "unknown";
 const DECK_TYPE_COMMAND = "号令";
 const DECK_TYPE_BALANCE = "バランス";
 const DECK_TYPE_MANY = "多枚数";
+const DECK_TYPE_KENYA = "ケニア";
 const LOW_COST_THRESHOLD = 1.5;
 const SIX_CARD_LOW_COST_MIN_COUNT = 4;
-const SECONDARY_AXIS_SUPPORT_THRESHOLD = 0.35;
+const SECONDARY_AXIS_STRONG_SUPPORT_THRESHOLD = 0.8;
+const SECONDARY_AXIS_SUPPORT_THRESHOLD = 0.5;
 const SECONDARY_AXIS_SUPPORT_REVIEW_MIN = 0.3;
 const SECONDARY_AXIS_STRATEGY_RATIO_THRESHOLD = 0.55;
-const SECONDARY_AXIS_STRATEGY_MIN_FREQUENCY = 0.35;
+const SECONDARY_AXIS_STRONG_SUPPORT_MIN_FREQUENCY = 0.5;
+const SECONDARY_AXIS_STRATEGY_MIN_FREQUENCY = 0.8;
 const PRIMARY_AXIS_COMMAND_RATIO_THRESHOLD = 0.7;
 const PRIMARY_AXIS_COMMAND_MIN_FREQUENCY = 0.8;
+const COEXISTING_PRIMARY_AXIS_MIN_SAMPLE = 20;
+const COEXISTING_PRIMARY_AXIS_MINOR_SAMPLE_RATIO = 0.5;
 const FACTION_PREFIXES = new Set(["蒼", "緋", "碧", "玄", "紫", "琥"]);
 
 function parseCsv(text) {
@@ -396,6 +401,16 @@ function fallbackCoreScore(cardId, deck, cardCatalog, cardStats, rule) {
   return usageScore + stabilityScore + rankScore + costScore + ruleScore;
 }
 
+function planTypeFallbackScore(mainPlanType) {
+  if (isCommandPlanType(mainPlanType)) {
+    return 90;
+  }
+  if (isBalancePlanType(mainPlanType)) {
+    return 20;
+  }
+  return 0;
+}
+
 function parseMaybeJsonArray(value) {
   if (Array.isArray(value)) {
     return value;
@@ -587,7 +602,7 @@ function isCommandSecondaryPlanType(mainPlanType) {
 }
 
 function isBalancePlanType(mainPlanType) {
-  return /単体|單体|单体|強化|强化|ダメージ|傷害|伤害|妨害|特殊|効果|damage/i.test(
+  return /単体|單体|单体|強化|强化|ダメージ|傷害|伤害|妨害|特殊|効果|拠点|damage/i.test(
     String(mainPlanType || ""),
   );
 }
@@ -769,7 +784,8 @@ function scoreCoreCandidate(
   const rule = rulesByCard.get(cardId);
   const usage = strategyUsageForCard(deck, cardId, cardCatalog, strategyUsageByDeck);
   const strategyType = strategyTypeForCard(cardId, cardCatalog, strategyTypesByKey, rule);
-  const fallbackScore = fallbackCoreScore(cardId, deck, cardCatalog, cardStats, rule);
+  const fallbackScore = fallbackCoreScore(cardId, deck, cardCatalog, cardStats, rule)
+    + planTypeFallbackScore(strategyType.mainPlanType);
 
   return {
     cardId,
@@ -946,6 +962,14 @@ function deckSizeRule(deck, cardCatalog) {
   const cards = uniqueCards(deck.cards);
   const lowCostCount = cards.filter((cardId) => cardCost(cardCatalog[cardId]) <= LOW_COST_THRESHOLD).length;
 
+  if (cards.length === 3) {
+    return {
+      deckType: DECK_TYPE_KENYA,
+      deckSizeReason: "cardCount=3",
+      lowCostCount,
+    };
+  }
+
   if (cards.length >= 7) {
     return {
       deckType: DECK_TYPE_MANY,
@@ -973,7 +997,7 @@ function selectDeckType(deck, core, cardCatalog) {
   const sizeRule = deckSizeRule(deck, cardCatalog);
   const mainPlanType = core?.best?.mainPlanType || UNKNOWN_PLAN_TYPE;
 
-  if (sizeRule.deckType) {
+  if (sizeRule.deckType === DECK_TYPE_KENYA) {
     return {
       deckType: sizeRule.deckType,
       mainPlanType,
@@ -985,6 +1009,28 @@ function selectDeckType(deck, core, cardCatalog) {
   }
 
   const inferred = deckTypeFromPlanType(mainPlanType);
+  if (inferred.known) {
+    return {
+      deckType: inferred.deckType,
+      mainPlanType,
+      deckSizeReason: "",
+      lowCostCount: sizeRule.lowCostCount,
+      needsReview: false,
+      typeKnown: true,
+    };
+  }
+
+  if (sizeRule.deckType) {
+    return {
+      deckType: sizeRule.deckType,
+      mainPlanType,
+      deckSizeReason: sizeRule.deckSizeReason,
+      lowCostCount: sizeRule.lowCostCount,
+      needsReview: false,
+      typeKnown: true,
+    };
+  }
+
   return {
     deckType: inferred.deckType,
     mainPlanType,
@@ -1219,6 +1265,10 @@ function secondaryAxisCompatibility(deckType, mainPlanType) {
     return "";
   }
 
+  if (deckType === DECK_TYPE_KENYA) {
+    return "";
+  }
+
   return "unknownPlanType";
 }
 
@@ -1246,12 +1296,15 @@ function secondaryAxisSupport(items) {
 }
 
 function secondaryAxisReason(candidate) {
-  if (candidate.support >= SECONDARY_AXIS_SUPPORT_THRESHOLD) {
-    return "support>=0.35";
+  if (
+    candidate.support > SECONDARY_AXIS_STRONG_SUPPORT_THRESHOLD
+    && candidate.strategyFrequency > SECONDARY_AXIS_STRONG_SUPPORT_MIN_FREQUENCY
+  ) {
+    return "support>0.8&strategyFrequency>0.5";
   }
 
-  if (candidate.strategyRatio >= SECONDARY_AXIS_STRATEGY_RATIO_THRESHOLD) {
-    return "strategyFrequency>=55%primary";
+  if (candidate.support > SECONDARY_AXIS_SUPPORT_THRESHOLD && candidate.strategyFrequency > SECONDARY_AXIS_STRATEGY_MIN_FREQUENCY) {
+    return "support>0.5&strategyFrequency>0.8";
   }
 
   return "";
@@ -1262,20 +1315,24 @@ function evaluateSecondaryAxisCandidate(item, candidate, supportByCard, cardCata
   const strategyRatio = item.strategyFrequency > 0
     ? round4(candidate.strategyFrequency / item.strategyFrequency)
     : 0;
-  const supportQualified = supportInfo.support >= SECONDARY_AXIS_SUPPORT_THRESHOLD;
+  const strongSupportQualified = Boolean(
+    supportInfo.support > SECONDARY_AXIS_STRONG_SUPPORT_THRESHOLD
+      && candidate.hasStrategyData
+      && candidate.strategyFrequency > SECONDARY_AXIS_STRONG_SUPPORT_MIN_FREQUENCY,
+  );
+  const supportQualified = supportInfo.support > SECONDARY_AXIS_SUPPORT_THRESHOLD;
   const frequencyQualified = Boolean(
     candidate.hasStrategyData
-      && item.strategyFrequency > 0
-      && strategyRatio >= SECONDARY_AXIS_STRATEGY_RATIO_THRESHOLD,
+      && candidate.strategyFrequency > SECONDARY_AXIS_STRATEGY_MIN_FREQUENCY,
   );
   const typeRecognized = planTypeRecognized(candidate.mainPlanType);
   const qualityQualified =
     candidate.cost >= 2
-    || candidate.strategyFrequency >= SECONDARY_AXIS_STRATEGY_MIN_FREQUENCY;
+    || candidate.strategyFrequency > SECONDARY_AXIS_STRONG_SUPPORT_MIN_FREQUENCY;
   const lowCostGeneric =
     candidate.cost <= LOW_COST_THRESHOLD
-    && candidate.strategyFrequency < SECONDARY_AXIS_STRATEGY_MIN_FREQUENCY;
-  const evidenceQualified = supportQualified || frequencyQualified;
+    && candidate.strategyFrequency <= SECONDARY_AXIS_STRONG_SUPPORT_MIN_FREQUENCY;
+  const evidenceQualified = strongSupportQualified || (supportQualified && frequencyQualified);
   const compatibilityReason = secondaryAxisCompatibility(item.deckType, candidate.mainPlanType);
   const rejectionReason =
     !evidenceQualified
@@ -1297,7 +1354,10 @@ function evaluateSecondaryAxisCandidate(item, candidate, supportByCard, cardCata
     typeRecognized,
     qualifies,
     rejectionReason,
-    reason: qualifies ? secondaryAxisReason({ support: supportInfo.support, strategyRatio }) : "",
+    reason: qualifies ? secondaryAxisReason({
+      support: supportInfo.support,
+      strategyFrequency: candidate.strategyFrequency,
+    }) : "",
   };
 }
 
@@ -1345,7 +1405,7 @@ function applySecondaryAxes(items, cardCatalog) {
   const supportByCard = secondaryAxisSupport(items);
 
   return items.map((item) => {
-    if (item.deckType === DECK_TYPE_MANY) {
+    if (item.deckType === DECK_TYPE_MANY || item.deckType === DECK_TYPE_KENYA) {
       return {
         ...item,
         secondaryAxisCardId: "",
@@ -1462,6 +1522,144 @@ function weightedStrategyFrequency(items) {
   );
 }
 
+function comparePrimaryAxisGroup(left, right) {
+  return right.sampleCount - left.sampleCount
+    || right.strategyFrequency - left.strategyFrequency
+    || left.cardId.localeCompare(right.cardId);
+}
+
+function primaryAxisGroups(items) {
+  const groups = new Map();
+
+  for (const item of items) {
+    if (!groups.has(item.primaryCoreCardId)) {
+      groups.set(item.primaryCoreCardId, []);
+    }
+    groups.get(item.primaryCoreCardId).push(item);
+  }
+
+  return Array.from(groups.entries()).map(([cardId, groupItems]) => ({
+    cardId,
+    items: groupItems,
+    sampleCount: groupItems.reduce((sum, item) => sum + item.deck.sampleCount, 0),
+    strategyFrequency: weightedStrategyFrequency(groupItems),
+  }));
+}
+
+function coexistSample(items, leftCardId, rightCardId) {
+  return items
+    .filter((item) => {
+      const cards = uniqueCards(item.deck.cards);
+      return cards.includes(leftCardId) && cards.includes(rightCardId);
+    })
+    .reduce((sum, item) => sum + item.deck.sampleCount, 0);
+}
+
+function coexistingPrimaryAxisRules(items) {
+  const groups = primaryAxisGroups(items);
+  const rules = [];
+
+  for (let leftIndex = 0; leftIndex < groups.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < groups.length; rightIndex += 1) {
+      const left = groups[leftIndex];
+      const right = groups[rightIndex];
+      const sampleCount = coexistSample(items, left.cardId, right.cardId);
+      const minorSampleCount = Math.min(left.sampleCount, right.sampleCount);
+
+      if (
+        sampleCount >= COEXISTING_PRIMARY_AXIS_MIN_SAMPLE
+        && minorSampleCount > 0
+        && sampleCount / minorSampleCount >= COEXISTING_PRIMARY_AXIS_MINOR_SAMPLE_RATIO
+      ) {
+        rules.push({
+          cardIds: new Set([left.cardId, right.cardId]),
+          winner: [left, right].sort(comparePrimaryAxisGroup)[0],
+        });
+      }
+    }
+  }
+
+  return rules;
+}
+
+function coexistingPrimaryAxisTarget(item, rules) {
+  const deckCards = new Set(uniqueCards(item.deck.cards));
+  const candidates = rules
+    .filter((rule) => rule.cardIds.has(item.primaryCoreCardId))
+    .filter((rule) => Array.from(rule.cardIds).every((cardId) => deckCards.has(cardId)))
+    .map((rule) => rule.winner);
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  return candidates.sort(comparePrimaryAxisGroup)[0];
+}
+
+function applyCoexistingPrimaryAxis(item, target, cardCatalog) {
+  if (!target || target.cardId === item.primaryCoreCardId) {
+    return item;
+  }
+
+  const selected = item.coreCandidates.find((candidate) => candidate.cardId === target.cardId);
+  if (!selected) {
+    return item;
+  }
+
+  const previous = item.coreCandidates.find((candidate) => candidate.cardId === item.primaryCoreCardId) || item.coreCandidates[0];
+  const coreCandidates = [
+    selected,
+    ...item.coreCandidates.filter((candidate) => candidate.cardId !== selected.cardId),
+  ];
+  const previousReason = item.primaryAxisOverrideReason ? `${item.primaryAxisOverrideReason};` : "";
+
+  return {
+    ...item,
+    primaryCoreCardId: selected.cardId,
+    primaryCoreCardName: cardDisplayName(selected.cardId, cardCatalog, selected.rule),
+    coreRule: selected.rule,
+    mainPlanType: selected.mainPlanType,
+    coreMargin: coreMargin(selected, previous),
+    strategyFrequency: selected.strategyFrequency,
+    axisCandidates: coreCandidates.slice(0, 5).map((candidate) => candidateEvidence(candidate, cardCatalog)),
+    primaryAxisOverrideReason: `${previousReason}coexistingCommandPrimaryAxis`,
+    coreCandidates,
+  };
+}
+
+function normalizeCoexistingCommandPrimaryAxes(items, cardCatalog) {
+  const scoped = new Map();
+
+  for (const item of items) {
+    if (item.deckType !== DECK_TYPE_COMMAND) {
+      continue;
+    }
+
+    const key = [item.primaryFaction, item.deckType].join("|");
+    if (!scoped.has(key)) {
+      scoped.set(key, []);
+    }
+    scoped.get(key).push(item);
+  }
+
+  const rulesByScope = new Map();
+  for (const [key, scopeItems] of scoped.entries()) {
+    const rules = coexistingPrimaryAxisRules(scopeItems);
+    if (rules.length > 0) {
+      rulesByScope.set(key, rules);
+    }
+  }
+
+  return items.map((item) => {
+    const key = [item.primaryFaction, item.deckType].join("|");
+    return applyCoexistingPrimaryAxis(
+      item,
+      coexistingPrimaryAxisTarget(item, rulesByScope.get(key) || []),
+      cardCatalog,
+    );
+  });
+}
+
 function classifyAnalysisDecks(decks, cardCatalog, options = {}) {
   const now = options.now || new Date().toISOString();
   const classifierVersion = options.classifierVersion || CURRENT_CLASSIFIER_VERSION;
@@ -1519,8 +1717,9 @@ function classifyAnalysisDecks(decks, cardCatalog, options = {}) {
     });
   }
 
+  const normalizedItems = normalizeCoexistingCommandPrimaryAxes(initialItems, cardCatalog);
   const baseGroups = new Map();
-  for (const item of initialItems) {
+  for (const item of normalizedItems) {
     const key = baseAxisKey(item);
     if (!baseGroups.has(key)) {
       baseGroups.set(key, []);

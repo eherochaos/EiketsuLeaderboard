@@ -1,0 +1,126 @@
+/* 页面主容器：限制最大宽度并居中。 */
+.Common_PageShell {
+  width: min(100%, var(--page-max));
+  margin: 0 auto;
+  padding: var(--section-gap) var(--page-pad) var(--space-xl);
+}
+
+/* 通用内容面板：统一边框、底色和阴影。 */
+.Main_Hero_Section,
+.Common_SectionBlock,
+.TierPage_FilterBar,
+.Main_SnapshotStrip_Section,
+.TierPage_Hero,
+.Common_TableCard,
+.Common_StatusPanel,
+.MainPage_Foot {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+/* 普通内容区块：控制 section 与上一段的距离。 */
+.Common_SectionBlock {
+  margin-top: var(--section-gap);
+  padding: var(--space-lg);
+}
+
+/* 区块标题栏：左侧标题，右侧摘要或入口。 */
+.Common_SectionHeading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(216, 192, 151, 0.8);
+}
+
+/* 紧凑标题栏：用于表格内部标题。 */
+.Common_SectionHeading.Common_SectionHeading_Compact {
+  margin-bottom: 12px;
+}
+
+/* 区块中文标题。 */
+.Common_SectionHeading h2 {
+  margin: 0;
+  color: var(--color-brown);
+  font-family: var(--font-serif);
+  font-size: var(--section-title-size);
+  line-height: 1.2;
+}
+
+/* 区块标题栏右侧文字或链接。 */
+.Common_SectionHeading span,
+.Common_SectionHeading a {
+  color: var(--color-primary);
+  font-family: var(--font-control);
+  font-size: 14px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+/* 区块说明文字。 */
+.Common_SectionNote {
+  margin-bottom: var(--space-md);
+  color: var(--color-muted);
+  font-size: 15px;
+}
+
+/* 表格外壳：允许宽表在容器内横向滚动。 */
+.Common_TableCard {
+  padding: 20px;
+  overflow-x: auto;
+}
+
+/* 移动端卡片列表默认隐藏，由组件在手机断点打开。 */
+.Common_MobileCardList {
+  display: none;
+}
+
+/* 状态面板和页脚说明共用的轻量信息块。 */
+.Common_StatusPanel,
+.MainPage_Foot {
+  margin-top: var(--section-gap);
+  padding: 22px;
+  color: var(--color-muted);
+}
+
+/* 页面第一个状态面板不需要上边距。 */
+.Common_StatusPanel:first-child {
+  margin-top: 0;
+}
+
+/* 错误状态使用主红色提示。 */
+.Common_StatusPanel.Common_StatusPanel_Error {
+  color: var(--color-primary);
+}
+
+/* 页脚说明文字略小于正文。 */
+.MainPage_Foot {
+  font-size: 14px;
+}
+
+/* 手机端：压缩容器和面板内边距。 */
+@media (max-width: 760px) {
+  /* 手机页面底部留白减少。 */
+  .Common_PageShell {
+    padding-bottom: 28px;
+  }
+
+  /* 手机面板统一改成较窄内边距。 */
+  .Main_Hero_Section,
+  .Common_SectionBlock,
+  .Common_TableCard,
+  .Main_SnapshotStrip_Section,
+  .TierPage_Hero {
+    padding: var(--space-md);
+  }
+
+  /* 手机区块标题改为上下排列。 */
+  .Common_SectionHeading {
+    align-items: start;
+    flex-direction: column;
+    gap: var(--space-xs);
+  }
+}

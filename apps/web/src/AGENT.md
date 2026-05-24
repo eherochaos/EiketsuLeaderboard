@@ -1,0 +1,5 @@
+约定Style和Component的基本命名规范
+
+1：通用的组件统一头命名是Common
+2：非通用组件根据具体使用页面命名
+譬如Main_RepresentativeDecks_Section

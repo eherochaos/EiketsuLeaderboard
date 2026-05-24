@@ -1,0 +1,93 @@
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 0;/* 防止页面因为某些子元素太宽，导致根元素强行撑开。 */
+  background: var(--color-bg);
+}
+
+body {
+  margin: 0; /* 去除页面边缘会有莫名空白 */
+  min-width: 0;
+  color: var(--color-text);
+  font-family: var(--font-content);/*默认正文字体*/
+  font-size: var(--body-size);
+  line-height: 1.55;
+  /* 视觉氛围背景 */
+  background:
+    radial-gradient(circle at 12% 10%, rgba(185, 133, 36, 0.14), transparent 30%),
+    radial-gradient(circle at 90% 16%, rgba(96, 76, 56, 0.08), transparent 28%),
+    linear-gradient(135deg, rgba(82, 54, 32, 0.04) 0 18%, transparent 18% 100%),
+    var(--color-bg);
+}
+
+/* 链接默认样式 */
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* 表单控件继承字体 */
+button,
+select {
+  font: inherit;
+}
+
+/* 标题和段落默认 margin */
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 18px;
+  color: var(--color-brown);
+  font-family: var(--font-serif);
+  font-size: var(--h1-size);
+  line-height: 1.08;
+  letter-spacing: 0;
+}
+
+/* h1强调色 */
+h1 span {
+  color: var(--color-gold);
+}
+
+/* 表格基础样式 */
+table {
+  width: 100%;
+  border-collapse: collapse; /* 表格边框合并，不然单元格之间会有缝 */
+  font-size: var(--table-size);
+}
+
+/* 表头和单元格 */
+th,
+td {
+  padding: 12px 10px;
+  border-bottom: 1px solid rgba(216, 192, 151, 0.72); /* 每一行下面有一条浅色分割线。 */
+  text-align: left; /* 文字左对齐 */
+  vertical-align: middle;
+}
+
+th {
+  color: var(--color-brown-soft);
+  background: rgba(237, 218, 181, 0.42);
+  font-family: var(--font-control);
+  font-size: var(--font-size-sm);
+  font-weight: 900;
+}
+
+td strong {
+  /*display: block;*/
+  color: var(--color-brown);
+  font-size: 16px;
+  line-height: 1.28;
+}
+
+td span {
+  color: var(--color-muted);
+  font-size: var(--font-size-sm);
+}

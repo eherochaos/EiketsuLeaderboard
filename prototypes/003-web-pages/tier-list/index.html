@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>TierList 静态原型</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="../styles.css">
+  </head>
+  <body data-page="tier-list">
+    <header class="top-shell">
+      <nav class="top-nav" aria-label="主要导航">
+        <a class="brand-mark" href="../">
+          <span class="brand-symbol" aria-hidden="true"></span>
+          <span>Eiketsu Leaderboard</span>
+        </a>
+        <a class="nav-primary" href="../">首页</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="tier-header" aria-labelledby="tier-title">
+        <div>
+          <p class="eyebrow">近 7 日静态样例 / 7,180 场</p>
+          <h1 id="tier-title">环境卡组 TierList</h1>
+          <p class="lead">默认按综合 Rank 降序，优先看胜率、使用率和样本数是否同时成立。</p>
+        </div>
+        <dl class="tier-meta" aria-label="榜单信息">
+          <div>
+            <dt>更新时间</dt>
+            <dd>2026-05-23 08:40</dd>
+          </div>
+          <div>
+            <dt>当前第一</dt>
+            <dd>織田信長 号令</dd>
+          </div>
+        </dl>
+        <nav class="section-index tier-index" aria-label="榜单目录">
+          <a href="#combo-source">注目组合</a>
+          <a href="#table-title">榜单主体</a>
+          <a href="#classification-note">分类说明</a>
+        </nav>
+      </section>
+
+      <section class="filters-band" aria-label="筛选排序">
+        <label>
+          <span>势力</span>
+          <select id="faction-filter">
+            <option value="all">全部</option>
+          </select>
+        </label>
+        <label id="combo-source">
+          <span>命名来源</span>
+          <select id="source-filter">
+            <option value="all">全部</option>
+            <option value="single">单卡</option>
+            <option value="combo">组合</option>
+            <option value="type">类型</option>
+          </select>
+        </label>
+        <label>
+          <span>排序</span>
+          <select id="sort-filter">
+            <option value="rankScore">综合Rank</option>
+            <option value="winRate">胜率</option>
+            <option value="usageRate">使用率</option>
+            <option value="kabukiPoints">倾奇点</option>
+            <option value="sampleSize">样本数</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="content-section tier-section" aria-labelledby="table-title">
+        <div class="section-heading row-heading compact">
+          <div>
+            <h2 id="table-title">榜单主体</h2>
+            <p data-field="table-summary">综合 Rank 排序中。</p>
+          </div>
+          <span class="rank-hint">胜率 / 使用率 / 样本数</span>
+        </div>
+
+        <div class="table-wrap tier-table-wrap">
+          <table class="metric-table tier-table">
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>素材</th>
+                <th>卡组</th>
+                <th>分类名</th>
+                <th>综合Rank</th>
+                <th>胜率</th>
+                <th>使用率</th>
+                <th>倾奇点</th>
+                <th>样本数</th>
+                <th>详情</th>
+              </tr>
+            </thead>
+            <tbody data-list="tier-rows"></tbody>
+          </table>
+        </div>
+
+        <div class="tier-card-list" data-list="tier-cards"></div>
+      </section>
+
+      <section class="detail-placeholder" id="detail-placeholder" aria-live="polite">
+        <div>
+          <h2>详情入口占位</h2>
+        </div>
+        <p data-field="detail-copy">详情页内容不在本规格范围内。</p>
+      </section>
+
+      <section class="classification-note" id="classification-note" aria-labelledby="tier-classification-title">
+        <div>
+          <h2 id="tier-classification-title">命名来源覆盖单卡、组合、类型</h2>
+        </div>
+        <p>榜单行只展示目标字段与静态排序理由，不定义详情页和真实接口。</p>
+      </section>
+    </main>
+
+    <script src="../app.js"></script>
+  </body>
+</html>

@@ -27,6 +27,7 @@ function cardCatalog() {
     "core-balance": { name: "Core Balance", cost: "2.0", unitType: "spear", card_code: "緋001" },
     "core-low-balance": { name: "Core Low Balance", cost: "1.0", unitType: "bow", card_code: "緋004" },
     "core-damage": { name: "Core Damage", cost: "2.5", unitType: "gun", card_code: "碧001" },
+    "core-base": { name: "Core Base", cost: "2.5", unitType: "bow", card_code: "碧002" },
     "core-formation": { name: "Core Formation", cost: "3.5", unitType: "spear", card_code: "玄001" },
     "tie-low": { name: "Tie Low", cost: "2.0", unitType: "bow", card_code: "紫001" },
     "tie-high": { name: "Tie High", cost: "3.5", unitType: "spear", card_code: "紫002" },
@@ -37,6 +38,7 @@ function cardCatalog() {
     "second-command": { name: "Second Command", cost: "2.5", unitType: "spear", card_code: "蒼013" },
     "support-all": { name: "Support All", cost: "2.0", unitType: "spear", card_code: "蒼014" },
     "big-balance": { name: "Big Balance", cost: "4.0", unitType: "spear", card_code: "蒼015" },
+    "red-command": { name: "Red Command", cost: "4.0", unitType: "spear", card_code: "緋010" },
     "low-common": { name: "Low Common", cost: "1.0", unitType: "spear", card_code: "蒼012" },
     "low-a": { name: "Low A", cost: "1.0", unitType: "spear", card_code: "蒼004" },
     "low-b": { name: "Low B", cost: "1.0", unitType: "spear", card_code: "蒼005" },
@@ -53,6 +55,7 @@ function strategyTypes() {
     { cardId: "core-balance", mainPlanType: "単体強化" },
     { cardId: "core-low-balance", mainPlanType: "単体強化" },
     { cardId: "core-damage", mainPlanType: "ダメージ" },
+    { cardId: "core-base", mainPlanType: "拠点" },
     { cardId: "core-formation", mainPlanType: "陣形" },
     { cardId: "tie-low", mainPlanType: "単体強化" },
     { cardId: "tie-high", mainPlanType: "号令" },
@@ -61,6 +64,7 @@ function strategyTypes() {
     { cardId: "second-freq", mainPlanType: "単体強化" },
     { cardId: "second-gray", mainPlanType: "特殊" },
     { cardId: "second-command", mainPlanType: "号令" },
+    { cardId: "red-command", mainPlanType: "号令" },
     {
       cardId: "support-all",
       categories: ["全体強化"],
@@ -130,16 +134,15 @@ function testSevenCardsAreManyCardDeck() {
   const output = classify(
     [
       deck("many-7", [
-        "core-command",
-        "second-command",
         "low-a",
         "low-b",
         "low-c",
+        "low-d",
         "flex-a",
         "flex-b",
+        "low-common",
       ]),
     ],
-    [usage("many-7", "core-command", 2.0)],
   );
 
   const result = output.results[0];
@@ -154,20 +157,55 @@ function testSixLowCostCardsAreManyCardDeck() {
   const output = classify(
     [
       deck("many-6", [
-        "core-command",
-        "second-command",
         "low-a",
         "low-b",
         "low-c",
         "low-d",
+        "flex-a",
+        "flex-b",
       ]),
     ],
-    [usage("many-6", "core-command", 2.0)],
   );
 
   const result = output.results[0];
   assert.strictEqual(result.deckType, "多枚数");
   assert.strictEqual(result.evidence.deckSizeReason, "cardCount=6 lowCostCount>=4");
+}
+
+function testKnownPlanTypeOverridesManyCardSize() {
+  const output = classify(
+    [
+      deck("many-command", ["core-command", "low-a", "low-b", "low-c", "low-d", "flex-b"]),
+      deck("many-balance", ["core-balance", "low-a", "low-b", "low-c", "low-d", "flex-b"]),
+      deck("many-base", ["core-base", "low-a", "low-b", "low-c", "low-d", "flex-b"]),
+    ],
+    [
+      usage("many-command", "core-command", 2.0),
+      usage("many-balance", "core-balance", 2.0),
+      usage("many-base", "core-base", 2.0),
+    ],
+  );
+
+  const byDeck = resultByDeck(output);
+  assert.strictEqual(byDeck["many-command"].deckType, "号令");
+  assert.strictEqual(byDeck["many-command"].categoryName.endsWith("号令デッキ"), true);
+  assert.strictEqual(byDeck["many-balance"].deckType, "バランス");
+  assert.strictEqual(byDeck["many-balance"].categoryName.endsWith("バランスデッキ"), true);
+  assert.strictEqual(byDeck["many-base"].deckType, "バランス");
+  assert.strictEqual(byDeck["many-base"].categoryName.endsWith("バランスデッキ"), true);
+}
+
+function testThreeCardsAreKenyaDeck() {
+  const output = classify(
+    [deck("kenya", ["core-command", "second-command", "low-a"])],
+    [usage("kenya", "core-command", 2.0)],
+  );
+
+  const result = output.results[0];
+  assert.strictEqual(result.deckType, "ケニア");
+  assert.strictEqual(result.categoryName.endsWith("ケニアデッキ"), true);
+  assert.strictEqual(result.secondaryAxisCardId, "");
+  assert.strictEqual(result.evidence.deckSizeReason, "cardCount=3");
 }
 
 function testCommandAndFormationBecomeCommandDecks() {
@@ -276,13 +314,16 @@ function testBalanceDeckPromotesHighFrequencyCommandToPrimaryAxis() {
 function testCompatibleHighCostPartnerBecomesSecondaryAxis() {
   const output = classify(
     [deck("secondary", ["core-balance", "second-balance", "low-a", "low-b"])],
-    [usage("secondary", "core-balance", 1.5)],
+    [
+      usage("secondary", "core-balance", 1.5),
+      usage("secondary", "second-balance", 0.6),
+    ],
   );
 
   const result = output.results[0];
   assert.strictEqual(result.secondaryAxisCardId, "second-balance");
   assert.strictEqual(result.secondaryAxisCardName, "Second Balance(2.5 gun)");
-  assert.strictEqual(result.secondaryAxisReason, "support>=0.35");
+  assert.strictEqual(result.secondaryAxisReason, "support>0.8&strategyFrequency>0.5");
   assert.strictEqual(result.categoryName, "Core BalanceやSecond Balanceバランスデッキ");
   assert.strictEqual(result.evidence.secondaryAxisSupport, 1);
 }
@@ -290,7 +331,10 @@ function testCompatibleHighCostPartnerBecomesSecondaryAxis() {
 function testCommandDeckRejectsBalanceSecondaryAxis() {
   const output = classify(
     [deck("reject-balance", ["core-command", "second-balance", "low-a", "low-b"])],
-    [usage("reject-balance", "core-command", 1.5)],
+    [
+      usage("reject-balance", "core-command", 1.5),
+      usage("reject-balance", "second-balance", 0.9),
+    ],
   );
 
   const result = output.results[0];
@@ -303,7 +347,10 @@ function testCommandDeckRejectsBalanceSecondaryAxis() {
 function testCommandDeckRejectsAllBuffSecondaryAxis() {
   const output = classify(
     [deck("reject-all-buff", ["core-command", "support-all", "low-a", "low-b"])],
-    [usage("reject-all-buff", "core-command", 1.5)],
+    [
+      usage("reject-all-buff", "core-command", 1.5),
+      usage("reject-all-buff", "support-all", 0.9),
+    ],
   );
 
   const result = output.results[0];
@@ -316,7 +363,10 @@ function testCommandDeckRejectsAllBuffSecondaryAxis() {
 function testBalanceNamePutsLargeSecondaryAxisFirst() {
   const output = classify(
     [deck("large-second", ["core-low-balance", "big-balance", "low-a", "low-b"])],
-    [usage("large-second", "core-low-balance", 1.5)],
+    [
+      usage("large-second", "core-low-balance", 1.5),
+      usage("large-second", "big-balance", 0.9),
+    ],
   );
 
   const result = output.results[0];
@@ -325,7 +375,7 @@ function testBalanceNamePutsLargeSecondaryAxisFirst() {
   assert.strictEqual(result.categoryName, "Big BalanceやCore Low Balanceバランスデッキ");
 }
 
-function testSamePrimaryDifferentSecondAxesSplitCategories() {
+function testSamePrimaryDifferentSecondAxesDoNotSplitAtHalfSupport() {
   const output = classify(
     [
       deck("split-a", ["core-balance", "second-balance", "low-common", "low-a"], 10, 7),
@@ -333,15 +383,17 @@ function testSamePrimaryDifferentSecondAxesSplitCategories() {
     ],
     [
       usage("split-a", "core-balance", 1.5),
+      usage("split-a", "second-balance", 0.9),
       usage("split-b", "core-balance", 1.5),
+      usage("split-b", "second-alt", 0.9),
     ],
   );
 
   const byDeck = resultByDeck(output);
-  assert.strictEqual(output.stats.categoryCount, 2);
-  assert.notStrictEqual(byDeck["split-a"].categoryId, byDeck["split-b"].categoryId);
-  assert.strictEqual(byDeck["split-a"].secondaryAxisCardId, "second-balance");
-  assert.strictEqual(byDeck["split-b"].secondaryAxisCardId, "second-alt");
+  assert.strictEqual(output.stats.categoryCount, 1);
+  assert.strictEqual(byDeck["split-a"].categoryId, byDeck["split-b"].categoryId);
+  assert.strictEqual(byDeck["split-a"].secondaryAxisCardId, "");
+  assert.strictEqual(byDeck["split-b"].secondaryAxisCardId, "");
 }
 
 function testLowCostCommonCardCannotBecomeSecondaryAxis() {
@@ -362,7 +414,26 @@ function testLowCostCommonCardCannotBecomeSecondaryAxis() {
   assert.strictEqual(byDeck["common-a"].categoryName, "Core Command号令デッキ");
 }
 
-function testSecondCardStrategyFrequencyCanBecomeSecondaryAxis() {
+function testModerateSupportHighFrequencyBecomesSecondaryAxis() {
+  const output = classify(
+    [
+      deck("moderate-small", ["core-balance", "second-freq", "low-a", "low-b"], 6, 4),
+      deck("moderate-large", ["core-balance", "low-common", "low-c", "low-d"], 4, 2),
+    ],
+    [
+      usage("moderate-small", "core-balance", 1.5, 6),
+      usage("moderate-small", "second-freq", 0.9, 6),
+      usage("moderate-large", "core-balance", 1.5, 4),
+    ],
+  );
+
+  const byDeck = resultByDeck(output);
+  assert.strictEqual(byDeck["moderate-small"].secondaryAxisCardId, "second-freq");
+  assert.strictEqual(byDeck["moderate-small"].secondaryAxisReason, "support>0.5&strategyFrequency>0.8");
+  assert.strictEqual(byDeck["moderate-large"].secondaryAxisCardId, "");
+}
+
+function testLowSupportHighFrequencyCannotBecomeSecondaryAxis() {
   const output = classify(
     [
       deck("freq-small", ["core-balance", "second-freq", "low-a", "low-b"], 3, 2),
@@ -376,12 +447,11 @@ function testSecondCardStrategyFrequencyCanBecomeSecondaryAxis() {
   );
 
   const byDeck = resultByDeck(output);
-  assert.strictEqual(byDeck["freq-small"].secondaryAxisCardId, "second-freq");
-  assert.strictEqual(byDeck["freq-small"].secondaryAxisReason, "strategyFrequency>=55%primary");
+  assert.strictEqual(byDeck["freq-small"].secondaryAxisCardId, "");
   assert.strictEqual(byDeck["freq-large"].secondaryAxisCardId, "");
 }
 
-function testSecondaryAxisSupportGrayZoneNeedsReview() {
+function testSecondaryAxisBelowThresholdDoesNotNeedReview() {
   const output = classify(
     [
       deck("gray-small", ["core-balance", "second-gray", "low-a", "low-b"], 32, 20),
@@ -389,21 +459,24 @@ function testSecondaryAxisSupportGrayZoneNeedsReview() {
     ],
     [
       usage("gray-small", "core-balance", 1.5, 32),
-      usage("gray-small", "second-gray", 0.9, 32),
+      usage("gray-small", "second-gray", 0.7, 32),
       usage("gray-large", "core-balance", 1.5, 68),
     ],
   );
 
   const result = resultByDeck(output)["gray-small"];
-  assert.strictEqual(result.secondaryAxisCardId, "second-gray");
-  assert.strictEqual(result.evidence.secondaryAxisSupport, 0.32);
-  assert.strictEqual(result.needsReview, true);
+  assert.strictEqual(result.secondaryAxisCardId, "");
+  assert.strictEqual(result.evidence.secondaryAxisCandidates[0].support, 0.32);
+  assert.strictEqual(result.needsReview, false);
 }
 
 function testUnknownPlanTypeCannotBecomeSecondaryAxis() {
   const output = classify(
     [deck("unknown-second", ["core-balance", "flex-a", "low-a", "low-b"])],
-    [usage("unknown-second", "core-balance", 1.5)],
+    [
+      usage("unknown-second", "core-balance", 1.5),
+      usage("unknown-second", "flex-a", 0.9),
+    ],
   );
 
   const result = output.results[0];
@@ -428,6 +501,76 @@ function testLowCostCommonCardDoesNotMergeDifferentAxes() {
   assert.notStrictEqual(byDeck["axis-a"].categoryId, byDeck["axis-b"].categoryId);
   assert.notStrictEqual(byDeck["axis-a"].primaryCoreCardId, "low-a");
   assert.notStrictEqual(byDeck["axis-b"].primaryCoreCardId, "low-a");
+}
+
+function testCoexistingCommandPrimaryAxisUsesLargerPrimaryGroup() {
+  const output = classify(
+    [
+      deck("coexist-major", ["core-command", "low-a", "low-b", "low-c"], 40, 24),
+      deck("coexist-minor", ["second-command", "low-a", "low-b", "low-d"], 10, 6),
+      deck("coexist-bridge", ["core-command", "second-command", "low-a", "low-b"], 20, 12),
+    ],
+    [
+      usage("coexist-major", "core-command", 1.4, 40),
+      usage("coexist-minor", "second-command", 1.4, 10),
+      usage("coexist-bridge", "core-command", 0.6, 20),
+      usage("coexist-bridge", "second-command", 1.3, 20),
+    ],
+  );
+
+  const byDeck = resultByDeck(output);
+  assert.strictEqual(byDeck["coexist-bridge"].primaryCoreCardId, "core-command");
+  assert.strictEqual(byDeck["coexist-bridge"].categoryId, byDeck["coexist-major"].categoryId);
+  assert.notStrictEqual(byDeck["coexist-minor"].categoryId, byDeck["coexist-major"].categoryId);
+  assert.strictEqual(byDeck["coexist-minor"].primaryCoreCardId, "second-command");
+  assert.ok(byDeck["coexist-bridge"].evidence.primaryAxisOverrideReason.includes("coexistingCommandPrimaryAxis"));
+}
+
+function testCoexistingCommandPrimaryAxisRequiresSampleThreshold() {
+  const output = classify(
+    [
+      deck("coexist-low-major", ["core-command", "low-a", "low-b", "low-c"], 40, 24),
+      deck("coexist-low-minor", ["second-command", "low-a", "low-b", "low-d"], 30, 18),
+      deck("coexist-low-bridge", ["core-command", "second-command", "low-a", "low-b"], 10, 6),
+    ],
+    [
+      usage("coexist-low-major", "core-command", 1.4, 40),
+      usage("coexist-low-minor", "second-command", 1.4, 30),
+      usage("coexist-low-bridge", "core-command", 0.6, 10),
+      usage("coexist-low-bridge", "second-command", 1.3, 10),
+    ],
+  );
+
+  const byDeck = resultByDeck(output);
+  assert.strictEqual(byDeck["coexist-low-bridge"].primaryCoreCardId, "second-command");
+  assert.strictEqual(byDeck["coexist-low-bridge"].categoryId, byDeck["coexist-low-minor"].categoryId);
+}
+
+function testCoexistingCommandPrimaryAxisDoesNotCrossFactionOrDeckType() {
+  const output = classify(
+    [
+      deck("type-command", ["core-command", "low-a", "low-b", "low-c"], 40, 24),
+      deck("type-balance", ["core-balance", "core-command", "flex-a", "flex-b"], 20, 12),
+      deck("faction-blue", ["core-command", "low-a", "low-b", "low-c"], 40, 24),
+      deck("faction-red", ["red-command", "flex-a", "flex-b", "low-a"], 30, 18),
+      deck("faction-mixed", ["core-command", "red-command", "flex-a", "flex-b"], 20, 12),
+    ],
+    [
+      usage("type-command", "core-command", 1.4, 40),
+      usage("type-balance", "core-balance", 1.5, 20),
+      usage("type-balance", "core-command", 1.0, 20),
+      usage("faction-blue", "core-command", 1.4, 40),
+      usage("faction-red", "red-command", 1.4, 30),
+      usage("faction-mixed", "core-command", 0.6, 20),
+      usage("faction-mixed", "red-command", 1.3, 20),
+    ],
+  );
+
+  const byDeck = resultByDeck(output);
+  assert.strictEqual(byDeck["type-balance"].deckType, "バランス");
+  assert.strictEqual(byDeck["type-balance"].primaryCoreCardId, "core-balance");
+  assert.strictEqual(byDeck["faction-mixed"].primaryCoreCardId, "red-command");
+  assert.strictEqual(byDeck["faction-mixed"].primaryFaction, "緋");
 }
 
 function testMissingStrategyDataFallsBackAndNeedsReview() {
@@ -538,6 +681,8 @@ testParseCsvObjects();
 testDuplicateFingerprintDoesNotDuplicateResults();
 testSevenCardsAreManyCardDeck();
 testSixLowCostCardsAreManyCardDeck();
+testKnownPlanTypeOverridesManyCardSize();
+testThreeCardsAreKenyaDeck();
 testCommandAndFormationBecomeCommandDecks();
 testSingleBuffAndDamageBecomeBalanceDecks();
 testHigherStrategyFrequencyBeatsCost();
@@ -548,12 +693,16 @@ testCompatibleHighCostPartnerBecomesSecondaryAxis();
 testCommandDeckRejectsBalanceSecondaryAxis();
 testCommandDeckRejectsAllBuffSecondaryAxis();
 testBalanceNamePutsLargeSecondaryAxisFirst();
-testSamePrimaryDifferentSecondAxesSplitCategories();
+testSamePrimaryDifferentSecondAxesDoNotSplitAtHalfSupport();
 testLowCostCommonCardCannotBecomeSecondaryAxis();
-testSecondCardStrategyFrequencyCanBecomeSecondaryAxis();
-testSecondaryAxisSupportGrayZoneNeedsReview();
+testModerateSupportHighFrequencyBecomesSecondaryAxis();
+testLowSupportHighFrequencyCannotBecomeSecondaryAxis();
+testSecondaryAxisBelowThresholdDoesNotNeedReview();
 testUnknownPlanTypeCannotBecomeSecondaryAxis();
 testLowCostCommonCardDoesNotMergeDifferentAxes();
+testCoexistingCommandPrimaryAxisUsesLargerPrimaryGroup();
+testCoexistingCommandPrimaryAxisRequiresSampleThreshold();
+testCoexistingCommandPrimaryAxisDoesNotCrossFactionOrDeckType();
 testMissingStrategyDataFallsBackAndNeedsReview();
 testRegistryIsNotIncludedByDefault();
 testRegistryKeepsInactiveAndReactivatesCategories();

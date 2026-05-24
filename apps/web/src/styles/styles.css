@@ -1,0 +1,5 @@
+/* 全局样式入口：只负责按顺序加载样式层。 */
+@import "./tokens.css";
+@import "./base.css";
+@import "./layout.css";
+@import "./utilities.css";

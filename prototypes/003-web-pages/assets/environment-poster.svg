@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" role="img" aria-label="战场环境主视觉">
+  <defs>
+    <linearGradient id="sky" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#22120e"/>
+      <stop offset="0.34" stop-color="#7b2e24"/>
+      <stop offset="0.66" stop-color="#2f615d"/>
+      <stop offset="1" stop-color="#0f1010"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="58%" cy="30%" r="36%">
+      <stop offset="0" stop-color="#f0be62" stop-opacity="0.92"/>
+      <stop offset="0.38" stop-color="#c94b35" stop-opacity="0.52"/>
+      <stop offset="1" stop-color="#c94b35" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="field" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0" stop-color="#18130f"/>
+      <stop offset="0.48" stop-color="#2f2a1e"/>
+      <stop offset="1" stop-color="#141614"/>
+    </linearGradient>
+    <filter id="grain">
+      <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="3" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer>
+        <feFuncA type="table" tableValues="0 0.12"/>
+      </feComponentTransfer>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="900" fill="url(#sky)"/>
+  <rect width="1200" height="900" fill="url(#sun)"/>
+
+  <path d="M0 508 C160 430 260 476 370 414 C515 332 672 407 804 337 C966 252 1067 333 1200 270 L1200 900 L0 900 Z" fill="#141313" opacity="0.82"/>
+  <path d="M0 576 C170 514 318 562 462 506 C622 444 744 501 900 438 C1046 380 1124 434 1200 393 L1200 900 L0 900 Z" fill="#201814" opacity="0.92"/>
+  <path d="M0 640 C146 612 278 618 432 592 C644 557 758 606 956 562 C1056 540 1138 548 1200 530 L1200 900 L0 900 Z" fill="url(#field)"/>
+
+  <g opacity="0.85">
+    <path d="M168 300 L195 640 L141 640 Z" fill="#0f0e0d"/>
+    <path d="M106 350 L242 350 L226 382 L120 382 Z" fill="#231812"/>
+    <path d="M133 410 L229 410 L216 438 L141 438 Z" fill="#291b13"/>
+    <path d="M1006 280 L1044 652 L968 652 Z" fill="#0f0e0d"/>
+    <path d="M936 334 L1108 334 L1086 370 L954 370 Z" fill="#201611"/>
+  </g>
+
+  <g opacity="0.92">
+    <path d="M460 260 L475 660 L444 660 Z" fill="#11100f"/>
+    <path d="M702 246 L717 670 L686 670 Z" fill="#11100f"/>
+    <path d="M426 298 L744 298 L724 330 L447 330 Z" fill="#2a1711"/>
+    <path d="M454 360 L720 360 L704 386 L466 386 Z" fill="#3b2016"/>
+    <path d="M486 420 L686 420 L672 444 L500 444 Z" fill="#4a2a1b"/>
+  </g>
+
+  <g opacity="0.55">
+    <path d="M132 714 C265 650 392 680 520 623 C670 556 829 590 1010 522" fill="none" stroke="#c79b2d" stroke-width="4"/>
+    <path d="M64 758 C206 720 338 724 478 690 C657 647 794 663 1120 602" fill="none" stroke="#2f8f83" stroke-width="3"/>
+    <path d="M210 802 C382 746 562 774 704 720 C816 678 960 700 1136 662" fill="none" stroke="#c94b35" stroke-width="5"/>
+  </g>
+
+  <g opacity="0.38">
+    <circle cx="210" cy="192" r="8" fill="#f4ead6"/>
+    <circle cx="270" cy="236" r="4" fill="#f4ead6"/>
+    <circle cx="826" cy="178" r="7" fill="#f4ead6"/>
+    <circle cx="912" cy="226" r="4" fill="#f4ead6"/>
+    <circle cx="1024" cy="188" r="5" fill="#f4ead6"/>
+  </g>
+
+  <rect width="1200" height="900" filter="url(#grain)"/>
+  <rect width="1200" height="900" fill="none" stroke="rgba(244,234,214,0.18)" stroke-width="2"/>
+</svg>
