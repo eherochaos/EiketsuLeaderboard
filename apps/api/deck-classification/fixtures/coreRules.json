@@ -1,0 +1,16 @@
+{
+  "rules": [
+    {
+      "cardId": "volcanic-spear",
+      "deckType": "号令",
+      "priority": 100,
+      "displayName": "Volcanic Spear"
+    },
+    {
+      "cardId": "tide-oracle",
+      "deckType": "バランス",
+      "priority": 80,
+      "displayName": "Tide Oracle"
+    }
+  ]
+}
