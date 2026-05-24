@@ -26,12 +26,25 @@ function publicError(error) {
 }
 
 export function createLeaderboardSnapshotServer(options = {}) {
+  const buildSnapshot = options.buildLeaderboardSnapshot || buildLeaderboardSnapshot;
+  let snapshotCachePromise = null;
+
+  function loadSnapshot() {
+    if (!snapshotCachePromise) {
+      snapshotCachePromise = buildSnapshot({ legacyRoot: options.legacyRoot }).catch((error) => {
+        snapshotCachePromise = null;
+        throw error;
+      });
+    }
+    return snapshotCachePromise;
+  }
+
   return createServer(async (request, response) => {
     const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
     if (request.method === "GET" && url.pathname === "/api/leaderboard-snapshot") {
       try {
-        const snapshot = await buildLeaderboardSnapshot({ legacyRoot: options.legacyRoot });
+        const snapshot = await loadSnapshot();
         writeJson(response, 200, snapshot);
       } catch (error) {
         console.error(publicError(error));

@@ -35,6 +35,44 @@ async function testMissingDataDoesNotExposePath() {
   }
 }
 
+async function testSnapshotIsCachedAfterFirstBuild() {
+  let buildCount = 0;
+  const server = createLeaderboardSnapshotServer({
+    async buildLeaderboardSnapshot() {
+      buildCount += 1;
+      return {
+        metadata: {
+          sourceRunId: 1,
+          dateFrom: "2026-05-20",
+          dateTo: "2026-05-25",
+          updatedAt: "2026-05-25T00:00:00",
+          sampleSize: 1
+        },
+        home: {
+          factionShare: [],
+          representativeDecks: [],
+          featuredCards: [],
+          summary: "ok"
+        },
+        tierRows: []
+      };
+    }
+  });
+  const address = await listen(server);
+
+  try {
+    const first = await fetch(`http://127.0.0.1:${address.port}/api/leaderboard-snapshot`);
+    const second = await fetch(`http://127.0.0.1:${address.port}/api/leaderboard-snapshot`);
+
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(buildCount, 1);
+  } finally {
+    await close(server);
+  }
+}
+
 await testMissingDataDoesNotExposePath();
+await testSnapshotIsCachedAfterFirstBuild();
 
 console.log("leaderboard snapshot api tests passed");
