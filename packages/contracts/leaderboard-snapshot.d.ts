@@ -45,6 +45,25 @@ export interface DeckConfigStats {
   unfavorableMatchups: DeckUnfavorableMatchupItem[];
 }
 
+export interface DeckClusterVariant {
+  deckId: string;
+  deckName: string;
+  categoryId: string;
+  categoryName: string;
+  faction: string;
+  namingSource: NamingSource;
+  rankScore: number;
+  sourceRank?: number;
+  winRate: number;
+  playerAverageWinRate: number;
+  usageRate: number;
+  kabukiPoints: number;
+  sampleSize: number;
+  imageUrl: string;
+  imageAlt: string;
+  deckCards: CardView[];
+}
+
 export interface DeckRow {
   deckId: string;
   deckName: string;
@@ -64,6 +83,7 @@ export interface DeckRow {
   deckCards: CardView[];
   deckConfig: DeckConfigStats;
   evidenceTags: string[];
+  clusterVariants?: DeckClusterVariant[];
 }
 
 export interface FeaturedCard {

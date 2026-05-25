@@ -7,7 +7,7 @@ import CommonMetricTags from "./components/Common_MetricTags.vue";
 import TierPageDeckConfigPanel from "./components/TierPage_DeckConfigPanel.vue";
 import { dateOnly, integer, percent, sourceLabels } from "./lib/format";
 import { loadSnapshot } from "./lib/snapshot";
-import type { CardView, DeckRow, LeaderboardSnapshot } from "./types";
+import type { CardView, DeckClusterVariant, DeckRow, LeaderboardSnapshot } from "./types";
 
 type SortKey = "rankScore" | "winRate" | "playerAverageWinRate" | "usageRate" | "kabukiPoints" | "sampleSize";
 
@@ -18,6 +18,7 @@ const factionFilter = ref("all");
 const sourceFilter = ref("all");
 const sortKey = ref<SortKey>("rankScore");
 const clusterSameName = ref(false);
+const clusterVariantIndexes = ref<Record<string, number>>({});
 const expandedDeckIds = ref(new Set<string>());
 
 const sortOptions: { value: SortKey; label: string }[] = [
@@ -107,7 +108,8 @@ function toggleDeckConfig(deck: DeckRow): void {
 }
 
 function deckSlots(deck: DeckRow): (CardView | null)[] {
-  return Array.from({ length: 8 }, (_, index) => deck.deckCards[index] ?? null);
+  const cards = activeClusterVariant(deck)?.deckCards ?? deck.deckCards;
+  return Array.from({ length: 8 }, (_, index) => cards[index] ?? null);
 }
 
 function factionLabel(value: string): string {
@@ -124,24 +126,59 @@ function displayRowKey(deck: DeckRow): string {
   return deckStateKey(deck);
 }
 
+function clusterVariantKey(deck: DeckRow): string {
+  return deck.deckId || deck.deckName;
+}
+
+function clusterVariants(deck: DeckRow): DeckClusterVariant[] {
+  return usePublishedClusters.value ? deck.clusterVariants ?? [] : [];
+}
+
+function activeClusterVariant(deck: DeckRow): DeckClusterVariant | null {
+  const variants = clusterVariants(deck);
+  if (!variants.length) return null;
+  const savedIndex = clusterVariantIndexes.value[clusterVariantKey(deck)] ?? 0;
+  const activeIndex = Math.min(Math.max(savedIndex, 0), variants.length - 1);
+  return variants[activeIndex] ?? variants[0] ?? null;
+}
+
+function deckImageUrl(deck: DeckRow): string {
+  return activeClusterVariant(deck)?.imageUrl || deck.imageUrl;
+}
+
+function deckImageAlt(deck: DeckRow): string {
+  return activeClusterVariant(deck)?.imageAlt || deck.imageAlt;
+}
+
 function hasClusterVariants(deck: DeckRow): boolean {
-  void deck;
-  return false;
+  return clusterVariants(deck).length > 1;
 }
 
 function clusterVariantLabel(deck: DeckRow): string {
-  void deck;
-  return "";
+  const variants = clusterVariants(deck);
+  if (!variants.length) return "";
+  const savedIndex = clusterVariantIndexes.value[clusterVariantKey(deck)] ?? 0;
+  const activeIndex = Math.min(Math.max(savedIndex, 0), variants.length - 1);
+  return `${activeIndex + 1}/${variants.length}`;
 }
 
 function clusterVariantTitle(deck: DeckRow): string {
-  void deck;
-  return "";
+  const variants = clusterVariants(deck);
+  if (!variants.length) return "";
+  const savedIndex = clusterVariantIndexes.value[clusterVariantKey(deck)] ?? 0;
+  const activeIndex = Math.min(Math.max(savedIndex, 0), variants.length - 1);
+  return `式样 ${activeIndex + 1}/${variants.length}，按样本数排序，点击切换`;
 }
 
 function switchClusterVariant(deck: DeckRow): void {
-  void deck;
-  return;
+  const variants = clusterVariants(deck);
+  if (variants.length <= 1) return;
+  const key = clusterVariantKey(deck);
+  const savedIndex = clusterVariantIndexes.value[key] ?? 0;
+  clusterVariantIndexes.value = {
+    ...clusterVariantIndexes.value,
+    [key]: (savedIndex + 1) % variants.length
+  };
 }
 </script>
 
@@ -287,7 +324,7 @@ function switchClusterVariant(deck: DeckRow): void {
           <article v-for="(deck, index) in visibleRows" :key="`${displayRowKey(deck)}-mobile`" class="TierPage_MobileRow">
             <div class="TierPage_MobileHead">
               <span class="Common_RankCell">#{{ index + 1 }}</span>
-              <CommonImageFrame :src="deck.imageUrl" :alt="deck.imageAlt" ratio="portrait" />
+              <CommonImageFrame :src="deckImageUrl(deck)" :alt="deckImageAlt(deck)" ratio="portrait" />
               <div>
                 <div class="TierPage_MobileTitleLine">
                   <h3>{{ deck.deckName }}</h3>

@@ -1,5 +1,6 @@
 export type {
   CardView,
+  DeckClusterVariant,
   DeckConfigItem,
   DeckConfigStats,
   DeckRow,

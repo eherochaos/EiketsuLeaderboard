@@ -997,6 +997,27 @@ function clusterDeckConfigSourceRows(sourceRowsByKey, row, fallbackRows) {
     || fallbackRows;
 }
 
+function clusterVariantRow(row) {
+  return {
+    deckId: row.deckId,
+    deckName: row.deckName,
+    categoryId: row.categoryId,
+    categoryName: row.categoryName,
+    faction: row.faction,
+    namingSource: row.namingSource,
+    rankScore: row.rankScore,
+    sourceRank: row.sourceRank,
+    winRate: row.winRate,
+    playerAverageWinRate: row.playerAverageWinRate,
+    usageRate: row.usageRate,
+    kabukiPoints: row.kabukiPoints,
+    sampleSize: row.sampleSize,
+    imageUrl: row.imageUrl,
+    imageAlt: row.imageAlt,
+    deckCards: row.deckCards
+  };
+}
+
 function mergeSameNameClusterRows(rows, configSourceRowsByKey = new Map()) {
   const byName = new Map();
   for (const row of rows) {
@@ -1023,6 +1044,7 @@ function mergeSameNameClusterRows(rows, configSourceRowsByKey = new Map()) {
         playerAverageWinRate: weightedRowPercent(ordered, "playerAverageWinRate", sampleSize),
         usageRate: Number(ordered.reduce((sum, row) => sum + toNumber(row.usageRate), 0).toFixed(1)),
         sampleSize,
+        clusterVariants: ordered.map(clusterVariantRow),
         deckConfig: {
           ...base.deckConfig,
           weapons: mergeFormalDeckConfigItems(ordered, "weapons", sampleSize),

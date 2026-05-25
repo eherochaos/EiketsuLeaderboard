@@ -187,6 +187,10 @@ async function testRefreshWritesAtomicSnapshot() {
     assert.equal(output.home.tierRows[1].sampleSize, 6);
     assert.equal(output.home.tierRows[1].rankScore, 2);
     assert.ok(output.home.tierRows[0].sourceRank > output.home.tierRows[1].sourceRank);
+    const multiVariantCluster = output.clusterRows.find((row) => row.sampleSize === 6);
+    assert.ok(multiVariantCluster);
+    assert.equal(multiVariantCluster.clusterVariants.length, 2);
+    assert.equal(multiVariantCluster.clusterVariants.reduce((sum, row) => sum + row.sampleSize, 0), 6);
     assert.ok(output.tierRows.some((row) => row.deckConfig.strategies.length > 0));
     assert.ok(output.tierRows.some((row) => row.deckConfig.schoolStages.length > 0));
     assert.ok(output.tierRows.some((row) => row.deckConfig.unfavorableMatchups.length > 0));
