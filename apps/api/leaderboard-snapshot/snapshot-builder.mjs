@@ -888,12 +888,12 @@ function mergeSameNameClusterRows(rows) {
       const base = ordered[0];
       const sampleSize = ordered.reduce((sum, row) => sum + toNumber(row.sampleSize), 0);
       const sourceRank = Math.min(...ordered.map((row) => sourceRankTie(row)));
-      const mergedRank = sourceRank < Number.MAX_SAFE_INTEGER ? sourceRank : base.rankScore;
+      const mergedSourceRank = sourceRank < Number.MAX_SAFE_INTEGER ? sourceRank : base.sourceRank;
       const merged = {
         ...base,
         deckId: base.categoryId || base.deckId,
-        rankScore: mergedRank,
-        sourceRank: mergedRank,
+        rankScore: 0,
+        sourceRank: mergedSourceRank,
         winRate: weightedRowPercent(ordered, "winRate", sampleSize),
         playerAverageWinRate: weightedRowPercent(ordered, "playerAverageWinRate", sampleSize),
         usageRate: Number(ordered.reduce((sum, row) => sum + toNumber(row.usageRate), 0).toFixed(1)),
@@ -905,7 +905,7 @@ function mergeSameNameClusterRows(rows) {
           souls: mergeFormalDeckConfigItems(ordered, "souls", sampleSize)
         }
       };
-      return { ...merged, evidenceTags: formalDeckEvidenceTags(merged) };
+      return merged;
     })
     .sort((left, right) => sourceRankTie(left) - sourceRankTie(right) || right.sampleSize - left.sampleSize || right.winRate - left.winRate);
 }
@@ -934,7 +934,7 @@ function buildFormalClusterRows(archetypeRows, classification, totalSamples) {
         categoryName,
         faction: deckFaction(cards, classificationResult?.primaryFaction || primaryCard?.faction),
         namingSource: namingSource(classificationResult),
-        rankScore: sourceRank || 0,
+        rankScore: 0,
         sourceRank,
         winRate: winRateValue,
         playerAverageWinRate: winRateValue,
@@ -955,10 +955,8 @@ function buildFormalClusterRows(archetypeRows, classification, totalSamples) {
       return { ...rankedRow, evidenceTags: formalDeckEvidenceTags(rankedRow) };
     });
 
-  return mergeSameNameClusterRows(rows).map((row, index) => {
-    const rankedRow = { ...row, rankScore: row.rankScore || index + 1 };
-    return { ...rankedRow, evidenceTags: formalDeckEvidenceTags(rankedRow) };
-  });
+  return applyDeckCompositeRanks(mergeSameNameClusterRows(rows))
+    .map((row) => ({ ...row, evidenceTags: formalDeckEvidenceTags(row) }));
 }
 
 function buildFormalFeaturedCards(cardRows, totalSamples) {
