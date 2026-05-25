@@ -6,9 +6,10 @@ import MainSnapshotStripSection from "./components/Main_SnapshotStrip_Section.vu
 import MainFactionShareSection from "./components/Main_FactionShare_Section.vue";
 import MainRepresentativeDecksSection from "./components/Main_RepresentativeDecks_Section.vue";
 import MainFeaturedCardsSection from "./components/Main_FeaturedCards_Section.vue";
+import { compareDeckRowsByRank, createSameNameDeckClusters } from "./lib/deck-clusters";
 import { dateOnly, integer } from "./lib/format";
 import { loadSnapshot } from "./lib/snapshot";
-import type { LeaderboardSnapshot } from "./types";
+import type { DeckRow, LeaderboardSnapshot } from "./types";
 
 const snapshot = ref<LeaderboardSnapshot | null>(null);
 const loading = ref(true);
@@ -26,9 +27,37 @@ onMounted(async () => {
 
 const home = computed(() => snapshot.value?.home ?? null);
 const metadata = computed(() => snapshot.value?.metadata ?? null);
-const topDeck = computed(() => snapshot.value?.tierRows[0] ?? null);
-const top4Decks = computed(() => snapshot.value?.tierRows.slice(0, 4) ?? []);
-const representativeDecks = computed(() => home.value?.representativeDecks ?? []);
+const clusteredRows = computed(() => createSameNameDeckClusters(snapshot.value?.tierRows ?? [], {
+  compareRows: compareDeckRowsByRank
+}).map((cluster) => cluster.displayRow));
+const topDeck = computed(() => clusteredRows.value[0] ?? null);
+const top4Decks = computed(() => clusteredRows.value.slice(0, 4));
+const representativeDecks = computed(() => {
+  const rowsByName = new Map(clusteredRows.value.map((row) => [row.deckName || row.deckId, row]));
+  const selected: DeckRow[] = [];
+  const seen = new Set<string>();
+
+  for (const deck of home.value?.representativeDecks ?? []) {
+    const key = deck.deckName || deck.deckId;
+    const row = rowsByName.get(key);
+    const selectedKey = row?.deckName || row?.deckId || "";
+    if (row && !seen.has(selectedKey)) {
+      selected.push(row);
+      seen.add(selectedKey);
+    }
+  }
+
+  for (const row of clusteredRows.value) {
+    const key = row.deckName || row.deckId;
+    if (selected.length >= 4) break;
+    if (!seen.has(key)) {
+      selected.push(row);
+      seen.add(key);
+    }
+  }
+
+  return selected.slice(0, 4);
+});
 const featuredCards = computed(() => home.value?.featuredCards ?? []);
 const factionShare = computed(() => home.value?.factionShare ?? []);
 const topShareTotal = computed(() => factionShare.value.slice(0, 3).reduce((sum, item) => sum + item.share, 0));

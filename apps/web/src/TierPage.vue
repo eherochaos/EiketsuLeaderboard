@@ -5,18 +5,12 @@ import CommonDeckRail from "./components/Common_DeckRail.vue";
 import CommonImageFrame from "./components/Common_ImageFrame.vue";
 import CommonMetricTags from "./components/Common_MetricTags.vue";
 import TierPageDeckConfigPanel from "./components/TierPage_DeckConfigPanel.vue";
+import { createSameNameDeckClusters, type DeckCluster } from "./lib/deck-clusters";
 import { dateOnly, integer, percent, sourceLabels } from "./lib/format";
 import { loadSnapshot } from "./lib/snapshot";
 import type { CardView, DeckRow, LeaderboardSnapshot } from "./types";
 
 type SortKey = "rankScore" | "winRate" | "playerAverageWinRate" | "usageRate" | "kabukiPoints" | "sampleSize";
-type DeckCluster = {
-  key: string;
-  rows: DeckRow[];
-  activeIndex: number;
-  activeRow: DeckRow;
-  displayRow: DeckRow;
-};
 
 const snapshot = ref<LeaderboardSnapshot | null>(null);
 const loading = ref(true);
@@ -215,30 +209,10 @@ const filteredRows = computed(() => {
 });
 
 const deckClusters = computed(() => {
-  const grouped = new Map<string, { order: number; rows: DeckRow[] }>();
-  filteredRows.value.forEach((row, index) => {
-    const key = row.deckName || row.deckId;
-    if (!grouped.has(key)) grouped.set(key, { order: index, rows: [] });
-    grouped.get(key)?.rows.push(row);
+  return createSameNameDeckClusters(filteredRows.value, {
+    variantIndexes: clusterVariantIndexes.value,
+    compareRows
   });
-
-  return Array.from(grouped.entries())
-    .map(([key, group]) => {
-      const groupRows = group.rows;
-      const variants = groupRows.slice().sort(compareClusterVariants);
-      const savedIndex = clusterVariantIndexes.value[key] ?? 0;
-      const activeIndex = Math.min(Math.max(savedIndex, 0), Math.max(variants.length - 1, 0));
-      const activeRow = variants[activeIndex] ?? variants[0];
-      return {
-        key,
-        rows: variants,
-        activeIndex,
-        activeRow,
-        displayRow: aggregateClusterRow(key, variants, activeRow)
-      };
-    })
-    .filter((group) => Boolean(group.activeRow))
-    .sort((left, right) => compareRows(left.displayRow, right.displayRow));
 });
 
 const activeClusterByDeckId = computed(() => {
