@@ -41,7 +41,13 @@ def export_table(session, table_name: str, output_path: Path) -> int:
     return count
 
 
-def copy_card_file(source_root: Path, output_root: Path, file_name: str, fallback: Any | None = None) -> bool:
+def copy_card_file(
+    source_root: Path,
+    output_root: Path,
+    file_name: str,
+    fallback: Any | None = None,
+    required: bool = False,
+) -> bool:
     output_path = output_root / "cards" / file_name
     output_path.parent.mkdir(parents=True, exist_ok=True)
     source_path = source_root / file_name
@@ -50,6 +56,9 @@ def copy_card_file(source_root: Path, output_root: Path, file_name: str, fallbac
         return True
     if fallback is not None:
         output_path.write_text(json.dumps(fallback, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return False
+    if required:
+        raise FileNotFoundError(f"required card asset missing: {file_name}")
     return False
 
 
@@ -68,7 +77,7 @@ def export_legacy_service_from_postgres(output_dir: Path) -> dict[str, Any]:
     card_outputs = {
         "card_catalog": copy_card_file(asset_root, output_dir, "card_catalog.json"),
         "card_catalog_overlay": copy_card_file(asset_root, output_dir, "card_catalog_overlay.json", {"cards": []}),
-        "card_strategy_types": copy_card_file(asset_root, output_dir, "card_strategy_types.json", []),
+        "card_strategy_types": copy_card_file(asset_root, output_dir, "card_strategy_types.json", required=True),
     }
     manifest = {
         "tables": exported_tables,
