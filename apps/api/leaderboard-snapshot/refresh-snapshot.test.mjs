@@ -53,6 +53,39 @@ function deckRow(id, deckId, cards, rank, winCount, lossCount) {
   };
 }
 
+function archetypeRow(id, title, cards, rank, winCount, lossCount) {
+  const sampleCount = winCount + lossCount;
+  return {
+    id,
+    run_id: 1,
+    row_type: "archetype",
+    rank_scope: "all",
+    cluster_enabled: 1,
+    rank,
+    sample_count: sampleCount,
+    row_json: {
+      archetype_id: `cluster-${id}`,
+      title,
+      sample_count: sampleCount,
+      win_count: winCount,
+      loss_count: lossCount,
+      draw_count: 0,
+      win_rate: sampleCount ? winCount / sampleCount : null,
+      core_cards: cards.slice(0, 1),
+      representative_deck: {
+        deck_fingerprint: deckB,
+        deck_name: cards.map((item) => item.label).join(" / "),
+        cards
+      },
+      behavior_stats: {
+        weapons: [{ name: "瀛瓙", sample_count: sampleCount, usage_rate: 1, low_sample: true }],
+        styles: [{ name: "澹皸", sample_count: sampleCount, usage_rate: 1, low_sample: true }],
+        souls: []
+      }
+    }
+  };
+}
+
 function matchSide(id, matchId, sideIndex, result, playerName) {
   return {
     id,
@@ -99,7 +132,9 @@ async function createLegacyFixture(root) {
   ]);
   await writeJsonl(join(tableRoot, "server_leaderboard_rows.jsonl"), [
     deckRow(1, deckA, [card("card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 1, 0, 1),
-    deckRow(2, deckB, [card("card-b1", "緋001", "Gamma"), card("card-b2", "緋002", "Delta")], 2, 1, 0)
+    deckRow(2, deckB, [card("card-b1", "緋001", "Gamma"), card("card-b2", "緋002", "Delta")], 2, 1, 0),
+    archetypeRow(3, "Published Cluster", [card("card-b1", "緋001", "Gamma"), card("card-b2", "緋002", "Delta")], 1, 4, 1),
+    archetypeRow(4, "Published Cluster", [card("card-b1", "緋001", "Gamma"), card("card-a2", "蒼002", "Beta")], 2, 1, 0)
   ]);
   await writeJsonl(join(tableRoot, "matches.jsonl"), [
     { id: 1, version: "Ver.test", played_at: "2026-05-21 12:00", created_at: "2026-05-21 12:00" }
@@ -143,6 +178,10 @@ async function testRefreshWritesAtomicSnapshot() {
     assert.equal(snapshot.metadata.sourceRunId, 1);
     assert.equal(output.metadata.sourceKind, "server_leaderboard");
     assert.equal(output.tierRows.length, 2);
+    assert.equal(output.clusterRows.length, 1);
+    assert.equal(output.home.tierRows.length, 1);
+    assert.match(output.home.tierRows[0].deckName, /バランスデッキ$/);
+    assert.equal(output.home.tierRows[0].sampleSize, 6);
     assert.ok(output.tierRows.some((row) => row.deckConfig.strategies.length > 0));
     assert.ok(output.tierRows.some((row) => row.deckConfig.schoolStages.length > 0));
     assert.ok(output.tierRows.some((row) => row.deckConfig.unfavorableMatchups.length > 0));

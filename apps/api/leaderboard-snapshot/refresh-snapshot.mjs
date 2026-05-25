@@ -23,7 +23,13 @@ function assertSnapshotShape(snapshot) {
   if (!snapshot || typeof snapshot !== "object") {
     throw new Error("snapshot JSON must be an object");
   }
-  if (!snapshot.metadata || !snapshot.home || !Array.isArray(snapshot.tierRows)) {
+  if (
+    !snapshot.metadata ||
+    !snapshot.home ||
+    !Array.isArray(snapshot.home.tierRows) ||
+    !Array.isArray(snapshot.clusterRows) ||
+    !Array.isArray(snapshot.tierRows)
+  ) {
     throw new Error("snapshot JSON is missing required fields");
   }
 }
@@ -55,7 +61,7 @@ async function main() {
   const builtAt = new Date().toISOString();
   console.log(`snapshot=${outputPath}`);
   console.log(
-    `${sourceKind}Run=${snapshot.metadata.sourceRunId} rows=${snapshot.tierRows.length} cards=${snapshot.home.featuredCards.length} builtAt=${builtAt}`
+    `${sourceKind}Run=${snapshot.metadata.sourceRunId} rows=${snapshot.tierRows.length} clusters=${snapshot.clusterRows.length} cards=${snapshot.home.featuredCards.length} builtAt=${builtAt}`
   );
 }
 

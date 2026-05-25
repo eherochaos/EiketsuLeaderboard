@@ -5,6 +5,7 @@ const LEADERBOARD_SNAPSHOT_ENDPOINT = "/api/leaderboard-snapshot";
 const LEADERBOARD_SNAPSHOT_ROOT_FIELDS = Object.freeze([
   "metadata",
   "home",
+  "clusterRows",
   "tierRows",
 ]);
 
@@ -25,6 +26,7 @@ const LEADERBOARD_SNAPSHOT_HOME_FIELDS = Object.freeze([
   "representativeDecks",
   "featuredCards",
   "summary",
+  "tierRows",
 ]);
 
 module.exports = {

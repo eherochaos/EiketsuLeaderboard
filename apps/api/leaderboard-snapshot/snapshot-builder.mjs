@@ -829,6 +829,138 @@ function buildFormalTierRows(deckRows, classification, totalSamples, playerAvera
   return applyDeckCompositeRanks(rows).map((row) => ({ ...row, evidenceTags: formalDeckEvidenceTags(row) }));
 }
 
+function formalArchetypeCards(json) {
+  const representativeCards = json?.representative_deck?.cards;
+  const cards = Array.isArray(representativeCards) && representativeCards.length
+    ? representativeCards
+    : json?.core_cards;
+  return (Array.isArray(cards) ? cards : []).slice(0, 8).map(formalCardView);
+}
+
+function formalArchetypePrimaryCard(json, cards) {
+  const coreCards = (Array.isArray(json?.core_cards) ? json.core_cards : []).map(formalCardView);
+  return coreCards.find((coreCard) => cards.some((card) => card.cardId === coreCard.cardId)) || coreCards[0] || cards[0] || null;
+}
+
+function formalArchetypeRepresentativeDeckId(json) {
+  return String(json?.representative_deck?.deck_fingerprint || json?.member_decks?.[0]?.deck_fingerprint || "").trim();
+}
+
+function weightedRowPercent(rows, key, sampleSize) {
+  if (!sampleSize) return 0;
+  return Number((rows.reduce((sum, row) => sum + toNumber(row[key]) * toNumber(row.sampleSize), 0) / sampleSize).toFixed(1));
+}
+
+function mergeFormalDeckConfigItems(rows, key, sampleSize) {
+  const byName = new Map();
+  for (const row of rows) {
+    for (const item of row.deckConfig?.[key] || []) {
+      const name = String(item.name || "").trim();
+      if (!name) continue;
+      const current = byName.get(name) || { name, sampleSize: 0 };
+      current.sampleSize += toNumber(item.sampleSize);
+      byName.set(name, current);
+    }
+  }
+
+  return Array.from(byName.values())
+    .map((item) => ({
+      name: item.name,
+      usageRate: sampleSize ? Number((item.sampleSize / sampleSize * 100).toFixed(1)) : 0,
+      sampleSize: item.sampleSize,
+      lowSample: item.sampleSize < 5
+    }))
+    .sort((left, right) => right.sampleSize - left.sampleSize || left.name.localeCompare(right.name, "ja"))
+    .slice(0, 3);
+}
+
+function mergeSameNameClusterRows(rows) {
+  const byName = new Map();
+  for (const row of rows) {
+    const key = row.deckName || row.deckId;
+    if (!byName.has(key)) byName.set(key, []);
+    byName.get(key).push(row);
+  }
+
+  return Array.from(byName.values())
+    .map((variants) => {
+      const ordered = variants.slice().sort((left, right) => sourceRankTie(left) - sourceRankTie(right) || right.sampleSize - left.sampleSize);
+      const base = ordered[0];
+      const sampleSize = ordered.reduce((sum, row) => sum + toNumber(row.sampleSize), 0);
+      const sourceRank = Math.min(...ordered.map((row) => sourceRankTie(row)));
+      const mergedRank = sourceRank < Number.MAX_SAFE_INTEGER ? sourceRank : base.rankScore;
+      const merged = {
+        ...base,
+        deckId: base.categoryId || base.deckId,
+        rankScore: mergedRank,
+        sourceRank: mergedRank,
+        winRate: weightedRowPercent(ordered, "winRate", sampleSize),
+        playerAverageWinRate: weightedRowPercent(ordered, "playerAverageWinRate", sampleSize),
+        usageRate: Number(ordered.reduce((sum, row) => sum + toNumber(row.usageRate), 0).toFixed(1)),
+        sampleSize,
+        deckConfig: {
+          ...base.deckConfig,
+          weapons: mergeFormalDeckConfigItems(ordered, "weapons", sampleSize),
+          styles: mergeFormalDeckConfigItems(ordered, "styles", sampleSize),
+          souls: mergeFormalDeckConfigItems(ordered, "souls", sampleSize)
+        }
+      };
+      return { ...merged, evidenceTags: formalDeckEvidenceTags(merged) };
+    })
+    .sort((left, right) => sourceRankTie(left) - sourceRankTie(right) || right.sampleSize - left.sampleSize || right.winRate - left.winRate);
+}
+
+function buildFormalClusterRows(archetypeRows, classification, totalSamples) {
+  const { byDeck } = categoryLookup(classification);
+  const rows = archetypeRows
+    .map((row) => {
+      const json = row.row_json || {};
+      const deckId = String(json.archetype_id || row.id);
+      const representativeDeckId = formalArchetypeRepresentativeDeckId(json);
+      const classificationResult = byDeck.get(representativeDeckId);
+      const cards = formalArchetypeCards(json);
+      const primaryCard = cards.find((card) => card.cardId === classificationResult?.primaryCoreCardId) || formalArchetypePrimaryCard(json, cards);
+      const fallbackName = String(json.title || json.representative_deck?.deck_name || deckId).trim();
+      const categoryName = classificationResult?.categoryName || fallbackName;
+      const deckName = analysisDeckDisplayName(categoryName, classificationResult, primaryCard, deckId);
+      const sampleSize = toNumber(json.sample_count ?? row.sample_count);
+      const winRateValue = percent(json.win_rate ?? 0);
+      const usageRateValue = totalSamples ? Number((sampleSize / totalSamples * 100).toFixed(1)) : 0;
+      const sourceRank = toNumber(row.rank);
+      const result = {
+        deckId,
+        deckName,
+        categoryId: classificationResult?.categoryId || deckId,
+        categoryName,
+        faction: deckFaction(cards, classificationResult?.primaryFaction || primaryCard?.faction),
+        namingSource: namingSource(classificationResult),
+        rankScore: sourceRank || 0,
+        sourceRank,
+        winRate: winRateValue,
+        playerAverageWinRate: winRateValue,
+        usageRate: usageRateValue,
+        kabukiPoints: 0,
+        sampleSize,
+        imageUrl: primaryCard?.imageUrl || cards[0]?.imageUrl || "",
+        imageAlt: primaryCard?.name || deckName,
+        deckCards: cards,
+        deckConfig: formalDeckConfig(json.behavior_stats, emptyAuxiliaryStats(), deckId, cards, sampleSize)
+      };
+      return result;
+    })
+    .filter((row) => row.sampleSize > 0 && row.deckCards.length > 0)
+    .sort((left, right) => sourceRankTie(left) - sourceRankTie(right) || right.sampleSize - left.sampleSize || right.winRate - left.winRate)
+    .map((row, index) => {
+      const rankedRow = { ...row, rankScore: row.rankScore || index + 1 };
+      return { ...rankedRow, evidenceTags: formalDeckEvidenceTags(rankedRow) };
+    });
+
+  return mergeSameNameClusterRows(rows).map((row, index) => {
+    const rankedRow = { ...row, rankScore: row.rankScore || index + 1 };
+    return { ...rankedRow, evidenceTags: formalDeckEvidenceTags(rankedRow) };
+  });
+}
+
 function buildFormalFeaturedCards(cardRows, totalSamples) {
   return cardRows
     .map((row) => {
@@ -855,6 +987,9 @@ async function buildFormalSnapshot(run, rows, cardCatalog, strategyTypes) {
   const deckRows = rows
     .filter((row) => row.run_id === run.id && row.row_type === "deck" && row.rank_scope === "all" && toNumber(row.cluster_enabled) === 0)
     .sort((left, right) => toNumber(left.rank) - toNumber(right.rank));
+  const archetypeRows = rows
+    .filter((row) => row.run_id === run.id && row.row_type === "archetype" && row.rank_scope === "all" && toNumber(row.cluster_enabled) === 1)
+    .sort((left, right) => toNumber(left.rank) - toNumber(right.rank));
   const { validDeckRows, invalidDeckRows } = splitInvalidDeckRows(deckRows);
   const totalSamples = validDeckRows.reduce((sum, row) => sum + formalDeckRowSample(row), 0);
   const excludedInvalidDeckSampleSize = invalidDeckRows.reduce((sum, item) => sum + formalDeckRowSample(item.row), 0);
@@ -871,7 +1006,10 @@ async function buildFormalSnapshot(run, rows, cardCatalog, strategyTypes) {
     buildFormalTierRows(validDeckRows, classification, totalSamples, playerAverageWinRates, auxiliaryStats),
     auxiliaryStats.matchupsByDeck
   );
-  const factionShare = buildFactionShare(tierRows);
+  const archetypeTotalSamples = archetypeRows.reduce((sum, row) => sum + formalDeckRowSample(row), 0);
+  const clusterRows = buildFormalClusterRows(archetypeRows, classification, totalSamples || archetypeTotalSamples);
+  const homeRows = clusterRows.length ? clusterRows : tierRows;
+  const factionShare = buildFactionShare(homeRows);
   const topShareTotal = factionShare.slice(0, 3).reduce((sum, item) => sum + item.share, 0);
 
   return {
@@ -888,17 +1026,19 @@ async function buildFormalSnapshot(run, rows, cardCatalog, strategyTypes) {
     },
     home: {
       factionShare,
-      representativeDecks: balancedUsageWinRows(tierRows, 4, {
+      representativeDecks: balancedUsageWinRows(homeRows, 4, {
         minWinRate: 54,
         minUsageRate: 0.6,
         minUsageShareOfMax: 0.15,
         minSampleSize: 10
       }),
-      featuredCards: featuredCardsFromTopUsageDecks(tierRows, 4),
-      summary: tierRows.length
+      featuredCards: featuredCardsFromTopUsageDecks(homeRows, 4),
+      summary: homeRows.length
         ? `${run.target_version} 正式榜单，前三势力合计 ${topShareTotal}%。`
-        : "当前无可展示榜单数据。"
+        : "当前无可展示榜单数据。",
+      tierRows: homeRows
     },
+    clusterRows: homeRows,
     tierRows
   };
 }
@@ -1010,7 +1150,7 @@ function buildFactionShare(rows) {
     }
     const entry = byFaction.get(key);
     entry.sampleSize += row.sampleSize;
-    if (entry.representatives.length < 2) entry.representatives.push(row.deckName);
+    if (entry.representatives.length < 2 && !entry.representatives.includes(row.deckName)) entry.representatives.push(row.deckName);
   }
 
   const ordered = Array.from(byFaction.values())
@@ -1133,8 +1273,10 @@ async function buildSnapshotFromData() {
       featuredCards: featuredCardsFromTopUsageDecks(tierRows, 4),
       summary: topDeck
         ? `前三势力合计 ${topShareTotal}%，Top 3 卡组按综合 Rank 自动排序。`
-        : "当前无可展示榜单数据。"
+        : "当前无可展示榜单数据。",
+      tierRows
     },
+    clusterRows: tierRows,
     tierRows
   };
 

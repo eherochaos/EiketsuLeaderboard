@@ -50,8 +50,10 @@ function testSnapshot(sourceRunId, summary) {
       factionShare: [],
       representativeDecks: [],
       featuredCards: [],
-      summary
+      summary,
+      tierRows: []
     },
+    clusterRows: [],
     tierRows: []
   };
 }
