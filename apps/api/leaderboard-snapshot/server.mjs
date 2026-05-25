@@ -1,8 +1,10 @@
 import { createServer } from "node:http";
+import { readFile, stat } from "node:fs/promises";
+import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { buildLeaderboardSnapshot } from "./snapshot-builder.mjs";
 
 const DEFAULT_PORT = 8001;
+const DEFAULT_SNAPSHOT_FILE = resolve("apps/api/data/leaderboard-snapshot.json");
 
 function jsonHeaders(extra = {}) {
   return {
@@ -26,27 +28,46 @@ function publicError(error) {
 }
 
 export function createLeaderboardSnapshotServer(options = {}) {
-  const buildSnapshot = options.buildLeaderboardSnapshot || buildLeaderboardSnapshot;
-  let snapshotCachePromise = null;
+  const snapshotFile = resolve(options.snapshotFile || DEFAULT_SNAPSHOT_FILE);
+  let snapshotCache = null;
 
   function loadSnapshot() {
-    if (!snapshotCachePromise) {
-      snapshotCachePromise = buildSnapshot({ legacyRoot: options.legacyRoot }).catch((error) => {
-        snapshotCachePromise = null;
-        throw error;
-      });
-    }
-    return snapshotCachePromise;
+    return stat(snapshotFile).then(async (snapshotStat) => {
+      if (
+        snapshotCache &&
+        snapshotCache.mtimeMs === snapshotStat.mtimeMs &&
+        snapshotCache.size === snapshotStat.size
+      ) {
+        return snapshotCache.body;
+      }
+
+      const body = await readFile(snapshotFile);
+      snapshotCache = {
+        mtimeMs: snapshotStat.mtimeMs,
+        size: snapshotStat.size,
+        body
+      };
+      return body;
+    });
   }
 
-  return createServer(async (request, response) => {
+  function writeSnapshot(response, body) {
+    response.writeHead(200, jsonHeaders());
+    response.end(body);
+  }
+
+  function clearSnapshotCache() {
+    snapshotCache = null;
+  }
+
+  const server = createServer(async (request, response) => {
     const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
     if (request.method === "GET" && url.pathname === "/api/leaderboard-snapshot") {
       try {
-        const snapshot = await loadSnapshot();
-        writeJson(response, 200, snapshot);
+        writeSnapshot(response, await loadSnapshot());
       } catch (error) {
+        clearSnapshotCache();
         console.error(publicError(error));
         writeJson(response, 500, { error: publicError(error) });
       }
@@ -55,6 +76,8 @@ export function createLeaderboardSnapshotServer(options = {}) {
 
     writeJson(response, 404, { error: "not found" });
   });
+
+  return server;
 }
 
 export function startLeaderboardSnapshotServer(options = {}) {
@@ -62,7 +85,7 @@ export function startLeaderboardSnapshotServer(options = {}) {
   const port = Number(options.port || env.PORT || DEFAULT_PORT);
   const host = options.host || env.HOST || "127.0.0.1";
   const server = createLeaderboardSnapshotServer({
-    legacyRoot: options.legacyRoot || env.LEADERBOARD_LEGACY_ROOT
+    snapshotFile: options.snapshotFile || env.LEADERBOARD_SNAPSHOT_FILE
   });
 
   server.listen(port, host, () => {
