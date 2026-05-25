@@ -104,6 +104,8 @@ export interface LeaderboardSnapshot {
     representativeDecks: DeckRow[];
     featuredCards: FeaturedCard[];
     summary: string;
+    tierRows: DeckRow[];
   };
+  clusterRows: DeckRow[];
   tierRows: DeckRow[];
 }

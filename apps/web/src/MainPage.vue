@@ -26,11 +26,12 @@ onMounted(async () => {
 
 const home = computed(() => snapshot.value?.home ?? null);
 const metadata = computed(() => snapshot.value?.metadata ?? null);
-const topDeck = computed(() => snapshot.value?.tierRows[0] ?? null);
-const top4Decks = computed(() => snapshot.value?.tierRows.slice(0, 4) ?? []);
-const representativeDecks = computed(() => home.value?.representativeDecks ?? []);
-const featuredCards = computed(() => home.value?.featuredCards ?? []);
+const homeRows = computed(() => home.value?.tierRows ?? snapshot.value?.clusterRows ?? snapshot.value?.tierRows ?? []);
+const topDeck = computed(() => homeRows.value[0] ?? null);
+const top4Decks = computed(() => homeRows.value.slice(0, 4));
 const factionShare = computed(() => home.value?.factionShare ?? []);
+const representativeDecks = computed(() => (home.value?.representativeDecks?.length ? home.value.representativeDecks : homeRows.value.slice(0, 4)));
+const featuredCards = computed(() => home.value?.featuredCards ?? []);
 const topShareTotal = computed(() => factionShare.value.slice(0, 3).reduce((sum, item) => sum + item.share, 0));
 const shareNote = computed(() => {
   if (!metadata.value) {

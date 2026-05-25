@@ -344,32 +344,52 @@ function deckMeta(deck: DeckRow): string {
 @media (max-width: 760px) {
   /* 手机 Hero 间距。 */
   .Main_Hero_Section {
-    gap: 20px;
+    gap: 12px;
+    padding: 20px 28px;
   }
 
   /* 手机摘要字号略小。 */
   .Main_Hero_Section_Lead {
+    margin-bottom: 16px;
     font-size: 15px;
   }
 
-  /* 手机端所有 Hero 网格改为一列。 */
-  .Main_Hero_Section_Facts,
+  .Main_Hero_Section_Facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .Main_Hero_Section_Facts div {
+    min-height: 64px;
+    padding: 10px;
+  }
+
+  /* 手机端排名区域纵向堆叠。 */
   .Main_Hero_Section_Rank,
-  .Main_Hero_Section_Metrics,
   .Main_Hero_Section_Top3List {
     grid-template-columns: 1fr;
   }
 
+  .Main_Hero_Section_Metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .Main_Hero_Section_Metrics div {
+    padding: 8px;
+  }
+
   /* 手机当前第一卡片：头像更窄。 */
   .Main_Hero_Section_RankCard {
-    grid-template-columns: 66px 1fr;
-    gap: 14px;
-    padding: 14px;
+    grid-template-columns: 58px 1fr;
+    gap: 12px;
+    padding: 10px;
   }
 
   /* 手机当前第一头像尺寸。 */
   .Main_Hero_Section_RankCard :deep(.Common_ImageFrame) {
-    width: 66px;
+    width: 58px;
     height: auto;
   }
 

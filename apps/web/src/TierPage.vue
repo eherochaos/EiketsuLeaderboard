@@ -10,13 +10,6 @@ import { loadSnapshot } from "./lib/snapshot";
 import type { CardView, DeckRow, LeaderboardSnapshot } from "./types";
 
 type SortKey = "rankScore" | "winRate" | "playerAverageWinRate" | "usageRate" | "kabukiPoints" | "sampleSize";
-type DeckCluster = {
-  key: string;
-  rows: DeckRow[];
-  activeIndex: number;
-  activeRow: DeckRow;
-  displayRow: DeckRow;
-};
 
 const snapshot = ref<LeaderboardSnapshot | null>(null);
 const loading = ref(true);
@@ -25,7 +18,6 @@ const factionFilter = ref("all");
 const sourceFilter = ref("all");
 const sortKey = ref<SortKey>("rankScore");
 const clusterSameName = ref(false);
-const clusterVariantIndexes = ref<Record<string, number>>({});
 const expandedDeckIds = ref(new Set<string>());
 
 const sortOptions: { value: SortKey; label: string }[] = [
@@ -48,9 +40,10 @@ onMounted(async () => {
 });
 
 const rows = computed(() => snapshot.value?.tierRows ?? []);
+const clusterRows = computed(() => snapshot.value?.clusterRows ?? snapshot.value?.home?.tierRows ?? []);
 const metadata = computed(() => snapshot.value?.metadata ?? null);
 const factions = computed(() => {
-  const values = new Set(rows.value.map((row) => row.faction).filter(Boolean));
+  const values = new Set([...rows.value, ...clusterRows.value].map((row) => row.faction).filter(Boolean));
   return Array.from(values).sort((left, right) => left.localeCompare(right, "ja"));
 });
 
@@ -62,150 +55,6 @@ function compareRows(left: DeckRow, right: DeckRow): number {
   return diff || left.rankScore - right.rankScore || right.sampleSize - left.sampleSize || left.deckName.localeCompare(right.deckName, "ja");
 }
 
-function compareClusterVariants(left: DeckRow, right: DeckRow): number {
-  return right.sampleSize - left.sampleSize || left.rankScore - right.rankScore || right.winRate - left.winRate || left.deckName.localeCompare(right.deckName, "ja");
-}
-
-function rounded(value: number, digits = 1): number {
-  return Number((Number.isFinite(value) ? value : 0).toFixed(digits));
-}
-
-function weightedPercent(rowsToAverage: DeckRow[], key: "winRate" | "playerAverageWinRate"): number {
-  const sampleSize = rowsToAverage.reduce((sum, row) => sum + row.sampleSize, 0);
-  if (!sampleSize) return 0;
-  return rounded(rowsToAverage.reduce((sum, row) => sum + row[key] * row.sampleSize, 0) / sampleSize);
-}
-
-function aggregateChoiceItems(rowsToAggregate: DeckRow[], key: "weapons" | "styles" | "souls", sampleSize: number): DeckRow["deckConfig"]["weapons"] {
-  const byName = new Map<string, { name: string; sampleSize: number }>();
-  for (const row of rowsToAggregate) {
-    for (const item of row.deckConfig[key] ?? []) {
-      const name = item.name || "未识别";
-      const current = byName.get(name) || { name, sampleSize: 0 };
-      current.sampleSize += item.sampleSize;
-      byName.set(name, current);
-    }
-  }
-
-  return Array.from(byName.values())
-    .map((item) => ({
-      name: item.name,
-      sampleSize: item.sampleSize,
-      usageRate: sampleSize ? rounded(item.sampleSize / sampleSize * 100) : 0,
-      lowSample: item.sampleSize < 5
-    }))
-    .sort((left, right) => right.sampleSize - left.sampleSize || left.name.localeCompare(right.name, "ja"))
-    .slice(0, 3);
-}
-
-function aggregateStrategyItems(rowsToAggregate: DeckRow[]): DeckRow["deckConfig"]["strategies"] {
-  const byCard = new Map<string, { cardId: string; name: string; strategyCount: number; sampleSize: number }>();
-  for (const row of rowsToAggregate) {
-    for (const item of row.deckConfig.strategies ?? []) {
-      const key = item.cardId || item.name;
-      const current = byCard.get(key) || { cardId: item.cardId, name: item.name, strategyCount: 0, sampleSize: 0 };
-      current.strategyCount += item.strategyCount;
-      current.sampleSize += item.sampleSize;
-      byCard.set(key, current);
-    }
-  }
-
-  const items = Array.from(byCard.values()).map((item) => ({
-    ...item,
-    averageCount: item.sampleSize ? rounded(item.strategyCount / item.sampleSize, 2) : 0,
-    usageRate: 0
-  }));
-  const maxAverage = Math.max(...items.map((item) => item.averageCount), 0);
-
-  return items
-    .map((item) => ({
-      ...item,
-      usageRate: maxAverage ? rounded(item.averageCount / maxAverage * 100) : 0
-    }))
-    .sort((left, right) => right.averageCount - left.averageCount || right.sampleSize - left.sampleSize || left.name.localeCompare(right.name, "ja"))
-    .slice(0, 3);
-}
-
-function aggregateSchoolStages(rowsToAggregate: DeckRow[], sampleSize: number): DeckRow["deckConfig"]["schoolStages"] {
-  const byStage = new Map<string, { name: string; stage: string; sampleSize: number }>();
-  for (const row of rowsToAggregate) {
-    for (const item of row.deckConfig.schoolStages ?? []) {
-      const key = `${item.stage}:${item.name}`;
-      const current = byStage.get(key) || { name: item.name, stage: item.stage, sampleSize: 0 };
-      current.sampleSize += item.sampleSize;
-      byStage.set(key, current);
-    }
-  }
-
-  return Array.from(byStage.values())
-    .map((item) => ({
-      name: item.name,
-      stage: item.stage,
-      sampleSize: item.sampleSize,
-      usageRate: sampleSize ? rounded(item.sampleSize / sampleSize * 100) : 0,
-      averageCount: sampleSize ? rounded(item.sampleSize / sampleSize, 2) : 0,
-      lowSample: item.sampleSize < 5
-    }))
-    .sort((left, right) => right.averageCount - left.averageCount || right.sampleSize - left.sampleSize || left.name.localeCompare(right.name, "ja"))
-    .slice(0, 3);
-}
-
-function aggregateUnfavorableMatchups(rowsToAggregate: DeckRow[]): DeckRow["deckConfig"]["unfavorableMatchups"] {
-  const byDeck = new Map<string, { deckId: string; deckName: string; sampleSize: number }>();
-  for (const row of rowsToAggregate) {
-    for (const item of row.deckConfig.unfavorableMatchups ?? []) {
-      const current = byDeck.get(item.deckId) || { deckId: item.deckId, deckName: item.deckName, sampleSize: 0 };
-      current.sampleSize += item.sampleSize;
-      byDeck.set(item.deckId, current);
-    }
-  }
-
-  const totalLosses = rowsToAggregate.reduce((sum, row) => sum + row.sampleSize * Math.max(100 - row.winRate, 0) / 100, 0);
-  return Array.from(byDeck.values())
-    .map((item) => ({
-      ...item,
-      usageRate: totalLosses ? rounded(item.sampleSize / totalLosses * 100) : 0
-    }))
-    .sort((left, right) => right.sampleSize - left.sampleSize || right.usageRate - left.usageRate || left.deckName.localeCompare(right.deckName, "ja"))
-    .slice(0, 3);
-}
-
-function clusterEvidenceTags(row: DeckRow, variantCount: number): string[] {
-  const tags = [`综合 Rank ${row.rankScore}`, `${variantCount} 式样`];
-  if (row.usageRate >= 2) tags.push("使用率高");
-  if (row.winRate >= 54) tags.push("胜率高");
-  if (row.sampleSize >= 20) tags.push("样本稳定");
-  return tags;
-}
-
-function aggregateClusterRow(key: string, variants: DeckRow[], activeRow: DeckRow): DeckRow {
-  const sampleSize = variants.reduce((sum, row) => sum + row.sampleSize, 0);
-  const usageRate = rounded(variants.reduce((sum, row) => sum + row.usageRate, 0));
-  const rankScore = Math.min(...variants.map((row) => row.rankScore));
-  const sourceRank = Math.min(...variants.map((row) => row.sourceRank ?? Number.MAX_SAFE_INTEGER));
-  const displayRow: DeckRow = {
-    ...activeRow,
-    deckId: activeRow.deckId,
-    deckName: key,
-    rankScore,
-    sourceRank: Number.isFinite(sourceRank) ? sourceRank : activeRow.sourceRank,
-    winRate: weightedPercent(variants, "winRate"),
-    playerAverageWinRate: weightedPercent(variants, "playerAverageWinRate"),
-    usageRate,
-    sampleSize,
-    deckConfig: {
-      weapons: aggregateChoiceItems(variants, "weapons", sampleSize),
-      styles: aggregateChoiceItems(variants, "styles", sampleSize),
-      souls: aggregateChoiceItems(variants, "souls", sampleSize),
-      strategies: aggregateStrategyItems(variants),
-      schoolStages: aggregateSchoolStages(variants, sampleSize),
-      unfavorableMatchups: aggregateUnfavorableMatchups(variants)
-    },
-    evidenceTags: clusterEvidenceTags(activeRow, variants.length)
-  };
-  return displayRow;
-}
-
 const filteredRows = computed(() => {
   return rows.value
     .filter((row) => factionFilter.value === "all" || row.faction === factionFilter.value)
@@ -214,53 +63,28 @@ const filteredRows = computed(() => {
     .sort(compareRows);
 });
 
-const deckClusters = computed(() => {
-  const grouped = new Map<string, { order: number; rows: DeckRow[] }>();
-  filteredRows.value.forEach((row, index) => {
-    const key = row.deckName || row.deckId;
-    if (!grouped.has(key)) grouped.set(key, { order: index, rows: [] });
-    grouped.get(key)?.rows.push(row);
-  });
-
-  return Array.from(grouped.entries())
-    .map(([key, group]) => {
-      const groupRows = group.rows;
-      const variants = groupRows.slice().sort(compareClusterVariants);
-      const savedIndex = clusterVariantIndexes.value[key] ?? 0;
-      const activeIndex = Math.min(Math.max(savedIndex, 0), Math.max(variants.length - 1, 0));
-      const activeRow = variants[activeIndex] ?? variants[0];
-      return {
-        key,
-        rows: variants,
-        activeIndex,
-        activeRow,
-        displayRow: aggregateClusterRow(key, variants, activeRow)
-      };
-    })
-    .filter((group) => Boolean(group.activeRow))
-    .sort((left, right) => compareRows(left.displayRow, right.displayRow));
+const filteredClusterRows = computed(() => {
+  return clusterRows.value
+    .filter((row) => factionFilter.value === "all" || row.faction === factionFilter.value)
+    .filter((row) => sourceFilter.value === "all" || row.namingSource === sourceFilter.value)
+    .slice()
+    .sort(compareRows);
 });
 
-const activeClusterByDeckId = computed(() => {
-  const lookup = new Map<string, DeckCluster>();
-  for (const cluster of deckClusters.value) {
-    lookup.set(cluster.displayRow.deckId, cluster);
-  }
-  return lookup;
-});
+const usePublishedClusters = computed(() => clusterSameName.value && filteredClusterRows.value.length > 0);
 
-const visibleRows = computed(() => clusterSameName.value ? deckClusters.value.map((cluster) => cluster.displayRow) : filteredRows.value);
+const visibleRows = computed(() => usePublishedClusters.value ? filteredClusterRows.value : filteredRows.value);
 
 const filterCountLabel = computed(() => {
   if (!clusterSameName.value) return `${integer(filteredRows.value.length)} 条`;
+  if (!filteredClusterRows.value.length) return `${integer(filteredRows.value.length)} 条`;
   return `${integer(visibleRows.value.length)} 组 / ${integer(filteredRows.value.length)} 条`;
 });
 
 const topDeck = computed(() => visibleRows.value[0] ?? null);
 
 function deckStateKey(deck: DeckRow): string {
-  const cluster = activeClusterByDeckId.value.get(deck.deckId);
-  return clusterSameName.value && cluster ? `cluster:${cluster.key}` : `deck:${deck.deckId}`;
+  return usePublishedClusters.value ? `cluster:${deck.deckId}` : `deck:${deck.deckId}`;
 }
 
 function deckConfigPanelId(deck: DeckRow): string {
@@ -301,30 +125,23 @@ function displayRowKey(deck: DeckRow): string {
 }
 
 function hasClusterVariants(deck: DeckRow): boolean {
-  const cluster = activeClusterByDeckId.value.get(deck.deckId);
-  return clusterSameName.value && Boolean(cluster && cluster.rows.length > 1);
+  void deck;
+  return false;
 }
 
 function clusterVariantLabel(deck: DeckRow): string {
-  const cluster = activeClusterByDeckId.value.get(deck.deckId);
-  if (!cluster) return "";
-  return `${cluster.activeIndex + 1}/${cluster.rows.length}`;
+  void deck;
+  return "";
 }
 
 function clusterVariantTitle(deck: DeckRow): string {
-  const cluster = activeClusterByDeckId.value.get(deck.deckId);
-  if (!cluster) return "";
-  return `式样 ${cluster.activeIndex + 1}/${cluster.rows.length}，按样本数排序，点击切换`;
+  void deck;
+  return "";
 }
 
 function switchClusterVariant(deck: DeckRow): void {
-  const cluster = activeClusterByDeckId.value.get(deck.deckId);
-  if (!cluster || cluster.rows.length <= 1) return;
-
-  clusterVariantIndexes.value = {
-    ...clusterVariantIndexes.value,
-    [cluster.key]: (cluster.activeIndex + 1) % cluster.rows.length
-  };
+  void deck;
+  return;
 }
 </script>
 
