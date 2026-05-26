@@ -53,7 +53,7 @@ function deckRow(id, deckId, cards, rank, winCount, lossCount) {
   };
 }
 
-function archetypeRow(id, title, cards, rank, winCount, lossCount, representativeDeckId = deckB) {
+function archetypeRow(id, title, cards, rank, winCount, lossCount, representativeDeckId = deckB, memberDecks = []) {
   const sampleCount = winCount + lossCount;
   return {
     id,
@@ -77,6 +77,7 @@ function archetypeRow(id, title, cards, rank, winCount, lossCount, representativ
         deck_name: cards.map((item) => item.label).join(" / "),
         cards
       },
+      member_decks: memberDecks,
       behavior_stats: {
         weapons: [{ name: "瀛瓙", sample_count: sampleCount, usage_rate: 1, low_sample: true }],
         styles: [{ name: "澹皸", sample_count: sampleCount, usage_rate: 1, low_sample: true }],
@@ -133,9 +134,16 @@ async function createLegacyFixture(root) {
   await writeJsonl(join(tableRoot, "server_leaderboard_rows.jsonl"), [
     deckRow(1, deckA, [card("card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 1, 0, 1),
     deckRow(2, deckB, [card("card-b1", "緋001", "Gamma"), card("card-b2", "緋002", "Delta")], 2, 1, 0),
-    archetypeRow(3, "Published Cluster", [card("card-b1", "緋001", "Gamma"), card("card-b2", "緋002", "Delta")], 1, 4, 1),
-    archetypeRow(4, "Published Cluster", [card("card-b1", "緋001", "Gamma"), card("card-a2", "蒼002", "Beta")], 2, 1, 0),
-    archetypeRow(5, "Late Better Cluster", [card("card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 99, 10, 0, deckA)
+    archetypeRow(3, "Published Cluster", [card("card-b1", "緋001", "Gamma"), card("card-b2", "緋002", "Delta")], 1, 4, 1, deckB, [
+      { deck_fingerprint: deckA, sample_count: 2 },
+      { deck_fingerprint: deckB, sample_count: 3 }
+    ]),
+    archetypeRow(4, "Published Cluster", [card("card-b1", "緋001", "Gamma"), card("card-a2", "蒼002", "Beta")], 2, 1, 0, deckB, [
+      { deck_fingerprint: deckB, sample_count: 1 }
+    ]),
+    archetypeRow(5, "Late Better Cluster", [card("card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 99, 10, 0, deckA, [
+      { deck_fingerprint: deckA, sample_count: 10 }
+    ])
   ]);
   await writeJsonl(join(tableRoot, "matches.jsonl"), [
     { id: 1, version: "Ver.test", played_at: "2026-05-21 12:00", created_at: "2026-05-21 12:00" }
@@ -191,6 +199,9 @@ async function testRefreshWritesAtomicSnapshot() {
     assert.ok(multiVariantCluster);
     assert.equal(multiVariantCluster.clusterVariants.length, 2);
     assert.equal(multiVariantCluster.clusterVariants.reduce((sum, row) => sum + row.sampleSize, 0), 6);
+    assert.equal(multiVariantCluster.winRate, 83.3);
+    assert.equal(multiVariantCluster.playerAverageWinRate, 66.7);
+    assert.notEqual(multiVariantCluster.playerAverageWinRate, multiVariantCluster.winRate);
     assert.ok(output.tierRows.some((row) => row.deckConfig.strategies.length > 0));
     assert.ok(output.tierRows.some((row) => row.deckConfig.schoolStages.length > 0));
     assert.ok(output.tierRows.some((row) => row.deckConfig.unfavorableMatchups.length > 0));
