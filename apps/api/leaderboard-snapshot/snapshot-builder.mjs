@@ -846,6 +846,49 @@ function formalArchetypeRepresentativeDeckId(json) {
   return String(json?.representative_deck?.deck_fingerprint || json?.member_decks?.[0]?.deck_fingerprint || "").trim();
 }
 
+function formalArchetypeMemberDeckRows(json) {
+  const rows = (Array.isArray(json?.member_decks) ? json.member_decks : [])
+    .map((member) => ({
+      deckId: String(member?.deck_fingerprint || "").trim(),
+      sampleSize: toNumber(member?.sample_count)
+    }))
+    .filter((member) => member.deckId);
+  const representativeDeckId = formalArchetypeRepresentativeDeckId(json);
+
+  if (representativeDeckId && !rows.some((member) => member.deckId === representativeDeckId)) {
+    rows.push({
+      deckId: representativeDeckId,
+      sampleSize: toNumber(json?.representative_deck?.sample_count ?? json?.sample_count)
+    });
+  }
+
+  return rows;
+}
+
+function formalArchetypePlayerAverageWinRate(json, tierRowsByDeckId, fallbackWinRate) {
+  const weightedRows = formalArchetypeMemberDeckRows(json)
+    .map((member) => {
+      const deckRow = tierRowsByDeckId.get(member.deckId);
+      if (!deckRow) return null;
+
+      const sampleSize = member.sampleSize || toNumber(deckRow.sampleSize);
+      if (!sampleSize) return null;
+
+      return {
+        sampleSize,
+        playerAverageWinRate: toNumber(deckRow.playerAverageWinRate)
+      };
+    })
+    .filter(Boolean);
+  const sampleSize = weightedRows.reduce((sum, row) => sum + row.sampleSize, 0);
+
+  if (!sampleSize) return fallbackWinRate;
+
+  return Number((weightedRows.reduce((sum, row) => (
+    sum + row.playerAverageWinRate * row.sampleSize
+  ), 0) / sampleSize).toFixed(1));
+}
+
 function weightedRowPercent(rows, key, sampleSize) {
   if (!sampleSize) return 0;
   return Number((rows.reduce((sum, row) => sum + toNumber(row[key]) * toNumber(row.sampleSize), 0) / sampleSize).toFixed(1));
@@ -1063,6 +1106,9 @@ function mergeSameNameClusterRows(rows, configSourceRowsByKey = new Map()) {
 function buildFormalClusterRows(archetypeRows, classification, totalSamples, configSourceRows = []) {
   const { byDeck } = categoryLookup(classification);
   const configSourceRowsByKey = deckConfigSourceRowsByKey(configSourceRows);
+  const tierRowsByDeckId = new Map((configSourceRows || [])
+    .map((row) => [String(row.deckId || "").trim(), row])
+    .filter(([deckId]) => deckId));
   const rows = archetypeRows
     .map((row) => {
       const json = row.row_json || {};
@@ -1076,6 +1122,7 @@ function buildFormalClusterRows(archetypeRows, classification, totalSamples, con
       const deckName = analysisDeckDisplayName(categoryName, classificationResult, primaryCard, deckId);
       const sampleSize = toNumber(json.sample_count ?? row.sample_count);
       const winRateValue = percent(json.win_rate ?? 0);
+      const playerAverageWinRateValue = formalArchetypePlayerAverageWinRate(json, tierRowsByDeckId, winRateValue);
       const usageRateValue = totalSamples ? Number((sampleSize / totalSamples * 100).toFixed(1)) : 0;
       const sourceRank = toNumber(row.rank);
       const result = {
@@ -1088,7 +1135,7 @@ function buildFormalClusterRows(archetypeRows, classification, totalSamples, con
         rankScore: 0,
         sourceRank,
         winRate: winRateValue,
-        playerAverageWinRate: winRateValue,
+        playerAverageWinRate: playerAverageWinRateValue,
         usageRate: usageRateValue,
         kabukiPoints: 0,
         sampleSize,
