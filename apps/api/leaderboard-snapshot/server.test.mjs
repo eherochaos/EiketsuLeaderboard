@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createLeaderboardSnapshotServer } from "./server.mjs";
+import { smokeLeaderboardSnapshotEndpoint } from "./smoke-snapshot-endpoint.mjs";
 
 async function listen(server) {
   server.listen(0, "127.0.0.1");
@@ -113,8 +115,46 @@ async function testSnapshotFileReplacementIsReloaded() {
   }
 }
 
+async function testSmokeAcceptsSnapshotEndpoint() {
+  const root = await mkdtemp(join(tmpdir(), "leaderboard-snapshot-smoke-"));
+  const snapshotFile = join(root, "leaderboard-snapshot.json");
+  const server = createLeaderboardSnapshotServer({ snapshotFile });
+
+  try {
+    await writeFile(snapshotFile, `${JSON.stringify(testSnapshot(3, "smoke"))}\n`, "utf8");
+    const address = await listen(server);
+    const result = await smokeLeaderboardSnapshotEndpoint(`http://127.0.0.1:${address.port}/api/leaderboard-snapshot`);
+
+    assert.equal(result.sourceRunId, 3);
+    assert.equal(result.clusterRows, 0);
+    assert.equal(result.tierRows, 0);
+  } finally {
+    await close(server);
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testSmokeRejectsHtmlFallback() {
+  const server = createHttpServer((request, response) => {
+    response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    response.end("<!doctype html><html><body>Vite fallback</body></html>");
+  });
+  const address = await listen(server);
+
+  try {
+    await assert.rejects(
+      () => smokeLeaderboardSnapshotEndpoint(`http://127.0.0.1:${address.port}/api/leaderboard-snapshot`),
+      /application\/json/
+    );
+  } finally {
+    await close(server);
+  }
+}
+
 await testMissingDataDoesNotExposePath();
 await testSnapshotFileIsServedWithoutBuild();
 await testSnapshotFileReplacementIsReloaded();
+await testSmokeAcceptsSnapshotEndpoint();
+await testSmokeRejectsHtmlFallback();
 
 console.log("leaderboard snapshot api tests passed");
