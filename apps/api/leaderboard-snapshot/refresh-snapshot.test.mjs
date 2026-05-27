@@ -19,6 +19,8 @@ function card(cardId, cardCode, name) {
   return {
     card_hash: cardId,
     card_code: cardCode,
+    force: "6",
+    intelligence: "3",
     image_url: `https://image.example.test/${cardId}.jpg`,
     label: `${name}(1.0 槍兵)`
   };
@@ -202,6 +204,10 @@ async function testRefreshWritesAtomicSnapshot() {
     assert.equal(multiVariantCluster.winRate, 83.3);
     assert.equal(multiVariantCluster.playerAverageWinRate, 66.7);
     assert.notEqual(multiVariantCluster.playerAverageWinRate, multiVariantCluster.winRate);
+    assert.equal(output.tierRows[0].deckCards[0].cost, "1.0");
+    assert.equal(output.tierRows[0].deckCards[0].unitType, "槍兵");
+    assert.equal(output.tierRows[0].deckCards[0].force, "6");
+    assert.equal(output.tierRows[0].deckCards[0].intelligence, "3");
     assert.ok(output.tierRows.some((row) => row.deckConfig.strategies.length > 0));
     assert.ok(output.tierRows.some((row) => row.deckConfig.schoolStages.length > 0));
     assert.ok(output.tierRows.some((row) => row.deckConfig.unfavorableMatchups.length > 0));

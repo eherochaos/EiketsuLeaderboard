@@ -4,6 +4,13 @@ export interface CardView {
   cardId: string;
   name: string;
   faction: string;
+  cardCode?: string;
+  cost?: string;
+  unitType?: string;
+  force?: string;
+  intelligence?: string;
+  era?: string;
+  skills?: string[];
   imageUrl: string;
   imageAlt: string;
 }
@@ -90,6 +97,13 @@ export interface FeaturedCard {
   cardId: string;
   name: string;
   faction: string;
+  cardCode?: string;
+  cost?: string;
+  unitType?: string;
+  force?: string;
+  intelligence?: string;
+  era?: string;
+  skills?: string[];
   imageUrl: string;
   imageAlt: string;
   rankScore: number;
