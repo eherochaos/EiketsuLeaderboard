@@ -47,7 +47,7 @@ defineProps<{
             </span>
           </td>
           <td>
-            <CommonImageFrame :src="card.imageUrl" :alt="card.imageAlt" ratio="portrait" />
+            <CommonImageFrame :src="card.imageUrl" :alt="card.imageAlt" :card="card" show-details density="full" ratio="portrait" />
           </td>
           <td class="Common_MetricNumber">{{ percent(card.usageRate) }}</td>
           <td class="Common_MetricNumber">{{ percent(card.winRate) }}</td>
@@ -60,7 +60,7 @@ defineProps<{
     <div class="Common_MobileCardList Main_FeaturedCards_Section_MobileList">
       <article v-for="(card, index) in cards" :key="`${card.cardId}-mobile`" class="Main_FeaturedCards_Section_MobileRow">
         <div class="Main_FeaturedCards_Section_Rank">#{{ index + 1 }}</div>
-        <CommonImageFrame :src="card.imageUrl" :alt="card.imageAlt" ratio="portrait" />
+        <CommonImageFrame :src="card.imageUrl" :alt="card.imageAlt" :card="card" show-details density="full" ratio="portrait" />
         <div class="Main_FeaturedCards_Section_CardMain">
           <span class="Main_FeaturedCards_Section_CardMainInner">
             <span class="Common_FactionPill">{{ card.faction }}</span>

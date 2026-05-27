@@ -6,8 +6,12 @@ import type { CardView } from "../types";
 withDefaults(defineProps<{
   cards: (CardView | null)[];
   railClass?: string;
+  showCardDetails?: boolean;
+  cardDensity?: "compact" | "full";
 }>(), {
-  railClass: "Common_DeckRail"
+  railClass: "Common_DeckRail",
+  showCardDetails: true,
+  cardDensity: "compact"
 });
 </script>
 
@@ -18,6 +22,9 @@ withDefaults(defineProps<{
         v-if="card"
         :src="card.imageUrl"
         :alt="card.imageAlt"
+        :card="card"
+        :show-details="showCardDetails"
+        :density="cardDensity"
         ratio="portrait"
       />
       <span v-else class="Common_DeckRail_EmptySlot" aria-label="空卡位"></span>

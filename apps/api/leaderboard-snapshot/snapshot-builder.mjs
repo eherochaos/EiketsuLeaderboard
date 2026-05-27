@@ -134,11 +134,42 @@ function labelName(value) {
   return shortName(value) || String(value || "").trim();
 }
 
+function firstText(...values) {
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
 function cardImageUrl(card) {
   // No stable public image template is defined in this repo. Keep URL empty so
   // the UI uses its fixed text fallback instead of guessing fake card art.
   void card;
   return "";
+}
+
+function cardSkillList(card) {
+  const raw = card?.skills || card?.specials || card?.specialTraits || card?.special_traits || card?.abilities || [];
+  if (Array.isArray(raw)) {
+    return raw.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+  return String(raw || "")
+    .split(/[、,\s/]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function cardViewMetadata(card) {
+  return {
+    cardCode: firstText(card?.card_code, card?.cardCode),
+    cost: firstText(card?.cost, card?.cost_label, card?.costValue, card?.cost_value),
+    unitType: firstText(card?.unitType, card?.unit_type, card?.unitTypeName, card?.unit_type_name, card?.["兵種"], card?.["兵种"]),
+    force: firstText(card?.force, card?.power, card?.strength, card?.attack, card?.["武力"]),
+    intelligence: firstText(card?.intelligence, card?.intellect, card?.wisdom, card?.["知力"]),
+    era: firstText(card?.era, card?.period, card?.timePeriod, card?.eraName, card?.periodName),
+    skills: cardSkillList(card)
+  };
 }
 
 function cardView(cardId, cardCatalog) {
@@ -148,6 +179,7 @@ function cardView(cardId, cardCatalog) {
     cardId,
     name,
     faction: normalizeFaction(card.faction || card.card_code),
+    ...cardViewMetadata(card),
     imageUrl: cardImageUrl(card),
     imageAlt: name
   };
@@ -190,12 +222,16 @@ function latestFormalRun(runs, targetVersion) {
     .sort((left, right) => toNumber(right.id) - toNumber(left.id))[0] || null;
 }
 
-function formalCardView(card) {
+function formalCardView(card, cardCatalog = {}) {
+  const cardId = String(card?.card_hash || "");
+  const catalogCard = cardCatalog[cardId] || {};
+  const mergedCard = { ...catalogCard, ...card };
   const name = labelName(card?.label) || String(card?.card_hash || "").slice(0, 8);
   return {
-    cardId: String(card?.card_hash || ""),
+    cardId,
     name,
-    faction: cardCodeFaction(card?.card_code),
+    faction: normalizeFaction(mergedCard.faction || cardCodeFaction(mergedCard.card_code)),
+    ...cardViewMetadata(mergedCard),
     imageUrl: String(card?.image_url || ""),
     imageAlt: name
   };
@@ -657,6 +693,13 @@ function featuredCardsFromTopUsageDecks(tierRows, limit) {
       cardId: coreCard.cardId,
       name: coreCard.name || deck.deckName,
       faction: normalizeFaction(coreCard.faction || deck.faction),
+      cardCode: coreCard.cardCode,
+      cost: coreCard.cost,
+      unitType: coreCard.unitType,
+      force: coreCard.force,
+      intelligence: coreCard.intelligence,
+      era: coreCard.era,
+      skills: coreCard.skills,
       imageUrl: coreCard.imageUrl || deck.imageUrl,
       imageAlt: coreCard.imageAlt || deck.imageAlt,
       rankScore: deck.rankScore,
@@ -787,7 +830,7 @@ function attachUnfavorableMatchups(rows, matchupsByDeck) {
   }));
 }
 
-function buildFormalTierRows(deckRows, classification, totalSamples, playerAverageWinRates = new Map(), auxiliaryStats = emptyAuxiliaryStats()) {
+function buildFormalTierRows(deckRows, classification, totalSamples, playerAverageWinRates = new Map(), auxiliaryStats = emptyAuxiliaryStats(), cardCatalog = {}) {
   const { byDeck } = categoryLookup(classification);
 
   const rows = deckRows
@@ -795,7 +838,9 @@ function buildFormalTierRows(deckRows, classification, totalSamples, playerAvera
       const json = row.row_json || {};
       const deckId = String(json.deck_fingerprint || row.id);
       const classificationResult = byDeck.get(deckId);
-      const cards = (Array.isArray(json.cards) ? json.cards : []).slice(0, 8).map(formalCardView);
+      const cards = (Array.isArray(json.cards) ? json.cards : [])
+        .slice(0, 8)
+        .map((card) => formalCardView(card, cardCatalog));
       const primaryCard = cards.find((card) => card.cardId === classificationResult?.primaryCoreCardId) || cards[0];
       const categoryName = classificationResult?.categoryName || "未分类";
       const deckName = analysisDeckDisplayName(categoryName, classificationResult, primaryCard, deckId);
@@ -829,16 +874,19 @@ function buildFormalTierRows(deckRows, classification, totalSamples, playerAvera
   return applyDeckCompositeRanks(rows).map((row) => ({ ...row, evidenceTags: formalDeckEvidenceTags(row) }));
 }
 
-function formalArchetypeCards(json) {
+function formalArchetypeCards(json, cardCatalog = {}) {
   const representativeCards = json?.representative_deck?.cards;
   const cards = Array.isArray(representativeCards) && representativeCards.length
     ? representativeCards
     : json?.core_cards;
-  return (Array.isArray(cards) ? cards : []).slice(0, 8).map(formalCardView);
+  return (Array.isArray(cards) ? cards : [])
+    .slice(0, 8)
+    .map((card) => formalCardView(card, cardCatalog));
 }
 
-function formalArchetypePrimaryCard(json, cards) {
-  const coreCards = (Array.isArray(json?.core_cards) ? json.core_cards : []).map(formalCardView);
+function formalArchetypePrimaryCard(json, cards, cardCatalog = {}) {
+  const coreCards = (Array.isArray(json?.core_cards) ? json.core_cards : [])
+    .map((card) => formalCardView(card, cardCatalog));
   return coreCards.find((coreCard) => cards.some((card) => card.cardId === coreCard.cardId)) || coreCards[0] || cards[0] || null;
 }
 
@@ -1103,7 +1151,7 @@ function mergeSameNameClusterRows(rows, configSourceRowsByKey = new Map()) {
     .sort((left, right) => sourceRankTie(left) - sourceRankTie(right) || right.sampleSize - left.sampleSize || right.winRate - left.winRate);
 }
 
-function buildFormalClusterRows(archetypeRows, classification, totalSamples, configSourceRows = []) {
+function buildFormalClusterRows(archetypeRows, classification, totalSamples, configSourceRows = [], cardCatalog = {}) {
   const { byDeck } = categoryLookup(classification);
   const configSourceRowsByKey = deckConfigSourceRowsByKey(configSourceRows);
   const tierRowsByDeckId = new Map((configSourceRows || [])
@@ -1115,8 +1163,8 @@ function buildFormalClusterRows(archetypeRows, classification, totalSamples, con
       const deckId = String(json.archetype_id || row.id);
       const representativeDeckId = formalArchetypeRepresentativeDeckId(json);
       const classificationResult = byDeck.get(representativeDeckId);
-      const cards = formalArchetypeCards(json);
-      const primaryCard = cards.find((card) => card.cardId === classificationResult?.primaryCoreCardId) || formalArchetypePrimaryCard(json, cards);
+      const cards = formalArchetypeCards(json, cardCatalog);
+      const primaryCard = cards.find((card) => card.cardId === classificationResult?.primaryCoreCardId) || formalArchetypePrimaryCard(json, cards, cardCatalog);
       const fallbackName = String(json.title || json.representative_deck?.deck_name || deckId).trim();
       const categoryName = classificationResult?.categoryName || fallbackName;
       const deckName = analysisDeckDisplayName(categoryName, classificationResult, primaryCard, deckId);
@@ -1157,15 +1205,22 @@ function buildFormalClusterRows(archetypeRows, classification, totalSamples, con
     .map((row) => ({ ...row, evidenceTags: formalDeckEvidenceTags(row) }));
 }
 
-function buildFormalFeaturedCards(cardRows, totalSamples) {
+function buildFormalFeaturedCards(cardRows, totalSamples, cardCatalog = {}) {
   return cardRows
     .map((row) => {
       const json = row.row_json || {};
-      const card = formalCardView(json);
+      const card = formalCardView(json, cardCatalog);
       const result = {
         cardId: card.cardId || String(row.id),
         name: card.name,
         faction: card.faction,
+        cardCode: card.cardCode,
+        cost: card.cost,
+        unitType: card.unitType,
+        force: card.force,
+        intelligence: card.intelligence,
+        era: card.era,
+        skills: card.skills,
         imageUrl: card.imageUrl,
         imageAlt: card.imageAlt,
         rankScore: formalRankScore(row, json),
@@ -1199,11 +1254,11 @@ async function buildFormalSnapshot(run, rows, cardCatalog, strategyTypes) {
     strategyUsage: auxiliaryStats.strategyUsage
   });
   const tierRows = attachUnfavorableMatchups(
-    buildFormalTierRows(validDeckRows, classification, totalSamples, playerAverageWinRates, auxiliaryStats),
+    buildFormalTierRows(validDeckRows, classification, totalSamples, playerAverageWinRates, auxiliaryStats, cardCatalog),
     auxiliaryStats.matchupsByDeck
   );
   const archetypeTotalSamples = archetypeRows.reduce((sum, row) => sum + formalDeckRowSample(row), 0);
-  const clusterRows = buildFormalClusterRows(archetypeRows, classification, totalSamples || archetypeTotalSamples, tierRows);
+  const clusterRows = buildFormalClusterRows(archetypeRows, classification, totalSamples || archetypeTotalSamples, tierRows, cardCatalog);
   const homeRows = clusterRows.length ? clusterRows : tierRows;
   const factionShare = buildFactionShare(homeRows);
   const topShareTotal = factionShare.slice(0, 3).reduce((sum, item) => sum + item.share, 0);
