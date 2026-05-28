@@ -25,6 +25,7 @@ jobs:
       DEPLOY_SSH_KEY_B64: ${{ secrets.DEPLOY_SSH_KEY_B64 }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
       DEPLOY_EXPORT_POSTGRES: ${{ secrets.DEPLOY_EXPORT_POSTGRES || '1' }}
+      DEPLOY_EXPORT_CONTAINER: ${{ secrets.DEPLOY_EXPORT_CONTAINER || 'eiketsu-env-db-api-1' }}
       DEPLOY_RESTART_COMMAND: ${{ secrets.DEPLOY_RESTART_COMMAND }}
 
     steps:
@@ -105,7 +106,8 @@ jobs:
       - name: Deploy on server
         run: |
           DEPLOY_PATH_B64="$(printf '%s' "$DEPLOY_PATH" | base64 -w 0)"
+          DEPLOY_EXPORT_CONTAINER_B64="$(printf '%s' "$DEPLOY_EXPORT_CONTAINER" | base64 -w 0)"
           DEPLOY_RESTART_COMMAND_B64="$(printf '%s' "$DEPLOY_RESTART_COMMAND" | base64 -w 0)"
           ssh -p "$DEPLOY_PORT" -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
-            "DEPLOY_PATH_B64=$DEPLOY_PATH_B64 DEPLOY_EXPORT_POSTGRES=$DEPLOY_EXPORT_POSTGRES DEPLOY_RESTART_COMMAND_B64=$DEPLOY_RESTART_COMMAND_B64 bash -s" \
+            "DEPLOY_PATH_B64=$DEPLOY_PATH_B64 DEPLOY_EXPORT_POSTGRES=$DEPLOY_EXPORT_POSTGRES DEPLOY_EXPORT_CONTAINER_B64=$DEPLOY_EXPORT_CONTAINER_B64 DEPLOY_RESTART_COMMAND_B64=$DEPLOY_RESTART_COMMAND_B64 bash -s" \
             < scripts/deploy/remote-main.sh
