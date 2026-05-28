@@ -10,6 +10,20 @@ fail() {
   exit 1
 }
 
+ensure_writable_dir() {
+  local path="$1"
+  mkdir -p "$path" 2>/dev/null || sudo -n mkdir -p "$path"
+  if [ ! -w "$path" ] || [ -n "$(find "$path" -maxdepth 1 ! -user "$(id -u)" -print -quit 2>/dev/null)" ]; then
+    sudo -n chown -R "$(id -u):$(id -g)" "$path"
+  fi
+}
+
+ensure_deploy_owner() {
+  local path="$1"
+  [ -e "$path" ] || return 0
+  sudo -n chown -R "$(id -u):$(id -g)" "$path" 2>/dev/null || chown -R "$(id -u):$(id -g)" "$path"
+}
+
 decode_env() {
   if [ -z "${1:-}" ]; then
     printf ''
@@ -66,11 +80,12 @@ if [ -d apps/web/dist ]; then
 fi
 mv apps/web/dist.next apps/web/dist
 
-LEGACY_ROOT='apps/api/data/legacy-service'
+DATA_ROOT='apps/api/data'
+LEGACY_ROOT="$DATA_ROOT/legacy-service"
 if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ]; then
   log 'export postgres data'
-  mkdir -p apps/api/data
-  rm -rf apps/api/data/legacy-service.next
+  ensure_writable_dir "$DATA_ROOT"
+  rm -rf "$DATA_ROOT/legacy-service.next"
   if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -Fx "$DEPLOY_EXPORT_CONTAINER" >/dev/null 2>&1; then
     container_export_root="/tmp/eiketsu-legacy-service-export-$$"
     container_settings_root="/tmp/eiketsu-export-settings-$$"
@@ -83,17 +98,18 @@ if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ]; then
     else
       docker exec "$DEPLOY_EXPORT_CONTAINER" python /tmp/export_legacy_service_from_postgres.py --output "$container_export_root"
     fi
-    docker cp "$DEPLOY_EXPORT_CONTAINER:$container_export_root" apps/api/data/legacy-service.next
+    docker cp "$DEPLOY_EXPORT_CONTAINER:$container_export_root" "$DATA_ROOT/legacy-service.next"
     docker exec "$DEPLOY_EXPORT_CONTAINER" rm -rf "$container_export_root" "$container_settings_root" /tmp/export_legacy_service_from_postgres.py
-    chown -R "$(id -u):$(id -g)" apps/api/data/legacy-service.next 2>/dev/null || true
+    ensure_deploy_owner "$DATA_ROOT/legacy-service.next"
   else
-    python3 apps/api/data-migration/export_legacy_service_from_postgres.py --output apps/api/data/legacy-service.next
+    python3 apps/api/data-migration/export_legacy_service_from_postgres.py --output "$DATA_ROOT/legacy-service.next"
+    ensure_deploy_owner "$DATA_ROOT/legacy-service.next"
   fi
-  rm -rf apps/api/data/legacy-service.prev
+  rm -rf "$DATA_ROOT/legacy-service.prev"
   if [ -d "$LEGACY_ROOT" ]; then
-    mv "$LEGACY_ROOT" apps/api/data/legacy-service.prev
+    mv "$LEGACY_ROOT" "$DATA_ROOT/legacy-service.prev"
   fi
-  mv apps/api/data/legacy-service.next "$LEGACY_ROOT"
+  mv "$DATA_ROOT/legacy-service.next" "$LEGACY_ROOT"
 else
   log 'skip postgres export'
 fi
