@@ -22,6 +22,7 @@ jobs:
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
       DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
       DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_SSH_KEY_B64: ${{ secrets.DEPLOY_SSH_KEY_B64 }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
       DEPLOY_EXPORT_POSTGRES: ${{ secrets.DEPLOY_EXPORT_POSTGRES || '1' }}
       DEPLOY_RESTART_COMMAND: ${{ secrets.DEPLOY_RESTART_COMMAND }}
@@ -51,12 +52,16 @@ jobs:
       - name: Check deploy secrets
         run: |
           missing=0
-          for name in DEPLOY_HOST DEPLOY_PORT DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_PATH; do
+          for name in DEPLOY_HOST DEPLOY_PORT DEPLOY_USER DEPLOY_PATH; do
             if [ -z "${!name}" ]; then
               echo "$name is missing"
               missing=1
             fi
           done
+          if [ -z "$DEPLOY_SSH_KEY" ] && [ -z "$DEPLOY_SSH_KEY_B64" ]; then
+            echo "DEPLOY_SSH_KEY or DEPLOY_SSH_KEY_B64 is missing"
+            missing=1
+          fi
           case "$DEPLOY_EXPORT_POSTGRES" in
             0|1) ;;
             *)
@@ -84,8 +89,13 @@ jobs:
       - name: Prepare SSH
         run: |
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          if [ -n "$DEPLOY_SSH_KEY_B64" ]; then
+            printf '%s' "$DEPLOY_SSH_KEY_B64" | base64 --decode > ~/.ssh/deploy_key
+          else
+            printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          fi
           chmod 600 ~/.ssh/deploy_key
+          ssh-keygen -y -f ~/.ssh/deploy_key > /dev/null
           ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
       - name: Upload deploy archives
