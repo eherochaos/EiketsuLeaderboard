@@ -37,25 +37,21 @@ case "$DEPLOY_PATH" in
 esac
 
 cd "$DEPLOY_PATH" || fail 'DEPLOY_PATH is not accessible'
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || fail 'DEPLOY_PATH is not a git worktree'
-cd "$REPO_ROOT"
+
+SOURCE_ARCHIVE='/tmp/eiketsu-deploy-source.tgz'
+DIST_ARCHIVE='/tmp/eiketsu-web-dist.tgz'
+
+[ -f "$SOURCE_ARCHIVE" ] || fail 'deploy source archive is missing'
+[ -f "$DIST_ARCHIVE" ] || fail 'web dist archive is missing'
+
+log 'publish source'
+tar -xzf "$SOURCE_ARCHIVE" -C "$DEPLOY_PATH"
+rm -f "$SOURCE_ARCHIVE"
 
 [ -d apps/web ] || fail 'apps/web is missing'
 [ -d apps/api ] || fail 'apps/api is missing'
 
-CURRENT_BRANCH="$(git branch --show-current)"
-if [ "$CURRENT_BRANCH" != 'main' ]; then
-  log 'switch main'
-  git switch main
-fi
-
-log 'pull main'
-git fetch origin main
-git pull --ff-only origin main
-
 log 'publish web dist'
-DIST_ARCHIVE='/tmp/eiketsu-web-dist.tgz'
-[ -f "$DIST_ARCHIVE" ] || fail 'web dist archive is missing'
 rm -rf apps/web/dist.next
 mkdir -p apps/web/dist.next
 tar -xzf "$DIST_ARCHIVE" -C apps/web/dist.next
@@ -81,13 +77,13 @@ else
 fi
 
 log 'refresh official card data'
-LEADERBOARD_LEGACY_ROOT="$REPO_ROOT/$LEGACY_ROOT" \
+LEADERBOARD_LEGACY_ROOT="$DEPLOY_PATH/$LEGACY_ROOT" \
   node apps/api/leaderboard-snapshot/refresh-official-card-data.mjs \
-  "$REPO_ROOT/$LEGACY_ROOT/cards/datalist_api_base.json"
+  "$DEPLOY_PATH/$LEGACY_ROOT/cards/datalist_api_base.json"
 
 log 'refresh leaderboard snapshot'
-LEADERBOARD_LEGACY_ROOT="$REPO_ROOT/$LEGACY_ROOT" \
-LEADERBOARD_SNAPSHOT_FILE="$REPO_ROOT/apps/api/data/leaderboard-snapshot.json" \
+LEADERBOARD_LEGACY_ROOT="$DEPLOY_PATH/$LEGACY_ROOT" \
+LEADERBOARD_SNAPSHOT_FILE="$DEPLOY_PATH/apps/api/data/leaderboard-snapshot.json" \
   node apps/api/leaderboard-snapshot/refresh-snapshot.mjs
 
 if [ -n "$DEPLOY_RESTART_COMMAND" ]; then
