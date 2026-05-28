@@ -14,6 +14,7 @@ const repoRoot = resolve(apiRoot, "../..");
 const defaultLegacyRoot = resolve(apiRoot, "data/legacy-service");
 let legacyRoot = defaultLegacyRoot;
 let diagnosticsEnabled = false;
+let unitTypeRepairWarnings = new Set();
 
 const OFFICIAL_FACTION_ORDER = ["蒼", "緋", "碧", "玄", "紫", "琥", "黄"];
 const FACTION_COLORS = {
@@ -25,6 +26,15 @@ const FACTION_COLORS = {
   琥: "#ff7800",
   黄: "#c9a227",
   unknown: "#636261"
+};
+
+const CARD_UNIT_TYPE_REPAIRS = {
+  "妲嶅叺": "槍兵",
+  "寮撳叺": "弓兵",
+  "楱庡叺": "騎兵",
+  "鍓ｈ豹": "剣豪",
+  "閴勭牪闅?": "鉄砲隊",
+  "閴勭牪闅�": "鉄砲隊"
 };
 
 function toNumber(value) {
@@ -142,6 +152,16 @@ function firstText(...values) {
   return "";
 }
 
+function repairCardUnitType(value) {
+  const repaired = CARD_UNIT_TYPE_REPAIRS[value];
+  if (!repaired) return value;
+  if (diagnosticsEnabled && !unitTypeRepairWarnings.has(value)) {
+    unitTypeRepairWarnings.add(value);
+    console.log(`repairedCardUnitType value=${value} repaired=${repaired}`);
+  }
+  return repaired;
+}
+
 function cardImageUrl(card) {
   // No stable public image template is defined in this repo. Keep URL empty so
   // the UI uses its fixed text fallback instead of guessing fake card art.
@@ -161,10 +181,11 @@ function cardSkillList(card) {
 }
 
 function cardViewMetadata(card) {
+  const unitType = firstText(card?.unitType, card?.unit_type, card?.unitTypeName, card?.unit_type_name, card?.["兵種"], card?.["兵种"]);
   return {
     cardCode: firstText(card?.card_code, card?.cardCode),
     cost: firstText(card?.cost, card?.cost_label, card?.costValue, card?.cost_value),
-    unitType: firstText(card?.unitType, card?.unit_type, card?.unitTypeName, card?.unit_type_name, card?.["兵種"], card?.["兵种"]),
+    unitType: repairCardUnitType(unitType),
     force: firstText(card?.force, card?.power, card?.strength, card?.attack, card?.["武力"]),
     intelligence: firstText(card?.intelligence, card?.intellect, card?.wisdom, card?.["知力"]),
     era: firstText(card?.era, card?.period, card?.timePeriod, card?.eraName, card?.periodName),
@@ -1537,14 +1558,17 @@ async function buildSnapshotFromData() {
 export async function buildLeaderboardSnapshot(options = {}) {
   const previousLegacyRoot = legacyRoot;
   const previousDiagnosticsEnabled = diagnosticsEnabled;
+  const previousUnitTypeRepairWarnings = unitTypeRepairWarnings;
   legacyRoot = options.legacyRoot ? resolve(options.legacyRoot) : defaultLegacyRoot;
   diagnosticsEnabled = Boolean(options.logDiagnostics);
+  unitTypeRepairWarnings = new Set();
 
   try {
     return await buildSnapshotFromData();
   } finally {
     legacyRoot = previousLegacyRoot;
     diagnosticsEnabled = previousDiagnosticsEnabled;
+    unitTypeRepairWarnings = previousUnitTypeRepairWarnings;
   }
 }
 
