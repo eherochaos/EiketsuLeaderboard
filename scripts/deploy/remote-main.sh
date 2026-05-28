@@ -24,6 +24,26 @@ ensure_deploy_owner() {
   sudo -n chown -R "$(id -u):$(id -g)" "$path" 2>/dev/null || chown -R "$(id -u):$(id -g)" "$path"
 }
 
+run_node() {
+  if command -v node >/dev/null 2>&1; then
+    LEADERBOARD_LEGACY_ROOT="${LEADERBOARD_LEGACY_ROOT:-}" \
+    LEADERBOARD_SNAPSHOT_FILE="${LEADERBOARD_SNAPSHOT_FILE:-}" \
+      node "$@"
+    return
+  fi
+  if command -v docker >/dev/null 2>&1; then
+    docker run --rm \
+      --user "$(id -u):$(id -g)" \
+      -v "$DEPLOY_PATH:/work" \
+      -w /work \
+      -e "LEADERBOARD_LEGACY_ROOT=${LEADERBOARD_LEGACY_ROOT:-}" \
+      -e "LEADERBOARD_SNAPSHOT_FILE=${LEADERBOARD_SNAPSHOT_FILE:-}" \
+      node:22-alpine node "$@"
+    return
+  fi
+  fail 'node runtime is missing'
+}
+
 decode_env() {
   if [ -z "${1:-}" ]; then
     printf ''
@@ -115,14 +135,16 @@ else
 fi
 
 log 'refresh official card data'
-LEADERBOARD_LEGACY_ROOT="$DEPLOY_PATH/$LEGACY_ROOT" \
-  node apps/api/leaderboard-snapshot/refresh-official-card-data.mjs \
-  "$DEPLOY_PATH/$LEGACY_ROOT/cards/datalist_api_base.json"
+LEADERBOARD_LEGACY_ROOT="$LEGACY_ROOT" \
+  run_node apps/api/leaderboard-snapshot/refresh-official-card-data.mjs \
+  "$LEGACY_ROOT/cards/datalist_api_base.json"
+ensure_deploy_owner "$DATA_ROOT"
 
 log 'refresh leaderboard snapshot'
-LEADERBOARD_LEGACY_ROOT="$DEPLOY_PATH/$LEGACY_ROOT" \
-LEADERBOARD_SNAPSHOT_FILE="$DEPLOY_PATH/apps/api/data/leaderboard-snapshot.json" \
-  node apps/api/leaderboard-snapshot/refresh-snapshot.mjs
+LEADERBOARD_LEGACY_ROOT="$LEGACY_ROOT" \
+LEADERBOARD_SNAPSHOT_FILE="$DATA_ROOT/leaderboard-snapshot.json" \
+  run_node apps/api/leaderboard-snapshot/refresh-snapshot.mjs
+ensure_deploy_owner "$DATA_ROOT"
 
 if [ -n "$DEPLOY_RESTART_COMMAND" ]; then
   log 'restart service'
