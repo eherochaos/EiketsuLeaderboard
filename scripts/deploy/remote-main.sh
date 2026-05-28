@@ -44,6 +44,41 @@ run_node() {
   fail 'node runtime is missing'
 }
 
+publish_live_frontend() {
+  if [ -n "$DEPLOY_LIVE_FRONTEND_ROOT" ]; then
+    local live_parent
+    live_parent="$(dirname "$DEPLOY_LIVE_FRONTEND_ROOT")"
+    ensure_writable_dir "$live_parent"
+    rm -rf "$DEPLOY_LIVE_FRONTEND_ROOT.next"
+    mkdir -p "$DEPLOY_LIVE_FRONTEND_ROOT.next"
+    cp -a apps/web/dist/. "$DEPLOY_LIVE_FRONTEND_ROOT.next/"
+    rm -rf "$DEPLOY_LIVE_FRONTEND_ROOT.prev"
+    if [ -d "$DEPLOY_LIVE_FRONTEND_ROOT" ]; then
+      mv "$DEPLOY_LIVE_FRONTEND_ROOT" "$DEPLOY_LIVE_FRONTEND_ROOT.prev"
+    fi
+    mv "$DEPLOY_LIVE_FRONTEND_ROOT.next" "$DEPLOY_LIVE_FRONTEND_ROOT"
+    ensure_deploy_owner "$DEPLOY_LIVE_FRONTEND_ROOT"
+  fi
+
+  if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -Fx "$DEPLOY_FASTAPI_CONTAINER" >/dev/null 2>&1; then
+    docker exec "$DEPLOY_FASTAPI_CONTAINER" sh -c "rm -rf '$DEPLOY_FASTAPI_FRONTEND_ROOT.next' '$DEPLOY_FASTAPI_FRONTEND_ROOT.prev' && mkdir -p '$DEPLOY_FASTAPI_FRONTEND_ROOT.next'"
+    tar -C apps/web/dist -cf - . | docker exec -i "$DEPLOY_FASTAPI_CONTAINER" tar -C "$DEPLOY_FASTAPI_FRONTEND_ROOT.next" -xf -
+    docker exec "$DEPLOY_FASTAPI_CONTAINER" sh -c "if [ -d '$DEPLOY_FASTAPI_FRONTEND_ROOT' ]; then mv '$DEPLOY_FASTAPI_FRONTEND_ROOT' '$DEPLOY_FASTAPI_FRONTEND_ROOT.prev'; fi && mv '$DEPLOY_FASTAPI_FRONTEND_ROOT.next' '$DEPLOY_FASTAPI_FRONTEND_ROOT'"
+  fi
+}
+
+publish_live_snapshot() {
+  [ -n "$DEPLOY_LIVE_SNAPSHOT_FILE" ] || return 0
+  local source_file="$DATA_ROOT/leaderboard-snapshot.json"
+  [ -f "$source_file" ] || fail 'leaderboard snapshot file is missing'
+  local live_snapshot_parent
+  live_snapshot_parent="$(dirname "$DEPLOY_LIVE_SNAPSHOT_FILE")"
+  ensure_writable_dir "$live_snapshot_parent"
+  cp "$source_file" "$DEPLOY_LIVE_SNAPSHOT_FILE.tmp.$$"
+  mv "$DEPLOY_LIVE_SNAPSHOT_FILE.tmp.$$" "$DEPLOY_LIVE_SNAPSHOT_FILE"
+  ensure_deploy_owner "$DEPLOY_LIVE_SNAPSHOT_FILE"
+}
+
 decode_env() {
   if [ -z "${1:-}" ]; then
     printf ''
@@ -55,10 +90,18 @@ decode_env() {
 DEPLOY_PATH="$(decode_env "${DEPLOY_PATH_B64:-}")"
 DEPLOY_EXPORT_CONTAINER="$(decode_env "${DEPLOY_EXPORT_CONTAINER_B64:-}")"
 DEPLOY_EXPORT_ASSET_ROOT="$(decode_env "${DEPLOY_EXPORT_ASSET_ROOT_B64:-}")"
+DEPLOY_FASTAPI_CONTAINER="$(decode_env "${DEPLOY_FASTAPI_CONTAINER_B64:-}")"
+DEPLOY_FASTAPI_FRONTEND_ROOT="$(decode_env "${DEPLOY_FASTAPI_FRONTEND_ROOT_B64:-}")"
+DEPLOY_LIVE_FRONTEND_ROOT="$(decode_env "${DEPLOY_LIVE_FRONTEND_ROOT_B64:-}")"
+DEPLOY_LIVE_SNAPSHOT_FILE="$(decode_env "${DEPLOY_LIVE_SNAPSHOT_FILE_B64:-}")"
 DEPLOY_RESTART_COMMAND="$(decode_env "${DEPLOY_RESTART_COMMAND_B64:-}")"
 DEPLOY_EXPORT_POSTGRES="${DEPLOY_EXPORT_POSTGRES:-1}"
 DEPLOY_EXPORT_CONTAINER="${DEPLOY_EXPORT_CONTAINER:-eiketsu-env-db-api-1}"
 DEPLOY_EXPORT_ASSET_ROOT="${DEPLOY_EXPORT_ASSET_ROOT:-/home/ubuntu/eiketsu-env-db/assets}"
+DEPLOY_FASTAPI_CONTAINER="${DEPLOY_FASTAPI_CONTAINER:-eiketsu-env-db-api-1}"
+DEPLOY_FASTAPI_FRONTEND_ROOT="${DEPLOY_FASTAPI_FRONTEND_ROOT:-/app/frontend/eiketsu-leaderboard}"
+DEPLOY_LIVE_FRONTEND_ROOT="${DEPLOY_LIVE_FRONTEND_ROOT:-/home/ubuntu/eiketsu-env-db/frontend/eiketsu-leaderboard}"
+DEPLOY_LIVE_SNAPSHOT_FILE="${DEPLOY_LIVE_SNAPSHOT_FILE:-/home/ubuntu/eiketsu-leaderboard-data/snapshots/leaderboard-snapshot.json}"
 
 case "$DEPLOY_EXPORT_POSTGRES" in
   '0'|'1')
@@ -99,6 +142,8 @@ if [ -d apps/web/dist ]; then
   mv apps/web/dist apps/web/dist.prev
 fi
 mv apps/web/dist.next apps/web/dist
+log 'publish live frontend'
+publish_live_frontend
 
 DATA_ROOT='apps/api/data'
 LEGACY_ROOT="$DATA_ROOT/legacy-service"
@@ -145,6 +190,8 @@ LEADERBOARD_LEGACY_ROOT="$LEGACY_ROOT" \
 LEADERBOARD_SNAPSHOT_FILE="$DATA_ROOT/leaderboard-snapshot.json" \
   run_node apps/api/leaderboard-snapshot/refresh-snapshot.mjs
 ensure_deploy_owner "$DATA_ROOT"
+log 'publish live snapshot'
+publish_live_snapshot
 
 if [ -n "$DEPLOY_RESTART_COMMAND" ]; then
   log 'restart service'
