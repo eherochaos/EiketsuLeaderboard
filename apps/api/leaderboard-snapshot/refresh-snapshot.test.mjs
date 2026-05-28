@@ -19,11 +19,35 @@ function card(cardId, cardCode, name) {
   return {
     card_hash: cardId,
     card_code: cardCode,
-    force: "6",
-    intelligence: "3",
+    force: "",
+    intelligence: "",
     image_url: `https://image.example.test/${cardId}.jpg`,
     label: `${name}(1.0 槍兵)`
   };
+}
+
+function officialGeneralRow(cardId, name, serial) {
+  return [
+    cardId,
+    `ds-${cardId}`,
+    `face-${cardId}`,
+    name,
+    name,
+    "0",
+    "0",
+    "1",
+    "1",
+    "0",
+    "0",
+    "0",
+    String(serial),
+    "0",
+    "0",
+    "-1",
+    "0",
+    "6",
+    "3"
+  ].join(",");
 }
 
 function deckRow(id, deckId, cards, rank, winCount, lossCount) {
@@ -166,13 +190,25 @@ async function createLegacyFixture(root) {
   ]);
   await writeJson(join(cardRoot, "card_catalog.json"), {
     cards: [
-      { hash_id: "card-a1", card_code: "蒼001", name: "Alpha", faction: "蒼", cost: "1.0", unitType: "槍兵" },
-      { hash_id: "card-a2", card_code: "蒼002", name: "Beta", faction: "蒼", cost: "1.0", unitType: "槍兵" },
-      { hash_id: "card-b1", card_code: "緋001", name: "Gamma", faction: "緋", cost: "1.0", unitType: "槍兵" },
-      { hash_id: "card-b2", card_code: "緋002", name: "Delta", faction: "緋", cost: "1.0", unitType: "槍兵" }
+      { hash_id: "card-a1", card_code: "蒼001", name: "Alpha", faction: "蒼", cost: "1.0", unitType: "妲嶅叺" },
+      { hash_id: "card-a2", card_code: "蒼002", name: "Beta", faction: "蒼", cost: "1.0", unitType: "妲嶅叺" },
+      { hash_id: "card-b1", card_code: "緋001", name: "Gamma", faction: "緋", cost: "1.0", unitType: "妲嶅叺" },
+      { hash_id: "card-b2", card_code: "緋002", name: "Delta", faction: "緋", cost: "1.0", unitType: "妲嶅叺" }
     ]
   });
   await writeJson(join(cardRoot, "card_catalog_overlay.json"), { cards: [] });
+  await writeJson(join(cardRoot, "datalist_api_base.json"), {
+    color: ["color-a,蒼,30,60,160"],
+    period: ["period-a,戦国"],
+    cost: ["cost-a,1.0,10"],
+    unitType: ["unit-a,槍兵"],
+    general: [
+      officialGeneralRow("card-a1", "Alpha", 1),
+      officialGeneralRow("card-a2", "Beta", 2),
+      officialGeneralRow("card-b1", "Gamma", 3),
+      officialGeneralRow("card-b2", "Delta", 4)
+    ]
+  });
 }
 
 async function testRefreshWritesAtomicSnapshot() {
@@ -182,7 +218,15 @@ async function testRefreshWritesAtomicSnapshot() {
 
   try {
     await createLegacyFixture(legacyRoot);
-    const { snapshot } = await refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: false });
+    const logs = [];
+    const originalLog = console.log;
+    let snapshot;
+    try {
+      console.log = (...args) => logs.push(args.join(" "));
+      ({ snapshot } = await refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: true }));
+    } finally {
+      console.log = originalLog;
+    }
     const outputText = await readFile(outputPath, "utf8");
     const output = JSON.parse(outputText);
 
@@ -206,6 +250,7 @@ async function testRefreshWritesAtomicSnapshot() {
     assert.notEqual(multiVariantCluster.playerAverageWinRate, multiVariantCluster.winRate);
     assert.equal(output.tierRows[0].deckCards[0].cost, "1.0");
     assert.equal(output.tierRows[0].deckCards[0].unitType, "槍兵");
+    assert.ok(logs.some((line) => line.includes("repairedCardUnitType value=妲嶅叺 repaired=槍兵")));
     assert.equal(output.tierRows[0].deckCards[0].force, "6");
     assert.equal(output.tierRows[0].deckCards[0].intelligence, "3");
     assert.ok(output.tierRows.some((row) => row.deckConfig.strategies.length > 0));

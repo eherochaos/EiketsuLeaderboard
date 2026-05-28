@@ -13,6 +13,43 @@ type ImageFrameCard = {
   skills?: string[];
 };
 
+const UNIT_TYPE_ICON_URLS: Record<string, string> = {
+  "槍兵": "https://image.eiketsu-taisen.net/unit_type/icon_white/5772a418a476299306cb90f89362f514.png?260520a",
+  "弓兵": "https://image.eiketsu-taisen.net/unit_type/icon_white/3e1dca95300bfd625d55d3f80996937d.png?260520a",
+  "騎兵": "https://image.eiketsu-taisen.net/unit_type/icon_white/f847cdd92b25ae6395de15ebb3fe8056.png?260520a",
+  "剣豪": "https://image.eiketsu-taisen.net/unit_type/icon_white/4121f72dfaa54327fd8aca68b4f25bc6.png?260520a",
+  "鉄砲隊": "https://image.eiketsu-taisen.net/unit_type/icon_white/435f285539ff5862f97f43fd70a2ccab.png?260520a"
+};
+
+const UNIT_TYPE_ALIASES: Record<string, string> = {
+  "槍": "槍兵",
+  "槍兵": "槍兵",
+  "枪兵": "槍兵",
+  "弓": "弓兵",
+  "弓兵": "弓兵",
+  "騎": "騎兵",
+  "騎兵": "騎兵",
+  "骑兵": "騎兵",
+  "剣": "剣豪",
+  "剣豪": "剣豪",
+  "剑豪": "剣豪",
+  "鉄": "鉄砲隊",
+  "鉄砲": "鉄砲隊",
+  "鉄砲隊": "鉄砲隊",
+  "铁炮": "鉄砲隊",
+  "铁炮队": "鉄砲隊"
+};
+
+const COST_ICON_URLS: Record<string, string> = {
+  "1.0": "https://image.eiketsu-taisen.net/general/cost/icon/227c4920436bde013efca97dadf846ab.png?260520a",
+  "1.5": "https://image.eiketsu-taisen.net/general/cost/icon/3f988d1dbbceadb0a3c3e234d9e0ca76.png?260520a",
+  "2.0": "https://image.eiketsu-taisen.net/general/cost/icon/6ef880152454c2e4f40f9e06094a7431.png?260520a",
+  "2.5": "https://image.eiketsu-taisen.net/general/cost/icon/4ab6c7bc627bdf1448c4ce60d54d96ec.png?260520a",
+  "3.0": "https://image.eiketsu-taisen.net/general/cost/icon/c457c44d0a0f42300ace6298bb2882f9.png?260520a",
+  "3.5": "https://image.eiketsu-taisen.net/general/cost/icon/a8110c617df5773102162c3a06a3ac8a.png?260520a",
+  "4.0": "https://image.eiketsu-taisen.net/general/cost/icon/bb4251def09373fcf2fa635753d5a0aa.png?260520a"
+};
+
 const props = withDefaults(defineProps<{
   src?: string;
   alt: string;
@@ -38,25 +75,39 @@ function text(value: unknown): string {
   return String(value ?? "").trim();
 }
 
+function toHalfWidth(value: string): string {
+  return value.replace(/[０-９．]/g, (char) => char === "．" ? "." : String.fromCharCode(char.charCodeAt(0) - 0xfee0));
+}
+
+function normalizedCost(value: unknown): string {
+  const match = toHalfWidth(text(value)).match(/\d+(?:\.\d+)?/);
+  if (!match) return "";
+  const costValue = Number(match[0]);
+  return Number.isFinite(costValue) ? costValue.toFixed(1) : "";
+}
+
+function normalizedUnitType(value: unknown): string {
+  const normalized = text(value).replace(/\s+/g, "");
+  return UNIT_TYPE_ALIASES[normalized] ?? normalized;
+}
+
 const detailCard = computed(() => props.card ?? null);
 const hasDetails = computed(() => Boolean(props.showDetails && detailCard.value));
 const displayName = computed(() => text(detailCard.value?.name) || props.alt);
-const unitType = computed(() => text(detailCard.value?.unitType));
+const unitType = computed(() => normalizedUnitType(detailCard.value?.unitType));
+const cost = computed(() => normalizedCost(detailCard.value?.cost));
 const force = computed(() => text(detailCard.value?.force));
 const intelligence = computed(() => text(detailCard.value?.intelligence));
+const unitTypeIconUrl = computed(() => UNIT_TYPE_ICON_URLS[unitType.value] ?? "");
+const costIconUrl = computed(() => COST_ICON_URLS[cost.value] ?? "");
 const skillLabels = computed(() => (detailCard.value?.skills ?? []).map(text).filter(Boolean).slice(0, 4));
-const statItems = computed(() => [
-  unitType.value ? { label: "兵", value: unitType.value, kind: "unit" } : null,
-  force.value ? { label: "武", value: force.value, kind: "number" } : null,
-  intelligence.value ? { label: "知", value: intelligence.value, kind: "number" } : null
-].filter((item): item is { label: string; value: string; kind: string } => Boolean(item)));
-const hasStats = computed(() => hasDetails.value && statItems.value.length > 0);
+const hasPowerStats = computed(() => hasDetails.value);
 const detailRows = computed(() => [
   { label: "勢力", value: text(detailCard.value?.faction) },
   { label: "兵種", value: unitType.value },
   { label: "武力", value: force.value },
   { label: "知力", value: intelligence.value },
-  { label: "Cost", value: text(detailCard.value?.cost) },
+  { label: "Cost", value: cost.value },
   { label: "時代", value: text(detailCard.value?.era) },
   { label: "No.", value: text(detailCard.value?.cardCode) }
 ].filter((row) => row.value));
@@ -83,18 +134,18 @@ const detailTitle = computed(() => {
     :data-label="alt"
   >
     <span class="Common_ImageFrame_Canvas">
-      <img v-if="src && !failed" :src="src" :alt="alt" loading="lazy" @error="failed = true">
+      <img v-if="src && !failed" class="Common_ImageFrame_Image" :src="src" :alt="alt" loading="lazy" @error="failed = true">
       <span v-else class="Common_ImageFrame_Fallback">{{ alt }}</span>
-      <span v-if="hasStats" class="Common_ImageFrame_Stats" aria-hidden="true">
-        <span
-          v-for="item in statItems"
-          :key="`${item.label}:${item.value}`"
-          class="Common_ImageFrame_Stat"
-          :class="{ Common_ImageFrame_StatUnit: item.kind === 'unit' }"
-        >
-          <span class="Common_ImageFrame_StatLabel">{{ item.label }}</span>
-          <span class="Common_ImageFrame_StatValue">{{ item.value }}</span>
-        </span>
+
+      <span v-if="hasDetails && unitTypeIconUrl" class="Common_ImageFrame_UnitIcon" aria-hidden="true">
+        <img :src="unitTypeIconUrl" alt="" loading="lazy">
+      </span>
+      <span v-if="hasDetails && costIconUrl" class="Common_ImageFrame_CostIcon" aria-hidden="true">
+        <img :src="costIconUrl" alt="" loading="lazy">
+      </span>
+      <span v-if="hasPowerStats" class="Common_ImageFrame_PowerStats" aria-hidden="true">
+        <span class="Common_ImageFrame_PowerValue">{{ force || "-" }}</span>
+        <span class="Common_ImageFrame_PowerValue">{{ intelligence || "-" }}</span>
       </span>
     </span>
 
@@ -115,6 +166,12 @@ const detailTitle = computed(() => {
 
 <style scoped>
 .Common_ImageFrame {
+  --Common_ImageFrame_Inset: 0px;
+  --Common_ImageFrame_OverlayMask: color-mix(in srgb, var(--color-panel-strong) 20%, transparent);
+  --Common_ImageFrame_UnitSize: clamp(17px, 35%, 24px);
+  --Common_ImageFrame_CostWidth: clamp(25px, 60%, 40px);
+  --Common_ImageFrame_StatSize: clamp(14px, 30%, 19px);
+
   position: relative;
   display: inline-block;
   width: 64px;
@@ -126,6 +183,20 @@ const detailTitle = computed(() => {
   font-weight: 700;
   text-align: center;
   outline: none;
+}
+
+.Common_ImageFrame.Common_ImageFrame_compact {
+  --Common_ImageFrame_Inset: 0px;
+  --Common_ImageFrame_UnitSize: clamp(15px, 34%, 21px);
+  --Common_ImageFrame_CostWidth: clamp(23px, 58%, 35px);
+  --Common_ImageFrame_StatSize: clamp(13px, 29%, 17px);
+}
+
+.Common_ImageFrame.Common_ImageFrame_full {
+  --Common_ImageFrame_Inset: 0px;
+  --Common_ImageFrame_UnitSize: clamp(18px, 36%, 26px);
+  --Common_ImageFrame_CostWidth: clamp(26px, 62%, 42px);
+  --Common_ImageFrame_StatSize: clamp(15px, 32%, 20px);
 }
 
 .Common_ImageFrame.Common_ImageFrame_portrait {
@@ -149,14 +220,14 @@ const detailTitle = computed(() => {
   transition: border-color 160ms ease, filter 160ms ease;
 }
 
-.Common_ImageFrame img {
+.Common_ImageFrame_Image {
   width: 100%;
   height: 100%;
   display: block;
   object-fit: cover;
 }
 
-.Common_ImageFrame.Common_ImageFrame_portrait img {
+.Common_ImageFrame.Common_ImageFrame_portrait .Common_ImageFrame_Image {
   object-fit: contain;
   background: var(--color-brown);
 }
@@ -172,6 +243,69 @@ const detailTitle = computed(() => {
   -webkit-line-clamp: 3;
 }
 
+.Common_ImageFrame_UnitIcon,
+.Common_ImageFrame_CostIcon,
+.Common_ImageFrame_PowerStats {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.Common_ImageFrame_UnitIcon {
+  top: var(--Common_ImageFrame_Inset);
+  left: var(--Common_ImageFrame_Inset);
+  width: var(--Common_ImageFrame_UnitSize);
+  padding: 2px;
+  background: var(--Common_ImageFrame_OverlayMask);
+  border-radius: 0 0 var(--radius-sm) 0;
+  filter: drop-shadow(0 1px 1px color-mix(in srgb, var(--color-brown) 86%, transparent));
+}
+
+.Common_ImageFrame_CostIcon {
+  top: var(--Common_ImageFrame_Inset);
+  right: var(--Common_ImageFrame_Inset);
+  width: var(--Common_ImageFrame_CostWidth);
+  padding: 1px 1px 0;
+  background: var(--Common_ImageFrame_OverlayMask);
+  border-radius: 0 0 0 var(--radius-sm);
+  filter: drop-shadow(0 1px 1px color-mix(in srgb, var(--color-brown) 76%, transparent));
+}
+
+.Common_ImageFrame_UnitIcon img,
+.Common_ImageFrame_CostIcon img {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+
+.Common_ImageFrame_PowerStats {
+  left: var(--Common_ImageFrame_Inset);
+  bottom: var(--Common_ImageFrame_Inset);
+  display: grid;
+  grid-template-columns: repeat(2, var(--Common_ImageFrame_StatSize));
+  gap: 1px;
+  padding: 1px;
+  background: var(--Common_ImageFrame_OverlayMask);
+  border-radius: 0 var(--radius-sm) 0 0;
+}
+
+.Common_ImageFrame_PowerValue {
+  display: grid;
+  place-items: center;
+  width: var(--Common_ImageFrame_StatSize);
+  height: var(--Common_ImageFrame_StatSize);
+  color: var(--color-panel-strong);
+  background: color-mix(in srgb, var(--color-brown) 64%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-gold) 38%, transparent);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-panel-strong) 10%, transparent);
+  font-family: var(--font-number);
+  font-size: calc(var(--Common_ImageFrame_StatSize) * 0.72);
+  font-weight: 800;
+  line-height: 1;
+}
+
 .Common_ImageFrame_HasDetails:hover .Common_ImageFrame_Canvas,
 .Common_ImageFrame_HasDetails:focus-visible .Common_ImageFrame_Canvas,
 .Common_ImageFrame_HasDetails:focus-within .Common_ImageFrame_Canvas {
@@ -183,56 +317,6 @@ const detailTitle = computed(() => {
 .Common_ImageFrame_HasDetails:focus-visible,
 .Common_ImageFrame_HasDetails:focus-within {
   z-index: 30;
-}
-
-.Common_ImageFrame_Stats {
-  position: absolute;
-  right: 3px;
-  bottom: 3px;
-  left: 3px;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  min-width: 0;
-  padding: 3px;
-  background: color-mix(in srgb, var(--color-brown) 88%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-gold) 52%, transparent);
-  border-radius: var(--radius-sm);
-}
-
-.Common_ImageFrame_Stat {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--color-brown);
-  background: var(--color-panel-strong);
-  border-radius: var(--radius-sm);
-  font-family: var(--font-number);
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.15;
-}
-
-.Common_ImageFrame_StatLabel {
-  flex: 0 0 auto;
-  padding: 1px 2px;
-  color: var(--color-panel-strong);
-  background: var(--color-brown);
-}
-
-.Common_ImageFrame_StatValue {
-  min-width: 0;
-  padding: 1px 3px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.Common_ImageFrame_StatUnit {
-  max-width: 100%;
 }
 
 .Common_ImageFrame_Popover {
@@ -329,25 +413,5 @@ const detailTitle = computed(() => {
   line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.Common_ImageFrame_Compact .Common_ImageFrame_Stats {
-  right: 2px;
-  bottom: 2px;
-  left: 2px;
-  gap: 2px;
-  padding: 2px;
-}
-
-.Common_ImageFrame_Compact .Common_ImageFrame_Stat {
-  font-size: 9px;
-}
-
-.Common_ImageFrame_Compact .Common_ImageFrame_StatLabel {
-  padding: 1px 2px;
-}
-
-.Common_ImageFrame_Compact .Common_ImageFrame_StatValue {
-  padding: 1px 2px;
 }
 </style>
