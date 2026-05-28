@@ -47,7 +47,7 @@ jobs:
             --exclude='apps/web/node_modules' \
             --exclude='apps/web/npm-cache' \
             --exclude='node_modules' \
-            -czf eiketsu-deploy-source.tgz .
+            -czf "$RUNNER_TEMP/eiketsu-deploy-source.tgz" .
 
       - name: Check deploy secrets
         run: |
@@ -84,7 +84,7 @@ jobs:
         run: npm run build
 
       - name: Pack web dist
-        run: tar -C apps/web/dist -czf eiketsu-web-dist.tgz .
+        run: tar -C apps/web/dist -czf "$RUNNER_TEMP/eiketsu-web-dist.tgz" .
 
       - name: Prepare SSH
         run: |
@@ -100,7 +100,7 @@ jobs:
 
       - name: Upload deploy archives
         run: |
-          scp -P "$DEPLOY_PORT" -i ~/.ssh/deploy_key eiketsu-deploy-source.tgz eiketsu-web-dist.tgz "$DEPLOY_USER@$DEPLOY_HOST:/tmp/"
+          scp -P "$DEPLOY_PORT" -i ~/.ssh/deploy_key "$RUNNER_TEMP/eiketsu-deploy-source.tgz" "$RUNNER_TEMP/eiketsu-web-dist.tgz" "$DEPLOY_USER@$DEPLOY_HOST:/tmp/"
 
       - name: Deploy on server
         run: |
