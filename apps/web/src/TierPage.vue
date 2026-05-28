@@ -150,6 +150,17 @@ function deckImageAlt(deck: DeckRow): string {
   return activeClusterVariant(deck)?.imageAlt || deck.imageAlt;
 }
 
+function deckImageCard(deck: DeckRow): CardView | null {
+  const variant = activeClusterVariant(deck);
+  const cards = variant?.deckCards ?? deck.deckCards;
+  const imageUrl = deckImageUrl(deck);
+  const imageAlt = deckImageAlt(deck);
+  return cards.find((card) => (
+    (imageUrl && card.imageUrl === imageUrl) ||
+    (imageAlt && (card.imageAlt === imageAlt || card.name === imageAlt))
+  )) || cards[0] || null;
+}
+
 function hasClusterVariants(deck: DeckRow): boolean {
   return clusterVariants(deck).length > 1;
 }
@@ -324,7 +335,7 @@ function switchClusterVariant(deck: DeckRow): void {
           <article v-for="(deck, index) in visibleRows" :key="`${displayRowKey(deck)}-mobile`" class="TierPage_MobileRow">
             <div class="TierPage_MobileHead">
               <span class="Common_RankCell">#{{ index + 1 }}</span>
-              <CommonImageFrame :src="deckImageUrl(deck)" :alt="deckImageAlt(deck)" ratio="portrait" />
+              <CommonImageFrame :src="deckImageUrl(deck)" :alt="deckImageAlt(deck)" :card="deckImageCard(deck)" show-details density="full" ratio="portrait" />
               <div>
                 <div class="TierPage_MobileTitleLine">
                   <h3>{{ deck.deckName }}</h3>

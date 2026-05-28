@@ -2,7 +2,7 @@
 import CommonImageFrame from "./Common_ImageFrame.vue";
 import CommonMetricTags from "./Common_MetricTags.vue";
 import { dateOnly, dateTime, integer, percent, topFactionSummary } from "../lib/format";
-import type { FactionShare, LeaderboardSnapshot, DeckRow } from "../types";
+import type { CardView, FactionShare, LeaderboardSnapshot, DeckRow } from "../types";
 
 // 首页首屏负责快速给出环境结论、当前第一和 2~4 名入口信息。
 defineProps<{
@@ -18,6 +18,12 @@ function deckMeta(deck: DeckRow): string {
   if (deck.categoryName && deck.categoryName !== deck.deckName) parts.push(deck.categoryName);
   parts.push(`样本 ${integer(deck.sampleSize)}`);
   return parts.join(" · ");
+}
+function deckImageCard(deck: DeckRow): CardView | null {
+  return deck.deckCards.find((card) => (
+    (deck.imageUrl && card.imageUrl === deck.imageUrl) ||
+    (deck.imageAlt && (card.imageAlt === deck.imageAlt || card.name === deck.imageAlt))
+  )) || deck.deckCards[0] || null;
 }
 </script>
 
@@ -50,7 +56,7 @@ function deckMeta(deck: DeckRow): string {
 
     <aside v-if="topDeck" class="Main_Hero_Section_Rank" aria-label="No.1">
       <div class="Main_Hero_Section_RankCard">
-        <CommonImageFrame :src="topDeck.imageUrl" :alt="topDeck.imageAlt" ratio="portrait" />
+        <CommonImageFrame :src="topDeck.imageUrl" :alt="topDeck.imageAlt" :card="deckImageCard(topDeck)" show-details density="full" ratio="portrait" />
         <div class="Main_Hero_Section_RankCardBody">
           <span class="Main_Hero_Section_RankKicker">No.1</span>
           <h2>{{ topDeck.deckName }}</h2>
@@ -75,7 +81,7 @@ function deckMeta(deck: DeckRow): string {
       <div class="Main_Hero_Section_Top3List">
         <article v-for="(deck, index) in top4Decks.slice(1, 4)" :key="deck.deckId" class="Main_Hero_Section_Top3Row">
           <span class="Main_Hero_Section_Top3Rank">No.{{ index + 2 }}</span>
-          <CommonImageFrame :src="deck.imageUrl" :alt="deck.imageAlt" ratio="portrait" />
+          <CommonImageFrame :src="deck.imageUrl" :alt="deck.imageAlt" :card="deckImageCard(deck)" show-details density="compact" ratio="portrait" />
           <div>
             <h3>{{ deck.deckName }}</h3>
             <div class="Main_Hero_Section_Metrics">
