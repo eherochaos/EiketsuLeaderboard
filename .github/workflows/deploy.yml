@@ -1,0 +1,90 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  production:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_EXPORT_POSTGRES: ${{ secrets.DEPLOY_EXPORT_POSTGRES || '1' }}
+      DEPLOY_RESTART_COMMAND: ${{ secrets.DEPLOY_RESTART_COMMAND }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Check deploy secrets
+        run: |
+          missing=0
+          for name in DEPLOY_HOST DEPLOY_PORT DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_PATH; do
+            if [ -z "${!name}" ]; then
+              echo "$name is missing"
+              missing=1
+            fi
+          done
+          case "$DEPLOY_EXPORT_POSTGRES" in
+            0|1) ;;
+            *)
+              echo "DEPLOY_EXPORT_POSTGRES must be 0 or 1"
+              missing=1
+              ;;
+          esac
+          exit "$missing"
+
+      - name: Install web dependencies
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Typecheck web
+        working-directory: apps/web
+        run: npm run typecheck
+
+      - name: Build web
+        working-directory: apps/web
+        run: npm run build
+
+      - name: Pack web dist
+        run: tar -C apps/web/dist -czf web-dist.tgz .
+
+      - name: Prepare SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload web dist
+        run: |
+          scp -P "$DEPLOY_PORT" -i ~/.ssh/deploy_key web-dist.tgz "$DEPLOY_USER@$DEPLOY_HOST:/tmp/eiketsu-web-dist.tgz"
+
+      - name: Deploy on server
+        run: |
+          DEPLOY_PATH_B64="$(printf '%s' "$DEPLOY_PATH" | base64 -w 0)"
+          DEPLOY_RESTART_COMMAND_B64="$(printf '%s' "$DEPLOY_RESTART_COMMAND" | base64 -w 0)"
+          ssh -p "$DEPLOY_PORT" -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
+            "DEPLOY_PATH_B64=$DEPLOY_PATH_B64 DEPLOY_EXPORT_POSTGRES=$DEPLOY_EXPORT_POSTGRES DEPLOY_RESTART_COMMAND_B64=$DEPLOY_RESTART_COMMAND_B64 bash -s" \
+            < scripts/deploy/remote-main.sh
