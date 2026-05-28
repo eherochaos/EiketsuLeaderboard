@@ -22,6 +22,7 @@ jobs:
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
       DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
       DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_SSH_KEY_B64: ${{ secrets.DEPLOY_SSH_KEY_B64 }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
       DEPLOY_EXPORT_POSTGRES: ${{ secrets.DEPLOY_EXPORT_POSTGRES || '1' }}
       DEPLOY_RESTART_COMMAND: ${{ secrets.DEPLOY_RESTART_COMMAND }}
@@ -37,15 +38,30 @@ jobs:
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
 
+      - name: Pack deploy source
+        run: |
+          tar \
+            --exclude='.git' \
+            --exclude='apps/api/data' \
+            --exclude='apps/web/dist' \
+            --exclude='apps/web/node_modules' \
+            --exclude='apps/web/npm-cache' \
+            --exclude='node_modules' \
+            -czf eiketsu-deploy-source.tgz .
+
       - name: Check deploy secrets
         run: |
           missing=0
-          for name in DEPLOY_HOST DEPLOY_PORT DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_PATH; do
+          for name in DEPLOY_HOST DEPLOY_PORT DEPLOY_USER DEPLOY_PATH; do
             if [ -z "${!name}" ]; then
               echo "$name is missing"
               missing=1
             fi
           done
+          if [ -z "$DEPLOY_SSH_KEY" ] && [ -z "$DEPLOY_SSH_KEY_B64" ]; then
+            echo "DEPLOY_SSH_KEY or DEPLOY_SSH_KEY_B64 is missing"
+            missing=1
+          fi
           case "$DEPLOY_EXPORT_POSTGRES" in
             0|1) ;;
             *)
@@ -68,18 +84,23 @@ jobs:
         run: npm run build
 
       - name: Pack web dist
-        run: tar -C apps/web/dist -czf web-dist.tgz .
+        run: tar -C apps/web/dist -czf eiketsu-web-dist.tgz .
 
       - name: Prepare SSH
         run: |
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          if [ -n "$DEPLOY_SSH_KEY_B64" ]; then
+            printf '%s' "$DEPLOY_SSH_KEY_B64" | base64 --decode > ~/.ssh/deploy_key
+          else
+            printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          fi
           chmod 600 ~/.ssh/deploy_key
+          ssh-keygen -y -f ~/.ssh/deploy_key > /dev/null
           ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
-      - name: Upload web dist
+      - name: Upload deploy archives
         run: |
-          scp -P "$DEPLOY_PORT" -i ~/.ssh/deploy_key web-dist.tgz "$DEPLOY_USER@$DEPLOY_HOST:/tmp/eiketsu-web-dist.tgz"
+          scp -P "$DEPLOY_PORT" -i ~/.ssh/deploy_key eiketsu-deploy-source.tgz eiketsu-web-dist.tgz "$DEPLOY_USER@$DEPLOY_HOST:/tmp/"
 
       - name: Deploy on server
         run: |
