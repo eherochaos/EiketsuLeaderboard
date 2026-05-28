@@ -19,8 +19,10 @@ decode_env() {
 }
 
 DEPLOY_PATH="$(decode_env "${DEPLOY_PATH_B64:-}")"
+DEPLOY_EXPORT_CONTAINER="$(decode_env "${DEPLOY_EXPORT_CONTAINER_B64:-}")"
 DEPLOY_RESTART_COMMAND="$(decode_env "${DEPLOY_RESTART_COMMAND_B64:-}")"
 DEPLOY_EXPORT_POSTGRES="${DEPLOY_EXPORT_POSTGRES:-1}"
+DEPLOY_EXPORT_CONTAINER="${DEPLOY_EXPORT_CONTAINER:-eiketsu-env-db-api-1}"
 
 case "$DEPLOY_EXPORT_POSTGRES" in
   '0'|'1')
@@ -65,8 +67,19 @@ mv apps/web/dist.next apps/web/dist
 LEGACY_ROOT='apps/api/data/legacy-service'
 if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ]; then
   log 'export postgres data'
+  mkdir -p apps/api/data
   rm -rf apps/api/data/legacy-service.next
-  python3 apps/api/data-migration/export_legacy_service_from_postgres.py --output apps/api/data/legacy-service.next
+  if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -Fx "$DEPLOY_EXPORT_CONTAINER" >/dev/null 2>&1; then
+    container_export_root="/tmp/eiketsu-legacy-service-export-$$"
+    docker exec "$DEPLOY_EXPORT_CONTAINER" rm -rf "$container_export_root" /tmp/export_legacy_service_from_postgres.py
+    docker cp apps/api/data-migration/export_legacy_service_from_postgres.py "$DEPLOY_EXPORT_CONTAINER:/tmp/export_legacy_service_from_postgres.py"
+    docker exec "$DEPLOY_EXPORT_CONTAINER" python /tmp/export_legacy_service_from_postgres.py --output "$container_export_root"
+    docker cp "$DEPLOY_EXPORT_CONTAINER:$container_export_root" apps/api/data/legacy-service.next
+    docker exec "$DEPLOY_EXPORT_CONTAINER" rm -rf "$container_export_root" /tmp/export_legacy_service_from_postgres.py
+    chown -R "$(id -u):$(id -g)" apps/api/data/legacy-service.next 2>/dev/null || true
+  else
+    python3 apps/api/data-migration/export_legacy_service_from_postgres.py --output apps/api/data/legacy-service.next
+  fi
   rm -rf apps/api/data/legacy-service.prev
   if [ -d "$LEGACY_ROOT" ]; then
     mv "$LEGACY_ROOT" apps/api/data/legacy-service.prev
