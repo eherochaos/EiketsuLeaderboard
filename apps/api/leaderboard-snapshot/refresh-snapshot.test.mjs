@@ -19,11 +19,35 @@ function card(cardId, cardCode, name) {
   return {
     card_hash: cardId,
     card_code: cardCode,
-    force: "6",
-    intelligence: "3",
+    force: "",
+    intelligence: "",
     image_url: `https://image.example.test/${cardId}.jpg`,
     label: `${name}(1.0 槍兵)`
   };
+}
+
+function officialGeneralRow(cardId, name, serial) {
+  return [
+    cardId,
+    `ds-${cardId}`,
+    `face-${cardId}`,
+    name,
+    name,
+    "0",
+    "0",
+    "1",
+    "1",
+    "0",
+    "0",
+    "0",
+    String(serial),
+    "0",
+    "0",
+    "-1",
+    "0",
+    "6",
+    "3"
+  ].join(",");
 }
 
 function deckRow(id, deckId, cards, rank, winCount, lossCount) {
@@ -173,6 +197,18 @@ async function createLegacyFixture(root) {
     ]
   });
   await writeJson(join(cardRoot, "card_catalog_overlay.json"), { cards: [] });
+  await writeJson(join(cardRoot, "datalist_api_base.json"), {
+    color: ["color-a,蒼,30,60,160"],
+    period: ["period-a,戦国"],
+    cost: ["cost-a,1.0,10"],
+    unitType: ["unit-a,槍兵"],
+    general: [
+      officialGeneralRow("card-a1", "Alpha", 1),
+      officialGeneralRow("card-a2", "Beta", 2),
+      officialGeneralRow("card-b1", "Gamma", 3),
+      officialGeneralRow("card-b2", "Delta", 4)
+    ]
+  });
 }
 
 async function testRefreshWritesAtomicSnapshot() {

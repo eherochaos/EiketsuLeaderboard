@@ -101,7 +101,7 @@ const intelligence = computed(() => text(detailCard.value?.intelligence));
 const unitTypeIconUrl = computed(() => UNIT_TYPE_ICON_URLS[unitType.value] ?? "");
 const costIconUrl = computed(() => COST_ICON_URLS[cost.value] ?? "");
 const skillLabels = computed(() => (detailCard.value?.skills ?? []).map(text).filter(Boolean).slice(0, 4));
-const hasPowerStats = computed(() => hasDetails.value && Boolean(force.value || intelligence.value));
+const hasPowerStats = computed(() => hasDetails.value);
 const detailRows = computed(() => [
   { label: "勢力", value: text(detailCard.value?.faction) },
   { label: "兵種", value: unitType.value },
@@ -166,10 +166,11 @@ const detailTitle = computed(() => {
 
 <style scoped>
 .Common_ImageFrame {
-  --Common_ImageFrame_Inset: 3px;
-  --Common_ImageFrame_UnitSize: clamp(16px, 34%, 23px);
-  --Common_ImageFrame_CostWidth: clamp(24px, 58%, 38px);
-  --Common_ImageFrame_StatSize: clamp(13px, 29%, 18px);
+  --Common_ImageFrame_Inset: 0px;
+  --Common_ImageFrame_OverlayMask: color-mix(in srgb, var(--color-panel-strong) 20%, transparent);
+  --Common_ImageFrame_UnitSize: clamp(17px, 35%, 24px);
+  --Common_ImageFrame_CostWidth: clamp(25px, 60%, 40px);
+  --Common_ImageFrame_StatSize: clamp(14px, 30%, 19px);
 
   position: relative;
   display: inline-block;
@@ -185,17 +186,17 @@ const detailTitle = computed(() => {
 }
 
 .Common_ImageFrame.Common_ImageFrame_compact {
-  --Common_ImageFrame_Inset: 2px;
-  --Common_ImageFrame_UnitSize: clamp(14px, 32%, 20px);
-  --Common_ImageFrame_CostWidth: clamp(22px, 56%, 34px);
-  --Common_ImageFrame_StatSize: clamp(12px, 27%, 16px);
+  --Common_ImageFrame_Inset: 0px;
+  --Common_ImageFrame_UnitSize: clamp(15px, 34%, 21px);
+  --Common_ImageFrame_CostWidth: clamp(23px, 58%, 35px);
+  --Common_ImageFrame_StatSize: clamp(13px, 29%, 17px);
 }
 
 .Common_ImageFrame.Common_ImageFrame_full {
-  --Common_ImageFrame_Inset: 3px;
-  --Common_ImageFrame_UnitSize: clamp(17px, 34%, 25px);
-  --Common_ImageFrame_CostWidth: clamp(25px, 60%, 40px);
-  --Common_ImageFrame_StatSize: clamp(14px, 30%, 19px);
+  --Common_ImageFrame_Inset: 0px;
+  --Common_ImageFrame_UnitSize: clamp(18px, 36%, 26px);
+  --Common_ImageFrame_CostWidth: clamp(26px, 62%, 42px);
+  --Common_ImageFrame_StatSize: clamp(15px, 32%, 20px);
 }
 
 .Common_ImageFrame.Common_ImageFrame_portrait {
@@ -254,13 +255,19 @@ const detailTitle = computed(() => {
   top: var(--Common_ImageFrame_Inset);
   left: var(--Common_ImageFrame_Inset);
   width: var(--Common_ImageFrame_UnitSize);
+  padding: 2px;
+  background: var(--Common_ImageFrame_OverlayMask);
+  border-radius: 0 0 var(--radius-sm) 0;
   filter: drop-shadow(0 1px 1px color-mix(in srgb, var(--color-brown) 86%, transparent));
 }
 
 .Common_ImageFrame_CostIcon {
-  top: calc(var(--Common_ImageFrame_Inset) + 1px);
+  top: var(--Common_ImageFrame_Inset);
   right: var(--Common_ImageFrame_Inset);
   width: var(--Common_ImageFrame_CostWidth);
+  padding: 1px 1px 0;
+  background: var(--Common_ImageFrame_OverlayMask);
+  border-radius: 0 0 0 var(--radius-sm);
   filter: drop-shadow(0 1px 1px color-mix(in srgb, var(--color-brown) 76%, transparent));
 }
 
@@ -277,7 +284,10 @@ const detailTitle = computed(() => {
   bottom: var(--Common_ImageFrame_Inset);
   display: grid;
   grid-template-columns: repeat(2, var(--Common_ImageFrame_StatSize));
-  gap: 2px;
+  gap: 1px;
+  padding: 1px;
+  background: var(--Common_ImageFrame_OverlayMask);
+  border-radius: 0 var(--radius-sm) 0 0;
 }
 
 .Common_ImageFrame_PowerValue {
@@ -286,10 +296,10 @@ const detailTitle = computed(() => {
   width: var(--Common_ImageFrame_StatSize);
   height: var(--Common_ImageFrame_StatSize);
   color: var(--color-panel-strong);
-  background: color-mix(in srgb, var(--color-brown) 88%, var(--color-text));
-  border: 1px solid color-mix(in srgb, var(--color-gold) 60%, var(--color-brown));
+  background: color-mix(in srgb, var(--color-brown) 64%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-gold) 38%, transparent);
   border-radius: var(--radius-sm);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-panel-strong) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-panel-strong) 10%, transparent);
   font-family: var(--font-number);
   font-size: calc(var(--Common_ImageFrame_StatSize) * 0.72);
   font-weight: 800;

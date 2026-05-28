@@ -37,6 +37,57 @@ const CARD_UNIT_TYPE_REPAIRS = {
   "閴勭牪闅�": "鉄砲隊"
 };
 
+const OFFICIAL_CARD_TYPE_PREFIXES = new Set(["ST", "EX", "PL"]);
+
+function csvParts(row) {
+  return String(row || "").split(",");
+}
+
+function indexedLabels(rows, labelIndex = 1) {
+  return (rows || []).map((row) => csvParts(row)[labelIndex] || "");
+}
+
+function officialDatalistCardCode(fields, colorLabels) {
+  const type = String(fields[8] || "").trim();
+  const serial = String(fields[12] || "").trim();
+  if (!serial) return "";
+  const prefix = OFFICIAL_CARD_TYPE_PREFIXES.has(type) ? type : colorLabels[toNumber(fields[5])] || "";
+  return prefix ? `${prefix}${serial.padStart(3, "0")}` : "";
+}
+
+function officialDatalistCards(data) {
+  const colorLabels = indexedLabels(data?.color);
+  const periodLabels = indexedLabels(data?.period);
+  const costLabels = indexedLabels(data?.cost);
+  const unitTypeLabels = indexedLabels(data?.unitType);
+
+  return (data?.general || []).map((row) => {
+    const fields = csvParts(row);
+    const card = { hash_id: fields[0] || "" };
+    const values = {
+      card_code: officialDatalistCardCode(fields, colorLabels),
+      name: fields[3] || "",
+      faction: colorLabels[toNumber(fields[5])] || "",
+      era: periodLabels[toNumber(fields[6])] || "",
+      cost: costLabels[toNumber(fields[13])] || "",
+      unitType: unitTypeLabels[toNumber(fields[15])] || "",
+      force: fields[17] || "",
+      intelligence: fields[18] || ""
+    };
+
+    for (const [key, value] of Object.entries(values)) {
+      if (value) card[key] = value;
+    }
+
+    card.image_keys = {
+      card_small: fields[0] || "",
+      card_ds: fields[1] || "",
+      card_face: fields[2] || ""
+    };
+    return card;
+  }).filter((card) => card.hash_id);
+}
+
 function toNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
@@ -107,9 +158,11 @@ function cardHashIds(card) {
 async function loadCardCatalog() {
   const base = await readJson(resolve(legacyRoot, "cards/card_catalog.json"));
   const overlay = await readJson(resolve(legacyRoot, "cards/card_catalog_overlay.json"));
+  const officialDatalist = await readOptionalJson(resolve(legacyRoot, "cards/datalist_api_base.json"), null);
+  const officialCards = officialDatalist ? officialDatalistCards(officialDatalist) : [];
   const byHash = new Map();
 
-  for (const card of [...(base.cards || []), ...(overlay.cards || [])]) {
+  for (const card of [...(base.cards || []), ...(overlay.cards || []), ...officialCards]) {
     for (const hashId of cardHashIds(card)) {
       byHash.set(hashId, { ...(byHash.get(hashId) || {}), ...card });
     }
@@ -193,6 +246,15 @@ function cardViewMetadata(card) {
   };
 }
 
+function mergeNonEmptyCardData(baseCard, overrideCard) {
+  const merged = { ...baseCard };
+  for (const [key, value] of Object.entries(overrideCard || {})) {
+    if (value === "" || value === null || value === undefined) continue;
+    merged[key] = value;
+  }
+  return merged;
+}
+
 function cardView(cardId, cardCatalog) {
   const card = cardCatalog[cardId] || {};
   const name = cardName(cardId, cardCatalog);
@@ -246,7 +308,7 @@ function latestFormalRun(runs, targetVersion) {
 function formalCardView(card, cardCatalog = {}) {
   const cardId = String(card?.card_hash || "");
   const catalogCard = cardCatalog[cardId] || {};
-  const mergedCard = { ...catalogCard, ...card };
+  const mergedCard = mergeNonEmptyCardData(catalogCard, card);
   const name = labelName(card?.label) || String(card?.card_hash || "").slice(0, 8);
   return {
     cardId,
