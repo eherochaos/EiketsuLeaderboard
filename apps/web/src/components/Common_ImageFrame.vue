@@ -321,6 +321,9 @@ const detailTitle = computed(() => {
 .Common_ImageFrame_CostIcon {
   top: 0;
   right: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
   width: var(--Common_ImageFrame_CostWidth);
   background: var(--Common_ImageFrame_OverlayMask);
   border-radius: 0 0 0 var(--radius-sm);
@@ -328,11 +331,19 @@ const detailTitle = computed(() => {
   transform: translate(var(--Common_ImageFrame_CostOffsetX), var(--Common_ImageFrame_CostOffsetY));
 }
 
-.Common_ImageFrame_UnitIcon img,
-.Common_ImageFrame_CostIcon img {
+.Common_ImageFrame_UnitIcon img {
   display: block;
   width: 100%;
   height: auto;
+  object-fit: contain;
+}
+
+.Common_ImageFrame_CostIcon img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  margin-left: auto;
   object-fit: contain;
 }
 
