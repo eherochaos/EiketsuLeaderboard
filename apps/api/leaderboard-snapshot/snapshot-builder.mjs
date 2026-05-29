@@ -48,9 +48,9 @@ function indexedLabels(rows, labelIndex = 1) {
 }
 
 function officialDatalistSkills(rawSkillIndexes, skillLabels) {
-  return String(rawSkillIndexes || "")
-    .split(":")
-    .map((value) => value.trim())
+  const values = Array.isArray(rawSkillIndexes) ? rawSkillIndexes : String(rawSkillIndexes || "").split(":");
+  return values
+    .map((value) => String(value).trim())
     .filter((value) => value && value !== "-1")
     .map((value) => skillLabels[toNumber(value)] || "")
     .filter(Boolean);
@@ -83,7 +83,7 @@ function officialDatalistCards(data) {
       unitType: unitTypeLabels[toNumber(fields[15])] || "",
       force: fields[17] || "",
       intelligence: fields[18] || "",
-      skills: officialDatalistSkills(fields[25], skillLabels)
+      skills: officialDatalistSkills(fields.slice(19, 22), skillLabels)
     };
 
     for (const [key, value] of Object.entries(values)) {
