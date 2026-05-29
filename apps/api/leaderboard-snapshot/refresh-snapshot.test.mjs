@@ -26,7 +26,7 @@ function card(cardId, cardCode, name) {
   };
 }
 
-function officialGeneralRow(cardId, name, serial) {
+function officialGeneralRow(cardId, name, serial, skillIndexes = "") {
   return [
     cardId,
     `ds-${cardId}`,
@@ -46,7 +46,14 @@ function officialGeneralRow(cardId, name, serial) {
     "-1",
     "0",
     "6",
-    "3"
+    "3",
+    "-1",
+    "-1",
+    "-1",
+    "0",
+    "0",
+    "0",
+    skillIndexes
   ].join(",");
 }
 
@@ -201,9 +208,10 @@ async function createLegacyFixture(root) {
     color: ["color-a,蒼,30,60,160"],
     period: ["period-a,戦国"],
     cost: ["cost-a,1.0,10"],
+    skill: ["skill-a,伏兵,伏,hidden,0", "skill-b,気合,気,grit,0"],
     unitType: ["unit-a,槍兵"],
     general: [
-      officialGeneralRow("card-a1", "Alpha", 1),
+      officialGeneralRow("card-a1", "Alpha", 1, "0:1"),
       officialGeneralRow("card-a2", "Beta", 2),
       officialGeneralRow("card-b1", "Gamma", 3),
       officialGeneralRow("card-b2", "Delta", 4)
@@ -253,6 +261,9 @@ async function testRefreshWritesAtomicSnapshot() {
     assert.ok(logs.some((line) => line.includes("repairedCardUnitType value=妲嶅叺 repaired=槍兵")));
     assert.equal(output.tierRows[0].deckCards[0].force, "6");
     assert.equal(output.tierRows[0].deckCards[0].intelligence, "3");
+    const skillCard = output.tierRows.flatMap((row) => row.deckCards).find((card) => card.cardId === "card-a1");
+    assert.ok(skillCard);
+    assert.deepEqual(skillCard.skills, ["伏兵", "気合"]);
     assert.ok(output.tierRows.some((row) => row.deckConfig.strategies.length > 0));
     assert.ok(output.tierRows.some((row) => row.deckConfig.schoolStages.length > 0));
     assert.ok(output.tierRows.some((row) => row.deckConfig.unfavorableMatchups.length > 0));

@@ -47,6 +47,15 @@ function indexedLabels(rows, labelIndex = 1) {
   return (rows || []).map((row) => csvParts(row)[labelIndex] || "");
 }
 
+function officialDatalistSkills(rawSkillIndexes, skillLabels) {
+  return String(rawSkillIndexes || "")
+    .split(":")
+    .map((value) => value.trim())
+    .filter((value) => value && value !== "-1")
+    .map((value) => skillLabels[toNumber(value)] || "")
+    .filter(Boolean);
+}
+
 function officialDatalistCardCode(fields, colorLabels) {
   const type = String(fields[8] || "").trim();
   const serial = String(fields[12] || "").trim();
@@ -60,6 +69,7 @@ function officialDatalistCards(data) {
   const periodLabels = indexedLabels(data?.period);
   const costLabels = indexedLabels(data?.cost);
   const unitTypeLabels = indexedLabels(data?.unitType);
+  const skillLabels = indexedLabels(data?.skill);
 
   return (data?.general || []).map((row) => {
     const fields = csvParts(row);
@@ -72,7 +82,8 @@ function officialDatalistCards(data) {
       cost: costLabels[toNumber(fields[13])] || "",
       unitType: unitTypeLabels[toNumber(fields[15])] || "",
       force: fields[17] || "",
-      intelligence: fields[18] || ""
+      intelligence: fields[18] || "",
+      skills: officialDatalistSkills(fields[25], skillLabels)
     };
 
     for (const [key, value] of Object.entries(values)) {
@@ -250,6 +261,7 @@ function mergeNonEmptyCardData(baseCard, overrideCard) {
   const merged = { ...baseCard };
   for (const [key, value] of Object.entries(overrideCard || {})) {
     if (value === "" || value === null || value === undefined) continue;
+    if (Array.isArray(value) && value.length === 0) continue;
     merged[key] = value;
   }
   return merged;

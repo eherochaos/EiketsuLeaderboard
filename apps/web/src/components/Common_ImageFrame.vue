@@ -50,6 +50,26 @@ const COST_ICON_URLS: Record<string, string> = {
   "4.0": "https://image.eiketsu-taisen.net/general/cost/icon/bb4251def09373fcf2fa635753d5a0aa.png?260520a"
 };
 
+const SKILL_ABBREVIATIONS: Record<string, string> = {
+  "伏兵": "伏",
+  "防柵": "柵",
+  "復活": "活",
+  "忍": "忍",
+  "気合": "気",
+  "狙撃": "狙",
+  "昂揚": "昂",
+  "技巧": "技",
+  "先陣": "先",
+  "鬼": "鬼",
+  "疾駆": "疾",
+  "大兵": "兵",
+  "同盟": "盟",
+  "槍術": "槍",
+  "黄熾": "黄",
+  "覇気": "覇",
+  "宿星": "星"
+};
+
 const props = withDefaults(defineProps<{
   src?: string;
   alt: string;
@@ -91,6 +111,10 @@ function normalizedUnitType(value: unknown): string {
   return UNIT_TYPE_ALIASES[normalized] ?? normalized;
 }
 
+function skillAbbreviation(value: string): string {
+  return SKILL_ABBREVIATIONS[value] ?? Array.from(value)[0] ?? "";
+}
+
 const detailCard = computed(() => props.card ?? null);
 const hasDetails = computed(() => Boolean(props.showDetails && detailCard.value));
 const displayName = computed(() => text(detailCard.value?.name) || props.alt);
@@ -100,7 +124,11 @@ const force = computed(() => text(detailCard.value?.force));
 const intelligence = computed(() => text(detailCard.value?.intelligence));
 const unitTypeIconUrl = computed(() => UNIT_TYPE_ICON_URLS[unitType.value] ?? "");
 const costIconUrl = computed(() => COST_ICON_URLS[cost.value] ?? "");
-const skillLabels = computed(() => (detailCard.value?.skills ?? []).map(text).filter(Boolean).slice(0, 4));
+const skillLabels = computed(() => (detailCard.value?.skills ?? []).map(text).filter(Boolean).slice(0, 3));
+const skillBadges = computed(() => skillLabels.value.map((label) => ({
+  label,
+  abbreviation: skillAbbreviation(label)
+})).filter((skill) => skill.abbreviation));
 const hasPowerStats = computed(() => hasDetails.value);
 const detailRows = computed(() => [
   { label: "勢力", value: text(detailCard.value?.faction) },
@@ -128,7 +156,6 @@ const detailTitle = computed(() => {
       `Common_ImageFrame_${density}`,
       { Common_ImageFrame_HasDetails: hasDetails }
     ]"
-    :title="detailTitle"
     :aria-label="detailTitle"
     :tabindex="hasDetails ? 0 : undefined"
     :data-label="alt"
@@ -146,6 +173,11 @@ const detailTitle = computed(() => {
       <span v-if="hasPowerStats" class="Common_ImageFrame_PowerStats" aria-hidden="true">
         <span class="Common_ImageFrame_PowerValue">{{ force || "-" }}</span>
         <span class="Common_ImageFrame_PowerValue">{{ intelligence || "-" }}</span>
+      </span>
+      <span v-if="skillBadges.length" class="Common_ImageFrame_SkillBadges" aria-hidden="true">
+        <span v-for="skill in skillBadges" :key="skill.label" class="Common_ImageFrame_SkillBadge">
+          {{ skill.abbreviation }}
+        </span>
       </span>
     </span>
 
@@ -166,11 +198,19 @@ const detailTitle = computed(() => {
 
 <style scoped>
 .Common_ImageFrame {
-  --Common_ImageFrame_Inset: 0px;
+  --Common_ImageFrame_UnitOffsetX: 0px;
+  --Common_ImageFrame_UnitOffsetY: 0px;
+  --Common_ImageFrame_CostOffsetX: 0px;
+  --Common_ImageFrame_CostOffsetY: 0px;
+  --Common_ImageFrame_StatsOffsetX: 0px;
+  --Common_ImageFrame_StatsOffsetY: 0px;
+  --Common_ImageFrame_SkillOffsetX: 0px;
+  --Common_ImageFrame_SkillOffsetY: 0px;
   --Common_ImageFrame_OverlayMask: color-mix(in srgb, var(--color-panel-strong) 20%, transparent);
   --Common_ImageFrame_UnitSize: clamp(17px, 35%, 24px);
   --Common_ImageFrame_CostWidth: clamp(25px, 60%, 40px);
   --Common_ImageFrame_StatSize: clamp(14px, 30%, 19px);
+  --Common_ImageFrame_SkillSize: 17px;
 
   position: relative;
   display: inline-block;
@@ -186,17 +226,33 @@ const detailTitle = computed(() => {
 }
 
 .Common_ImageFrame.Common_ImageFrame_compact {
-  --Common_ImageFrame_Inset: 0px;
+  --Common_ImageFrame_UnitOffsetX: -3px;
+  --Common_ImageFrame_UnitOffsetY: -1px;
+  --Common_ImageFrame_CostOffsetX: 8px;
+  --Common_ImageFrame_CostOffsetY: -1px;
+  --Common_ImageFrame_StatsOffsetX: -3px;
+  --Common_ImageFrame_StatsOffsetY: 2px;
+  --Common_ImageFrame_SkillOffsetX: 3px;
+  --Common_ImageFrame_SkillOffsetY: 2px;
   --Common_ImageFrame_UnitSize: clamp(15px, 34%, 21px);
-  --Common_ImageFrame_CostWidth: clamp(23px, 58%, 35px);
+  --Common_ImageFrame_CostWidth: clamp(23px, 90%, 50px);
   --Common_ImageFrame_StatSize: clamp(13px, 29%, 17px);
+  --Common_ImageFrame_SkillSize: 14px;
 }
 
 .Common_ImageFrame.Common_ImageFrame_full {
-  --Common_ImageFrame_Inset: 0px;
+  --Common_ImageFrame_UnitOffsetX: -4px;
+  --Common_ImageFrame_UnitOffsetY: -2px;
+  --Common_ImageFrame_CostOffsetX: 10px;
+  --Common_ImageFrame_CostOffsetY: -2px;
+  --Common_ImageFrame_StatsOffsetX: -4px;
+  --Common_ImageFrame_StatsOffsetY: 2px;
+  --Common_ImageFrame_SkillOffsetX: 4px;
+  --Common_ImageFrame_SkillOffsetY: 2px;
   --Common_ImageFrame_UnitSize: clamp(18px, 36%, 26px);
-  --Common_ImageFrame_CostWidth: clamp(26px, 62%, 42px);
+  --Common_ImageFrame_CostWidth: clamp(26px, 70%, 50px);
   --Common_ImageFrame_StatSize: clamp(15px, 32%, 20px);
+  --Common_ImageFrame_SkillSize: 18px;
 }
 
 .Common_ImageFrame.Common_ImageFrame_portrait {
@@ -245,49 +301,62 @@ const detailTitle = computed(() => {
 
 .Common_ImageFrame_UnitIcon,
 .Common_ImageFrame_CostIcon,
-.Common_ImageFrame_PowerStats {
+.Common_ImageFrame_PowerStats,
+.Common_ImageFrame_SkillBadges {
   position: absolute;
   z-index: 2;
   pointer-events: none;
 }
 
 .Common_ImageFrame_UnitIcon {
-  top: var(--Common_ImageFrame_Inset);
-  left: var(--Common_ImageFrame_Inset);
+  top: 0;
+  left: 0;
   width: var(--Common_ImageFrame_UnitSize);
-  padding: 2px;
   background: var(--Common_ImageFrame_OverlayMask);
   border-radius: 0 0 var(--radius-sm) 0;
   filter: drop-shadow(0 1px 1px color-mix(in srgb, var(--color-brown) 86%, transparent));
+  transform: translate(var(--Common_ImageFrame_UnitOffsetX), var(--Common_ImageFrame_UnitOffsetY));
 }
 
 .Common_ImageFrame_CostIcon {
-  top: var(--Common_ImageFrame_Inset);
-  right: var(--Common_ImageFrame_Inset);
+  top: 0;
+  right: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
   width: var(--Common_ImageFrame_CostWidth);
-  padding: 1px 1px 0;
   background: var(--Common_ImageFrame_OverlayMask);
   border-radius: 0 0 0 var(--radius-sm);
   filter: drop-shadow(0 1px 1px color-mix(in srgb, var(--color-brown) 76%, transparent));
+  transform: translate(var(--Common_ImageFrame_CostOffsetX), var(--Common_ImageFrame_CostOffsetY));
 }
 
-.Common_ImageFrame_UnitIcon img,
-.Common_ImageFrame_CostIcon img {
+.Common_ImageFrame_UnitIcon img {
   display: block;
   width: 100%;
   height: auto;
   object-fit: contain;
 }
 
+.Common_ImageFrame_CostIcon img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  margin-left: auto;
+  object-fit: contain;
+}
+
 .Common_ImageFrame_PowerStats {
-  left: var(--Common_ImageFrame_Inset);
-  bottom: var(--Common_ImageFrame_Inset);
+  left: 0;
+  bottom: 0;
   display: grid;
   grid-template-columns: repeat(2, var(--Common_ImageFrame_StatSize));
   gap: 1px;
   padding: 1px;
   background: var(--Common_ImageFrame_OverlayMask);
   border-radius: 0 var(--radius-sm) 0 0;
+  transform: translate(var(--Common_ImageFrame_StatsOffsetX), var(--Common_ImageFrame_StatsOffsetY));
 }
 
 .Common_ImageFrame_PowerValue {
@@ -301,7 +370,35 @@ const detailTitle = computed(() => {
   border-radius: var(--radius-sm);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-panel-strong) 10%, transparent);
   font-family: var(--font-number);
-  font-size: calc(var(--Common_ImageFrame_StatSize) * 0.72);
+  font-size: calc(var(--Common_ImageFrame_StatSize) * 1.0);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.Common_ImageFrame_SkillBadges {
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 1px;
+  padding: 1px;
+  background: var(--Common_ImageFrame_OverlayMask);
+  border-radius: var(--radius-sm) 0 0 0;
+  transform: translate(var(--Common_ImageFrame_SkillOffsetX), var(--Common_ImageFrame_SkillOffsetY));
+}
+
+.Common_ImageFrame_SkillBadge {
+  display: grid;
+  place-items: center;
+  width: var(--Common_ImageFrame_SkillSize);
+  height: var(--Common_ImageFrame_SkillSize);
+  color: var(--color-brown);
+  background: color-mix(in srgb, var(--color-panel-strong) 82%, transparent);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-brown) 20%, transparent);
+  font-family: var(--font-serif);
+  font-size: calc(var(--Common_ImageFrame_SkillSize) * 0.82);
   font-weight: 800;
   line-height: 1;
 }
