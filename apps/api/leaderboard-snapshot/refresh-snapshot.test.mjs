@@ -26,7 +26,8 @@ function card(cardId, cardCode, name) {
   };
 }
 
-function officialGeneralRow(cardId, name, serial, skillIndexes = "") {
+function officialGeneralRow(cardId, name, serial, skillIndexes = []) {
+  const skills = Array.isArray(skillIndexes) ? skillIndexes : String(skillIndexes || "").split(":").filter(Boolean);
   return [
     cardId,
     `ds-${cardId}`,
@@ -47,13 +48,13 @@ function officialGeneralRow(cardId, name, serial, skillIndexes = "") {
     "0",
     "6",
     "3",
-    "-1",
-    "-1",
-    "-1",
+    skills[0] ?? "-1",
+    skills[1] ?? "-1",
+    skills[2] ?? "-1",
     "0",
     "0",
     "0",
-    skillIndexes
+    "0:4"
   ].join(",");
 }
 
@@ -264,6 +265,9 @@ async function testRefreshWritesAtomicSnapshot() {
     const skillCard = output.tierRows.flatMap((row) => row.deckCards).find((card) => card.cardId === "card-a1");
     assert.ok(skillCard);
     assert.deepEqual(skillCard.skills, ["伏兵", "気合"]);
+    const noSkillCard = output.tierRows.flatMap((row) => row.deckCards).find((card) => card.cardId === "card-a2");
+    assert.ok(noSkillCard);
+    assert.deepEqual(noSkillCard.skills, []);
     assert.ok(output.tierRows.some((row) => row.deckConfig.strategies.length > 0));
     assert.ok(output.tierRows.some((row) => row.deckConfig.schoolStages.length > 0));
     assert.ok(output.tierRows.some((row) => row.deckConfig.unfavorableMatchups.length > 0));
