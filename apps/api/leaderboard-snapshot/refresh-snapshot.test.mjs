@@ -180,7 +180,15 @@ async function createLegacyFixture(root) {
     ])
   ]);
   await writeJsonl(join(tableRoot, "matches.jsonl"), [
-    { id: 1, version: "Ver.test", played_at: "2026-05-21 12:00", created_at: "2026-05-21 12:00" }
+    {
+      id: 1,
+      version: "Ver.test",
+      played_at: "2026-05-21 12:00",
+      created_at: "2026-05-21 12:00",
+      play_url: "https://eiketsu.example.test/play/1",
+      detail_url: "https://eiketsu.example.test/detail/1",
+      replay_id: "fixture-replay-1"
+    }
   ]);
   await writeJsonl(join(tableRoot, "match_decks.jsonl"), [
     { id: 1, match_id: 1, side_index: 0, deck_fingerprint: deckA },
@@ -271,9 +279,16 @@ async function testRefreshWritesAtomicSnapshot() {
     assert.ok(output.tierRows.some((row) => row.deckConfig.strategies.length > 0));
     assert.ok(output.tierRows.some((row) => row.deckConfig.schoolStages.length > 0));
     assert.ok(output.tierRows.some((row) => row.deckConfig.unfavorableMatchups.length > 0));
+    const stageWithMatch = output.tierRows.flatMap((row) => row.deckConfig.schoolStages)
+      .find((item) => item.highlightMatchUrl);
+    assert.ok(stageWithMatch);
+    assert.equal(stageWithMatch.highlightMatchUrl, "https://eiketsu.example.test/play/1");
+    assert.match(stageWithMatch.highlightMatchLabel, /2026-05-21/);
     assert.ok(output.clusterRows.some((row) => row.deckConfig.strategies.length > 0));
     assert.ok(output.clusterRows.some((row) => row.deckConfig.schoolStages.length > 0));
     assert.ok(output.clusterRows.some((row) => row.deckConfig.unfavorableMatchups.length > 0));
+    assert.ok(output.clusterRows.flatMap((row) => row.deckConfig.schoolStages)
+      .some((item) => item.highlightMatchUrl === "https://eiketsu.example.test/play/1"));
     assert.ok(output.home.tierRows.some((row) => row.deckConfig.strategies.length > 0));
     assert.equal(/token|cookie|secret|C:\\|E:\\/.test(outputText), false);
   } finally {

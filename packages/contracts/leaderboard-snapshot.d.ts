@@ -34,6 +34,8 @@ export interface DeckStrategyConfigItem {
 export interface DeckSchoolStageConfigItem extends DeckConfigItem {
   stage: string;
   averageCount: number;
+  highlightMatchUrl?: string;
+  highlightMatchLabel?: string;
 }
 
 export interface DeckUnfavorableMatchupItem {
