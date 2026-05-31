@@ -117,7 +117,17 @@ function averageCount(value: number): string {
             class="TierPage_DeckConfigPanel_Item"
           >
             <div class="TierPage_DeckConfigPanel_ItemHead">
-              <strong>{{ item.name }}</strong>
+              <a
+                v-if="item.highlightMatchUrl"
+                class="TierPage_DeckConfigPanel_MatchLink"
+                :href="item.highlightMatchUrl"
+                :title="item.highlightMatchLabel || '精彩对局'"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {{ item.name }}
+              </a>
+              <strong v-else>{{ item.name }}</strong>
               <span>场均 {{ averageCount(item.averageCount) }}</span>
             </div>
             <div class="TierPage_DeckConfigPanel_Bar" aria-hidden="true">
@@ -241,7 +251,8 @@ function averageCount(value: number): string {
   gap: var(--space-sm);
 }
 
-.TierPage_DeckConfigPanel_ItemHead strong {
+.TierPage_DeckConfigPanel_ItemHead strong,
+.TierPage_DeckConfigPanel_MatchLink {
   overflow: hidden;
   color: var(--color-text);
   font-family: var(--font-control);
@@ -249,6 +260,16 @@ function averageCount(value: number): string {
   font-weight: 900;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.TierPage_DeckConfigPanel_MatchLink {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.TierPage_DeckConfigPanel_MatchLink:hover {
+  color: var(--color-brown);
 }
 
 .TierPage_DeckConfigPanel_ItemHead span {

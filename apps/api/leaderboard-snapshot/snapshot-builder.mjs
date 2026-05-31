@@ -451,6 +451,57 @@ function normalizedSideResult(value) {
   return ["win", "loss", "draw"].includes(result) ? result : "";
 }
 
+function firstUrl(...values) {
+  return values
+    .map((value) => String(value || "").trim())
+    .find((value) => /^https?:\/\//.test(value)) || "";
+}
+
+function matchHighlightUrl(match) {
+  return firstUrl(match?.play_url, match?.detail_url, match?.source_url);
+}
+
+function matchTimestamp(match) {
+  const raw = String(match?.played_at || match?.created_at || "").trim();
+  const normalized = raw.includes(" ") ? raw.replace(" ", "T") : raw;
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function highlightMatchScore(match, side) {
+  const result = normalizedSideResult(side?.result);
+  let score = 0;
+  if (result === "win") score += 1000;
+  if (result === "draw") score += 400;
+  if (match?.play_url) score += 120;
+  if (!match?.play_url && match?.detail_url) score += 80;
+  if (!match?.play_url && !match?.detail_url && match?.source_url) score += 40;
+  if (match?.m3u8_url || match?.replay_id) score += 80;
+  return score;
+}
+
+function highlightMatchCandidate(match, side) {
+  const url = matchHighlightUrl(match);
+  if (!url) return null;
+
+  const result = normalizedSideResult(side?.result);
+  const playedDate = formalRunDate(match?.played_at || match?.created_at);
+  const label = `${result === "win" ? "胜利对局" : "精彩对局"}${playedDate ? ` ${playedDate}` : ""}`;
+  return {
+    url,
+    label,
+    score: highlightMatchScore(match, side),
+    playedAt: matchTimestamp(match)
+  };
+}
+
+function isBetterHighlightMatch(candidate, current) {
+  if (!candidate) return false;
+  if (!current) return true;
+  return toNumber(candidate.score) > toNumber(current.score)
+    || (toNumber(candidate.score) === toNumber(current.score) && toNumber(candidate.playedAt) > toNumber(current.playedAt));
+}
+
 const SCHOOL_STAGE_LABELS = [
   { stage: "1", label: "壱之型" },
   { stage: "2", label: "弐之型" },
@@ -555,6 +606,7 @@ async function formalAuxiliaryStats(run, deckRows) {
     resolve(legacyRoot, "tables/matches.jsonl"),
     (match) => matchesFormalRun(match, run)
   );
+  const matchById = new Map(matches.map((match) => [toNumber(match.id), match]));
   const matchIds = new Set(matches.map((match) => toNumber(match.id)));
   if (!matchIds.size) return emptyAuxiliaryStats();
 
@@ -597,6 +649,8 @@ async function formalAuxiliaryStats(run, deckRows) {
 
   for (const deck of targetMatchDecks) {
     const side = sideByKey.get(matchSideKey(deck.match_id, deck.side_index));
+    const match = matchById.get(toNumber(deck.match_id));
+    const highlightMatch = highlightMatchCandidate(match, side);
     const deckId = String(deck.deck_fingerprint || "").trim();
     const bySlot = side?.profile_json?.battle_stats?.strategy_count?.by_slot;
 
@@ -632,6 +686,9 @@ async function formalAuxiliaryStats(run, deckRows) {
         count: 0
       };
       current.count += 1;
+      if (isBetterHighlightMatch(highlightMatch, current.highlightMatch)) {
+        current.highlightMatch = highlightMatch;
+      }
       schoolStagesByDeckStage.set(key, current);
     }
 
@@ -874,14 +931,19 @@ function formalSchoolStageConfigItems(items, sampleSize) {
     .slice()
     .sort((left, right) => toNumber(right.count) - toNumber(left.count) || String(left.name || "").localeCompare(String(right.name || ""), "ja"))
     .slice(0, 3)
-    .map((item) => ({
-      name: String(item.name || "").trim() || "未识别",
-      stage: String(item.stage || ""),
-      usageRate: sampleSize ? Number((toNumber(item.count) / sampleSize * 100).toFixed(1)) : 0,
-      sampleSize: toNumber(item.count),
-      averageCount: sampleSize ? Number((toNumber(item.count) / sampleSize).toFixed(2)) : 0,
-      lowSample: toNumber(item.count) < 5
-    }));
+    .map((item) => {
+      const highlightMatchUrl = String(item.highlightMatch?.url || "").trim();
+      const highlightMatchLabel = String(item.highlightMatch?.label || "精彩对局").trim();
+      return {
+        name: String(item.name || "").trim() || "未识别",
+        stage: String(item.stage || ""),
+        usageRate: sampleSize ? Number((toNumber(item.count) / sampleSize * 100).toFixed(1)) : 0,
+        sampleSize: toNumber(item.count),
+        averageCount: sampleSize ? Number((toNumber(item.count) / sampleSize).toFixed(2)) : 0,
+        lowSample: toNumber(item.count) < 5,
+        ...(highlightMatchUrl ? { highlightMatchUrl, highlightMatchLabel } : {})
+      };
+    });
 }
 
 function formalDeckConfig(behaviorStats, auxiliaryStats, deckId, cards, sampleSize) {
@@ -1107,8 +1169,22 @@ function mergeSchoolStageConfigItems(rows, sampleSize) {
       const stage = String(item.stage || "").trim();
       const key = `${stage}|${name}`;
       if (!name) continue;
-      const current = byStage.get(key) || { name, stage, sampleSize: 0 };
+      const current = byStage.get(key) || {
+        name,
+        stage,
+        sampleSize: 0,
+        highlightMatchUrl: "",
+        highlightMatchLabel: "",
+        highlightMatchSampleSize: 0
+      };
       current.sampleSize += toNumber(item.sampleSize);
+      const highlightMatchUrl = String(item.highlightMatchUrl || "").trim();
+      const highlightMatchSampleSize = toNumber(item.sampleSize);
+      if (highlightMatchUrl && highlightMatchSampleSize >= current.highlightMatchSampleSize) {
+        current.highlightMatchUrl = highlightMatchUrl;
+        current.highlightMatchLabel = String(item.highlightMatchLabel || "精彩对局").trim();
+        current.highlightMatchSampleSize = highlightMatchSampleSize;
+      }
       byStage.set(key, current);
     }
   }
@@ -1120,7 +1196,11 @@ function mergeSchoolStageConfigItems(rows, sampleSize) {
       usageRate: sampleSize ? Number((item.sampleSize / sampleSize * 100).toFixed(1)) : 0,
       sampleSize: item.sampleSize,
       averageCount: sampleSize ? Number((item.sampleSize / sampleSize).toFixed(2)) : 0,
-      lowSample: item.sampleSize < 5
+      lowSample: item.sampleSize < 5,
+      ...(item.highlightMatchUrl ? {
+        highlightMatchUrl: item.highlightMatchUrl,
+        highlightMatchLabel: item.highlightMatchLabel
+      } : {})
     }))
     .sort((left, right) => right.sampleSize - left.sampleSize || left.name.localeCompare(right.name, "ja"))
     .slice(0, 3);
