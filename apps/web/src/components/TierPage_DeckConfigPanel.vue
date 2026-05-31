@@ -44,6 +44,10 @@ function barWidth(value: number): string {
 function averageCount(value: number): string {
   return Number(value || 0).toFixed(2);
 }
+
+function highlightMatchText(item: DeckSchoolStageConfigItem): string {
+  return item.highlightMatchLabel || "精彩对局";
+}
 </script>
 
 <template>
@@ -117,17 +121,7 @@ function averageCount(value: number): string {
             class="TierPage_DeckConfigPanel_Item"
           >
             <div class="TierPage_DeckConfigPanel_ItemHead">
-              <a
-                v-if="item.highlightMatchUrl"
-                class="TierPage_DeckConfigPanel_MatchLink"
-                :href="item.highlightMatchUrl"
-                :title="item.highlightMatchLabel || '精彩对局'"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {{ item.name }}
-              </a>
-              <strong v-else>{{ item.name }}</strong>
+              <strong>{{ item.name }}</strong>
               <span>场均 {{ averageCount(item.averageCount) }}</span>
             </div>
             <div class="TierPage_DeckConfigPanel_Bar" aria-hidden="true">
@@ -135,7 +129,19 @@ function averageCount(value: number): string {
             </div>
             <div class="TierPage_DeckConfigPanel_ItemMeta">
               <small>启用 {{ integer(item.sampleSize) }} / {{ percent(item.usageRate) }}</small>
-              <em v-if="item.lowSample">低样本</em>
+              <span class="TierPage_DeckConfigPanel_MetaActions">
+                <em v-if="item.lowSample">低样本</em>
+                <a
+                  v-if="item.highlightMatchUrl"
+                  class="TierPage_DeckConfigPanel_MatchLink"
+                  :href="item.highlightMatchUrl"
+                  :title="highlightMatchText(item)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {{ highlightMatchText(item) }}
+                </a>
+              </span>
             </div>
           </article>
         </div>
@@ -251,8 +257,7 @@ function averageCount(value: number): string {
   gap: var(--space-sm);
 }
 
-.TierPage_DeckConfigPanel_ItemHead strong,
-.TierPage_DeckConfigPanel_MatchLink {
+.TierPage_DeckConfigPanel_ItemHead strong {
   overflow: hidden;
   color: var(--color-text);
   font-family: var(--font-control);
@@ -260,16 +265,6 @@ function averageCount(value: number): string {
   font-weight: 900;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.TierPage_DeckConfigPanel_MatchLink {
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
-}
-
-.TierPage_DeckConfigPanel_MatchLink:hover {
-  color: var(--color-brown);
 }
 
 .TierPage_DeckConfigPanel_ItemHead span {
@@ -310,6 +305,14 @@ function averageCount(value: number): string {
   font-weight: 800;
 }
 
+.TierPage_DeckConfigPanel_MetaActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
 .TierPage_DeckConfigPanel_ItemMeta em {
   padding: 2px 6px;
   border: 1px solid rgba(128, 95, 42, 0.34);
@@ -319,6 +322,35 @@ function averageCount(value: number): string {
   font-size: 11px;
   font-style: normal;
   font-weight: 900;
+}
+
+.TierPage_DeckConfigPanel_MatchLink {
+  display: inline-flex;
+  align-items: center;
+  max-width: 136px;
+  min-height: 20px;
+  overflow: hidden;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--color-gold) 54%, transparent);
+  color: var(--color-brown);
+  background: color-mix(in srgb, var(--color-gold-soft) 42%, transparent);
+  font-family: var(--font-control);
+  font-size: 11px;
+  font-weight: 900;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.TierPage_DeckConfigPanel_MatchLink::after {
+  content: "↗";
+  margin-left: 4px;
+  font-family: var(--font-control);
+}
+
+.TierPage_DeckConfigPanel_MatchLink:hover {
+  border-color: var(--color-gold);
+  background: color-mix(in srgb, var(--color-gold-soft) 68%, transparent);
 }
 
 /* 空状态：仅说明没有自动统计数据。 */
