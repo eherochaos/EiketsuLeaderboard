@@ -252,7 +252,10 @@ def _build_refresh_status(
         "durationMs": int(safe_refresh.get("durationMs") or 0),
     }
     recent_runs = _read_recent_runs(legacy_root / "tables" / "server_leaderboard_runs.jsonl")
-    recent_uploads = _read_recent_uploads(legacy_root / "tables" / "server_uploads.jsonl")
+    recent_uploads = _read_recent_uploads(
+        legacy_root / "tables" / "server_uploads.jsonl",
+        legacy_root / "tables" / "server_users.jsonl",
+    )
     manifest = export_manifest if export_manifest is not None else _read_export_manifest(legacy_root)
     return {
         "schemaVersion": STATUS_SCHEMA_VERSION,
@@ -314,23 +317,50 @@ def _read_recent_runs(path: Path, limit: int = RECENT_STATUS_LIMIT) -> list[dict
     ]
 
 
-def _read_recent_uploads(path: Path, limit: int = RECENT_STATUS_LIMIT) -> list[dict[str, Any]]:
+def _read_recent_uploads(
+    path: Path,
+    users_path: Path | None = None,
+    limit: int = RECENT_STATUS_LIMIT,
+) -> list[dict[str, Any]]:
     rows = _read_recent_jsonl(path, limit)
-    return [
-        {
-            "id": row.get("id"),
-            "targetVersion": row.get("target_version"),
-            "dateFrom": row.get("date_from"),
-            "dateTo": row.get("date_to"),
-            "status": row.get("status"),
-            "matchCount": row.get("match_count"),
-            "importedMatchCount": row.get("imported_match_count"),
-            "createdAt": row.get("created_at"),
-            "updatedAt": row.get("updated_at"),
-            "errors": _sanitize_json(row.get("error_summary_json") or []),
+    users_by_id = _read_upload_users(users_path) if users_path else {}
+    uploads = []
+    for row in rows:
+        user = users_by_id.get(row.get("user_id")) or {}
+        contributor_name = row.get("contributor_name") or user.get("contributorName") or ""
+        user_public_id = row.get("user_public_id") or user.get("userPublicId") or ""
+        uploads.append(
+            {
+                "id": row.get("id"),
+                "contributorName": _sanitize_text(contributor_name),
+                "userPublicId": _sanitize_text(user_public_id),
+                "targetVersion": row.get("target_version"),
+                "dateFrom": row.get("date_from"),
+                "dateTo": row.get("date_to"),
+                "status": row.get("status"),
+                "matchCount": row.get("match_count"),
+                "importedMatchCount": row.get("imported_match_count"),
+                "createdAt": row.get("created_at"),
+                "updatedAt": row.get("updated_at"),
+                "errors": _sanitize_json(row.get("error_summary_json") or []),
+            }
+        )
+    return uploads
+
+
+def _read_upload_users(path: Path | None) -> dict[Any, dict[str, str]]:
+    if path is None:
+        return {}
+    users: dict[Any, dict[str, str]] = {}
+    for row in _read_recent_jsonl(path, 100000):
+        user_id = row.get("id")
+        if user_id is None:
+            continue
+        users[user_id] = {
+            "contributorName": _sanitize_text(row.get("contributor_name") or ""),
+            "userPublicId": _sanitize_text(row.get("public_id") or ""),
         }
-        for row in rows
-    ]
+    return users
 
 
 def _read_recent_jsonl(path: Path, limit: int) -> list[dict[str, Any]]:

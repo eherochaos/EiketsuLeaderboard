@@ -26,6 +26,15 @@ def load_export_module():
 
 
 class ExportLegacyServiceFromPostgresTests(unittest.TestCase):
+    def test_runtime_tables_include_upload_users(self) -> None:
+        module = load_export_module()
+
+        self.assertIn("server_users", module.SNAPSHOT_RUNTIME_TABLES)
+        self.assertLess(
+            module.SNAPSHOT_RUNTIME_TABLES.index("server_users"),
+            module.SNAPSHOT_RUNTIME_TABLES.index("server_uploads"),
+        )
+
     def test_required_card_asset_missing_raises(self) -> None:
         module = load_export_module()
         with tempfile.TemporaryDirectory() as temp_dir:
