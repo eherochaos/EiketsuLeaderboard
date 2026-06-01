@@ -13,14 +13,15 @@ SPEC.loader.exec_module(MODULE)
 
 
 class InstallFastApiLeaderboardRoutesTests(unittest.TestCase):
-    def test_match_search_post_uses_body_param_not_request_annotation(self) -> None:
+    def test_match_search_post_uses_request_annotation_and_registers_global(self) -> None:
         self.assertIn(MODULE.MARKER, MODULE.ROUTE_BLOCK)
         self.assertIn(MODULE.END_MARKER, MODULE.ROUTE_BLOCK)
         self.assertIn("@app.post(\"/api/match-search\")", MODULE.ROUTE_BLOCK)
-        self.assertIn("body: bytes = _CodexBody(default=b\"\")", MODULE.ROUTE_BLOCK)
-        self.assertIn("content_type: str = _CodexHeader", MODULE.ROUTE_BLOCK)
-        self.assertNotIn("request: _CodexRequest", MODULE.ROUTE_BLOCK)
-        self.assertNotIn("await request.body()", MODULE.ROUTE_BLOCK)
+        self.assertIn("from fastapi import Request as _CodexRequest", MODULE.ROUTE_BLOCK)
+        self.assertIn("globals()[\"_CodexRequest\"] = _CodexRequest", MODULE.ROUTE_BLOCK)
+        self.assertIn("request: _CodexRequest", MODULE.ROUTE_BLOCK)
+        self.assertIn("await request.body()", MODULE.ROUTE_BLOCK)
+        self.assertNotIn("_CodexBody", MODULE.ROUTE_BLOCK)
 
 
 if __name__ == "__main__":

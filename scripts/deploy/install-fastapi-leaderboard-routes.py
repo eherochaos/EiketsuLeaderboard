@@ -102,14 +102,13 @@ ROUTE_BLOCK = f"""
     def api_match_search_options():
         return _codex_proxy_leaderboard_node_api("/api/match-search-options")
 
-    from fastapi import Body as _CodexBody
-    from fastapi import Header as _CodexHeader
+    from fastapi import Request as _CodexRequest
+    globals()["_CodexRequest"] = _CodexRequest
 
     @app.post("/api/match-search")
-    async def api_match_search(
-        body: bytes = _CodexBody(default=b""),
-        content_type: str = _CodexHeader(default="application/json", alias="content-type"),
-    ):
+    async def api_match_search(request: _CodexRequest):
+        body = await request.body()
+        content_type = request.headers.get("content-type") or "application/json"
         return _codex_proxy_leaderboard_node_api("/api/match-search", method="POST", body=body, content_type=content_type)
     {END_MARKER}
 """
