@@ -15,7 +15,9 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             repo_root = Path(temp_dir)
             legacy_root = repo_root / "apps/api/data/legacy-service"
             snapshot_file = repo_root / "apps/api/data/leaderboard-snapshot.json"
+            status_file = repo_root / "apps/api/data/leaderboard-refresh-status.json"
             live_snapshot_file = repo_root / "live/leaderboard-snapshot.json"
+            live_status_file = repo_root / "live/leaderboard-refresh-status.json"
             calls: list[tuple[list[str], dict[str, str]]] = []
 
             (legacy_root / "tables").mkdir(parents=True)
@@ -39,16 +41,27 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
                 repo_root=repo_root,
                 legacy_root=legacy_root,
                 snapshot_file=snapshot_file,
+                status_file=status_file,
                 live_snapshot_file=live_snapshot_file,
+                live_status_file=live_status_file,
                 exporter=fake_exporter,
+                run_refresher=lambda: {"status": "completed", "run_id": 6},
                 runner=fake_runner,
             )
 
             self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["run"]["run_id"], 6)
             self.assertEqual(result["export"]["tables"]["server_leaderboard_rows"], 1)
             self.assertTrue((legacy_root / "tables" / "server_leaderboard_rows.jsonl").is_file())
             self.assertTrue((legacy_root.with_name("legacy-service.prev") / "tables" / "old.jsonl").is_file())
             self.assertEqual(json.loads(live_snapshot_file.read_text(encoding="utf-8"))["metadata"]["sourceRunId"], 7)
+            status = json.loads(status_file.read_text(encoding="utf-8"))
+            live_status = json.loads(live_status_file.read_text(encoding="utf-8"))
+            self.assertEqual(status["refresh"]["status"], "completed")
+            self.assertEqual(status["runRefresh"]["run_id"], 6)
+            self.assertEqual(status["snapshot"]["sourceRunId"], 7)
+            self.assertEqual(live_status["snapshot"]["sourceRunId"], 7)
+            self.assertNotIn(str(repo_root), json.dumps(status, ensure_ascii=False))
             self.assertEqual(len(calls), 2)
             self.assertEqual(calls[-1][1]["LEADERBOARD_LEGACY_ROOT"], str(legacy_root))
             self.assertEqual(calls[-1][1]["LEADERBOARD_SNAPSHOT_FILE"], str(snapshot_file))
@@ -63,6 +76,41 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             result = refresh_static_snapshot_after_upload(repo_root=repo_root, snapshot_file=snapshot_file)
 
             self.assertEqual(result, {"status": "skipped", "reason": "refresh already running"})
+            status_file = repo_root / "apps/api/data/leaderboard-refresh-status.json"
+            status = json.loads(status_file.read_text(encoding="utf-8"))
+            self.assertEqual(status["refresh"]["status"], "skipped")
+            self.assertEqual(status["refresh"]["reason"], "refresh already running")
+
+    def test_refresh_failure_writes_sanitized_status(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            legacy_root = repo_root / "apps/api/data/legacy-service"
+            snapshot_file = repo_root / "apps/api/data/leaderboard-snapshot.json"
+            status_file = repo_root / "apps/api/data/leaderboard-refresh-status.json"
+
+            def fake_exporter(output_dir: Path) -> dict:
+                output_dir.mkdir(parents=True)
+                return {"tables": {}}
+
+            def fake_runner(command: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+                raise RuntimeError(f"failed at {repo_root}\\secret token=abc123")
+
+            with self.assertRaises(RuntimeError):
+                refresh_static_snapshot_after_upload(
+                    repo_root=repo_root,
+                    legacy_root=legacy_root,
+                    snapshot_file=snapshot_file,
+                    status_file=status_file,
+                    exporter=fake_exporter,
+                    run_refresher=lambda: {"status": "completed"},
+                    runner=fake_runner,
+                )
+
+            status_text = status_file.read_text(encoding="utf-8")
+            status = json.loads(status_text)
+            self.assertEqual(status["refresh"]["status"], "failed")
+            self.assertNotIn(str(repo_root), status_text)
+            self.assertNotIn("abc123", status_text)
 
 
 if __name__ == "__main__":

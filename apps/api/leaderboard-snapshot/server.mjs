@@ -1,10 +1,11 @@
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_PORT = 8001;
 const DEFAULT_SNAPSHOT_FILE = resolve("apps/api/data/leaderboard-snapshot.json");
+const DEFAULT_STATUS_FILE = resolve("apps/api/data/leaderboard-refresh-status.json");
 
 function jsonHeaders(extra = {}) {
   return {
@@ -19,45 +20,52 @@ function writeJson(response, statusCode, payload) {
   response.end(`${JSON.stringify(payload)}\n`);
 }
 
-function publicError(error) {
+function publicError(error, fallback = "leaderboard snapshot failed") {
   if (error?.code === "ENOENT") {
     return "leaderboard data is not available";
   }
 
-  return "leaderboard snapshot failed";
+  return fallback;
+}
+
+function createJsonFileCache(filePath) {
+  let cache = null;
+
+  async function load() {
+    const fileStat = await stat(filePath);
+    if (
+      cache &&
+      cache.mtimeMs === fileStat.mtimeMs &&
+      cache.size === fileStat.size
+    ) {
+      return cache.body;
+    }
+
+    const body = await readFile(filePath);
+    cache = {
+      mtimeMs: fileStat.mtimeMs,
+      size: fileStat.size,
+      body
+    };
+    return body;
+  }
+
+  function clear() {
+    cache = null;
+  }
+
+  return { clear, load };
 }
 
 export function createLeaderboardSnapshotServer(options = {}) {
   const snapshotFile = resolve(options.snapshotFile || DEFAULT_SNAPSHOT_FILE);
-  let snapshotCache = null;
+  const statusFile = resolve(options.statusFile || DEFAULT_STATUS_FILE);
+  const snapshotCache = createJsonFileCache(snapshotFile);
+  const statusCache = createJsonFileCache(statusFile);
 
-  function loadSnapshot() {
-    return stat(snapshotFile).then(async (snapshotStat) => {
-      if (
-        snapshotCache &&
-        snapshotCache.mtimeMs === snapshotStat.mtimeMs &&
-        snapshotCache.size === snapshotStat.size
-      ) {
-        return snapshotCache.body;
-      }
-
-      const body = await readFile(snapshotFile);
-      snapshotCache = {
-        mtimeMs: snapshotStat.mtimeMs,
-        size: snapshotStat.size,
-        body
-      };
-      return body;
-    });
-  }
-
-  function writeSnapshot(response, body) {
+  function writeStaticJson(response, body) {
     response.writeHead(200, jsonHeaders());
     response.end(body);
-  }
-
-  function clearSnapshotCache() {
-    snapshotCache = null;
   }
 
   const server = createServer(async (request, response) => {
@@ -65,11 +73,23 @@ export function createLeaderboardSnapshotServer(options = {}) {
 
     if (request.method === "GET" && url.pathname === "/api/leaderboard-snapshot") {
       try {
-        writeSnapshot(response, await loadSnapshot());
+        writeStaticJson(response, await snapshotCache.load());
       } catch (error) {
-        clearSnapshotCache();
+        snapshotCache.clear();
         console.error(publicError(error));
         writeJson(response, 500, { error: publicError(error) });
+      }
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/leaderboard-refresh-status") {
+      try {
+        writeStaticJson(response, await statusCache.load());
+      } catch (error) {
+        statusCache.clear();
+        const message = publicError(error, "leaderboard refresh status failed");
+        console.error(message);
+        writeJson(response, 500, { error: error?.code === "ENOENT" ? "leaderboard refresh status is not available" : message });
       }
       return;
     }
@@ -84,8 +104,13 @@ export function startLeaderboardSnapshotServer(options = {}) {
   const env = typeof process !== "undefined" ? process.env : {};
   const port = Number(options.port || env.PORT || DEFAULT_PORT);
   const host = options.host || env.HOST || "127.0.0.1";
+  const snapshotFile = options.snapshotFile || env.LEADERBOARD_SNAPSHOT_FILE;
+  const statusFile = options.statusFile || env.LEADERBOARD_REFRESH_STATUS_FILE || (
+    snapshotFile ? resolve(dirname(resolve(snapshotFile)), "leaderboard-refresh-status.json") : undefined
+  );
   const server = createLeaderboardSnapshotServer({
-    snapshotFile: options.snapshotFile || env.LEADERBOARD_SNAPSHOT_FILE
+    snapshotFile,
+    statusFile
   });
 
   server.listen(port, host, () => {

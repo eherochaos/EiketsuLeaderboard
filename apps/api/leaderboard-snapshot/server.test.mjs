@@ -39,6 +39,27 @@ async function testMissingDataDoesNotExposePath() {
   }
 }
 
+async function testMissingRefreshStatusDoesNotExposePath() {
+  const missingFile = resolve("apps/api/leaderboard-snapshot/__missing_status__.json");
+  const server = createLeaderboardSnapshotServer({ statusFile: missingFile });
+  const address = await listen(server);
+  const originalConsoleError = console.error;
+
+  try {
+    console.error = () => {};
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/leaderboard-refresh-status`);
+    const bodyText = await response.text();
+    const body = JSON.parse(bodyText);
+
+    assert.equal(response.status, 500);
+    assert.equal(body.error, "leaderboard refresh status is not available");
+    assert.equal(bodyText.includes(missingFile), false);
+  } finally {
+    console.error = originalConsoleError;
+    await close(server);
+  }
+}
+
 function testSnapshot(sourceRunId, summary) {
   return {
     metadata: {
@@ -115,6 +136,29 @@ async function testSnapshotFileReplacementIsReloaded() {
   }
 }
 
+async function testRefreshStatusFileReplacementIsReloaded() {
+  const root = await mkdtemp(join(tmpdir(), "leaderboard-status-reload-"));
+  const statusFile = join(root, "leaderboard-refresh-status.json");
+  const server = createLeaderboardSnapshotServer({ statusFile });
+
+  try {
+    await writeFile(statusFile, `${JSON.stringify({ refresh: { status: "running" } })}\n`, "utf8");
+    const address = await listen(server);
+    const first = await fetch(`http://127.0.0.1:${address.port}/api/leaderboard-refresh-status`);
+    assert.equal((await first.json()).refresh.status, "running");
+
+    await writeFile(statusFile, `${JSON.stringify({ refresh: { status: "completed" } })}\n`, "utf8");
+    const second = await fetch(`http://127.0.0.1:${address.port}/api/leaderboard-refresh-status`);
+    const secondBody = await second.json();
+
+    assert.equal(second.status, 200);
+    assert.equal(secondBody.refresh.status, "completed");
+  } finally {
+    await close(server);
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 async function testSmokeAcceptsSnapshotEndpoint() {
   const root = await mkdtemp(join(tmpdir(), "leaderboard-snapshot-smoke-"));
   const snapshotFile = join(root, "leaderboard-snapshot.json");
@@ -152,8 +196,10 @@ async function testSmokeRejectsHtmlFallback() {
 }
 
 await testMissingDataDoesNotExposePath();
+await testMissingRefreshStatusDoesNotExposePath();
 await testSnapshotFileIsServedWithoutBuild();
 await testSnapshotFileReplacementIsReloaded();
+await testRefreshStatusFileReplacementIsReloaded();
 await testSmokeAcceptsSnapshotEndpoint();
 await testSmokeRejectsHtmlFallback();
 

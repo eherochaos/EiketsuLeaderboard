@@ -24,21 +24,49 @@ ensure_deploy_owner() {
   sudo -n chown -R "$(id -u):$(id -g)" "$path" 2>/dev/null || chown -R "$(id -u):$(id -g)" "$path"
 }
 
+to_work_path() {
+  local value="$1"
+  case "$value" in
+    "$DEPLOY_PATH")
+      printf '/work'
+      ;;
+    "$DEPLOY_PATH"/*)
+      printf '/work/%s' "${value#"$DEPLOY_PATH"/}"
+      ;;
+    *)
+      printf '%s' "$value"
+      ;;
+  esac
+}
+
 run_node() {
   if command -v node >/dev/null 2>&1; then
     LEADERBOARD_LEGACY_ROOT="${LEADERBOARD_LEGACY_ROOT:-}" \
     LEADERBOARD_SNAPSHOT_FILE="${LEADERBOARD_SNAPSHOT_FILE:-}" \
+    LEADERBOARD_REFRESH_STATUS_FILE="${LEADERBOARD_REFRESH_STATUS_FILE:-}" \
       node "$@"
     return
   fi
   if command -v docker >/dev/null 2>&1; then
+    local docker_args=()
+    local arg
+    for arg in "$@"; do
+      docker_args+=("$(to_work_path "$arg")")
+    done
+    local docker_legacy_root
+    local docker_snapshot_file
+    local docker_status_file
+    docker_legacy_root="$(to_work_path "${LEADERBOARD_LEGACY_ROOT:-}")"
+    docker_snapshot_file="$(to_work_path "${LEADERBOARD_SNAPSHOT_FILE:-}")"
+    docker_status_file="$(to_work_path "${LEADERBOARD_REFRESH_STATUS_FILE:-}")"
     docker run --rm \
       --user "$(id -u):$(id -g)" \
       -v "$DEPLOY_PATH:/work" \
       -w /work \
-      -e "LEADERBOARD_LEGACY_ROOT=${LEADERBOARD_LEGACY_ROOT:-}" \
-      -e "LEADERBOARD_SNAPSHOT_FILE=${LEADERBOARD_SNAPSHOT_FILE:-}" \
-      node:22-alpine node "$@"
+      -e "LEADERBOARD_LEGACY_ROOT=$docker_legacy_root" \
+      -e "LEADERBOARD_SNAPSHOT_FILE=$docker_snapshot_file" \
+      -e "LEADERBOARD_REFRESH_STATUS_FILE=$docker_status_file" \
+      node:22-alpine node "${docker_args[@]}"
     return
   fi
   fail 'node runtime is missing'
@@ -79,6 +107,28 @@ publish_live_snapshot() {
   ensure_deploy_owner "$DEPLOY_LIVE_SNAPSHOT_FILE"
 }
 
+publish_live_status() {
+  [ -n "$DEPLOY_LIVE_STATUS_FILE" ] || return 0
+  local source_file="$DATA_ROOT/leaderboard-refresh-status.json"
+  [ -f "$source_file" ] || fail 'leaderboard refresh status file is missing'
+  local live_status_parent
+  live_status_parent="$(dirname "$DEPLOY_LIVE_STATUS_FILE")"
+  ensure_writable_dir "$live_status_parent"
+  cp "$source_file" "$DEPLOY_LIVE_STATUS_FILE.tmp.$$"
+  mv "$DEPLOY_LIVE_STATUS_FILE.tmp.$$" "$DEPLOY_LIVE_STATUS_FILE"
+  ensure_deploy_owner "$DEPLOY_LIVE_STATUS_FILE"
+}
+
+refresh_public_run() {
+  if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -Fx "$DEPLOY_EXPORT_CONTAINER" >/dev/null 2>&1; then
+    docker cp apps/api/data-migration/refresh_public_leaderboard_run.py "$DEPLOY_EXPORT_CONTAINER:/tmp/refresh_public_leaderboard_run.py"
+    docker exec "$DEPLOY_EXPORT_CONTAINER" python /tmp/refresh_public_leaderboard_run.py
+    docker exec "$DEPLOY_EXPORT_CONTAINER" rm -f /tmp/refresh_public_leaderboard_run.py
+  else
+    python3 apps/api/data-migration/refresh_public_leaderboard_run.py
+  fi
+}
+
 decode_env() {
   if [ -z "${1:-}" ]; then
     printf ''
@@ -94,6 +144,7 @@ DEPLOY_FASTAPI_CONTAINER="$(decode_env "${DEPLOY_FASTAPI_CONTAINER_B64:-}")"
 DEPLOY_FASTAPI_FRONTEND_ROOT="$(decode_env "${DEPLOY_FASTAPI_FRONTEND_ROOT_B64:-}")"
 DEPLOY_LIVE_FRONTEND_ROOT="$(decode_env "${DEPLOY_LIVE_FRONTEND_ROOT_B64:-}")"
 DEPLOY_LIVE_SNAPSHOT_FILE="$(decode_env "${DEPLOY_LIVE_SNAPSHOT_FILE_B64:-}")"
+DEPLOY_LIVE_STATUS_FILE="$(decode_env "${DEPLOY_LIVE_STATUS_FILE_B64:-}")"
 DEPLOY_RESTART_COMMAND="$(decode_env "${DEPLOY_RESTART_COMMAND_B64:-}")"
 DEPLOY_EXPORT_POSTGRES="${DEPLOY_EXPORT_POSTGRES:-1}"
 DEPLOY_EXPORT_CONTAINER="${DEPLOY_EXPORT_CONTAINER:-eiketsu-env-db-api-1}"
@@ -102,6 +153,9 @@ DEPLOY_FASTAPI_CONTAINER="${DEPLOY_FASTAPI_CONTAINER:-eiketsu-env-db-api-1}"
 DEPLOY_FASTAPI_FRONTEND_ROOT="${DEPLOY_FASTAPI_FRONTEND_ROOT:-/app/frontend/eiketsu-leaderboard}"
 DEPLOY_LIVE_FRONTEND_ROOT="${DEPLOY_LIVE_FRONTEND_ROOT:-/home/ubuntu/eiketsu-env-db/frontend/eiketsu-leaderboard}"
 DEPLOY_LIVE_SNAPSHOT_FILE="${DEPLOY_LIVE_SNAPSHOT_FILE:-/home/ubuntu/eiketsu-leaderboard-data/snapshots/leaderboard-snapshot.json}"
+if [ -z "$DEPLOY_LIVE_STATUS_FILE" ] && [ -n "$DEPLOY_LIVE_SNAPSHOT_FILE" ]; then
+  DEPLOY_LIVE_STATUS_FILE="$(dirname "$DEPLOY_LIVE_SNAPSHOT_FILE")/leaderboard-refresh-status.json"
+fi
 
 case "$DEPLOY_EXPORT_POSTGRES" in
   '0'|'1')
@@ -147,7 +201,11 @@ publish_live_frontend
 
 DATA_ROOT='apps/api/data'
 LEGACY_ROOT="$DATA_ROOT/legacy-service"
+STATUS_FILE="$DATA_ROOT/leaderboard-refresh-status.json"
 if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ]; then
+  log 'refresh leaderboard run'
+  refresh_public_run
+
   log 'export postgres data'
   ensure_writable_dir "$DATA_ROOT"
   rm -rf "$DATA_ROOT/legacy-service.next"
@@ -190,8 +248,20 @@ LEADERBOARD_LEGACY_ROOT="$LEGACY_ROOT" \
 LEADERBOARD_SNAPSHOT_FILE="$DATA_ROOT/leaderboard-snapshot.json" \
   run_node apps/api/leaderboard-snapshot/refresh-snapshot.mjs
 ensure_deploy_owner "$DATA_ROOT"
+log 'write refresh status'
+python3 apps/api/data-migration/refresh_static_snapshot_after_upload.py \
+  --repo-root "$DEPLOY_PATH" \
+  --legacy-root "$LEGACY_ROOT" \
+  --snapshot-file "$DATA_ROOT/leaderboard-snapshot.json" \
+  --status-file "$STATUS_FILE" \
+  --status-only \
+  --refresh-status completed \
+  --refresh-reason 'deploy refresh completed'
+ensure_deploy_owner "$DATA_ROOT"
 log 'publish live snapshot'
 publish_live_snapshot
+log 'publish live status'
+publish_live_status
 
 if [ -n "$DEPLOY_RESTART_COMMAND" ]; then
   log 'restart service'
