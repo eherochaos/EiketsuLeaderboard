@@ -41,6 +41,7 @@ const searching = ref(false);
 const error = ref("");
 const searchError = ref("");
 const cardMatchMode = ref<MatchSearchCardMatchMode>("all");
+const pickerSide = ref<SideKey | null>(null);
 
 const sideForms = reactive<Record<SideKey, SideForm>>({
   sideA: createSideForm(),
@@ -76,6 +77,10 @@ const factions = computed(() => uniqueSorted(cards.value.map((card) => card.fact
 const unitTypes = computed(() => uniqueSorted(cards.value.map((card) => card.unitType || "").filter(Boolean)));
 const costs = computed(() => uniqueSorted(cards.value.map((card) => card.cost || "").filter(Boolean)));
 const canSearch = computed(() => hasAnyFilter(sideForms.sideA) || hasAnyFilter(sideForms.sideB));
+const pickerForm = computed(() => sideForms[pickerSide.value ?? "sideA"]);
+const pickerTitle = computed(() => pickerSide.value ? sideLabels[pickerSide.value].title : "");
+const pickerCardOptions = computed(() => filteredCardOptions(pickerForm.value, 96));
+const pickerSelectedCards = computed(() => selectedCards(pickerForm.value));
 
 function createSideForm(): SideForm {
   return {
@@ -121,7 +126,7 @@ function cardScore(card: MatchSearchCardOption, query: string): number {
   return cardSearchText(card).includes(query) ? 50000 + card.usageCount : 0;
 }
 
-function filteredCardOptions(side: SideForm): MatchSearchCardOption[] {
+function filteredCardOptions(side: SideForm, limit = 24): MatchSearchCardOption[] {
   const query = normalizedText(side.cardQuery);
   const selected = new Set(side.cardIds);
   return cards.value
@@ -132,7 +137,7 @@ function filteredCardOptions(side: SideForm): MatchSearchCardOption[] {
     .map((card) => ({ card, score: cardScore(card, query) }))
     .filter((item) => !query || item.score > 0)
     .sort((left, right) => right.score - left.score || right.card.usageCount - left.card.usageCount || left.card.name.localeCompare(right.card.name, "ja"))
-    .slice(0, 24)
+    .slice(0, limit)
     .map((item) => item.card);
 }
 
@@ -145,6 +150,14 @@ function filteredWeaponOptions(side: SideForm): MatchSearchWeaponOption[] {
 
 function selectedCards(side: SideForm): MatchSearchCardOption[] {
   return side.cardIds.map((cardId) => cardsById.value.get(cardId)).filter(Boolean) as MatchSearchCardOption[];
+}
+
+function openCardPicker(sideKey: SideKey): void {
+  pickerSide.value = sideKey;
+}
+
+function closeCardPicker(): void {
+  pickerSide.value = null;
 }
 
 function addCard(side: SideForm, card: MatchSearchCardOption): void {
@@ -338,40 +351,14 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
           </div>
 
           <div class="MatchSearch_FieldBlock">
-            <label>
-              单卡
-              <input v-model="sideForms[sideKey].cardQuery" type="search" autocomplete="off" placeholder="名称 / 卡号 / 势力 / 兵种 / Cost" />
-            </label>
-            <div class="MatchSearch_FilterRow">
-              <select v-model="sideForms[sideKey].faction" aria-label="势力">
-                <option value="all">全部势力</option>
-                <option v-for="faction in factions" :key="faction" :value="faction">{{ faction }}</option>
-              </select>
-              <select v-model="sideForms[sideKey].unitType" aria-label="兵种">
-                <option value="all">全部兵种</option>
-                <option v-for="unitType in unitTypes" :key="unitType" :value="unitType">{{ unitType }}</option>
-              </select>
-              <select v-model="sideForms[sideKey].cost" aria-label="Cost">
-                <option value="all">全部 Cost</option>
-                <option v-for="cost in costs" :key="cost" :value="cost">{{ cost }}</option>
-              </select>
-            </div>
-            <div class="MatchSearch_CardResults">
-              <button
-                v-for="card in filteredCardOptions(sideForms[sideKey])"
-                :key="card.cardId"
-                class="MatchSearch_CardPick"
-                type="button"
-                @click="addCard(sideForms[sideKey], card)"
-              >
-                <CommonImageFrame :src="card.imageUrl" :alt="card.imageAlt" :card="card" show-details density="compact" ratio="portrait" />
-                <span>
-                  <strong>{{ card.name }}</strong>
-                  <small>{{ card.cardCode || "-" }} / {{ card.faction }} / {{ card.unitType || "-" }} / {{ card.cost || "-" }}</small>
-                </span>
-                <em>{{ integer(card.usageCount) }}</em>
-              </button>
-            </div>
+            <span class="MatchSearch_FieldLabel">单卡</span>
+            <button class="MatchSearch_CardPickerTrigger" type="button" @click="openCardPicker(sideKey)">
+              <span>
+                <strong>选择单卡</strong>
+                <small>{{ selectedCards(sideForms[sideKey]).length }} / 8 已选</small>
+              </span>
+              <em>{{ filteredCardOptions(sideForms[sideKey]).length }}</em>
+            </button>
           </div>
 
           <div class="MatchSearch_SelectedList">
@@ -437,6 +424,67 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
         </div>
       </section>
     </template>
+
+    <div v-if="pickerSide" class="MatchSearch_CardPickerBackdrop" role="presentation" @click.self="closeCardPicker">
+      <section class="MatchSearch_CardPicker" role="dialog" aria-modal="true" aria-labelledby="match-card-picker-title" @keydown.esc="closeCardPicker">
+        <header class="MatchSearch_CardPickerHead">
+          <div>
+            <p class="Common_Eyebrow">{{ pickerTitle }}</p>
+            <h2 id="match-card-picker-title">选择单卡</h2>
+          </div>
+          <button type="button" aria-label="关闭选卡" @click="closeCardPicker">×</button>
+        </header>
+
+        <div class="MatchSearch_CardPickerControls">
+          <label>
+            搜索
+            <input v-model="pickerForm.cardQuery" type="search" autocomplete="off" placeholder="名称 / 卡号 / 势力 / 兵种 / Cost" />
+          </label>
+          <select v-model="pickerForm.faction" aria-label="势力">
+            <option value="all">全部势力</option>
+            <option v-for="faction in factions" :key="faction" :value="faction">{{ faction }}</option>
+          </select>
+          <select v-model="pickerForm.unitType" aria-label="兵种">
+            <option value="all">全部兵种</option>
+            <option v-for="unitType in unitTypes" :key="unitType" :value="unitType">{{ unitType }}</option>
+          </select>
+          <select v-model="pickerForm.cost" aria-label="Cost">
+            <option value="all">全部 Cost</option>
+            <option v-for="cost in costs" :key="cost" :value="cost">{{ cost }}</option>
+          </select>
+        </div>
+
+        <div class="MatchSearch_CardPickerSelected">
+          <span>{{ pickerSelectedCards.length }} / 8 已选</span>
+          <button v-for="card in pickerSelectedCards" :key="card.cardId" type="button" @click="removeCard(pickerForm, card.cardId)">
+            {{ card.name }} ×
+          </button>
+        </div>
+
+        <div v-if="pickerCardOptions.length" class="MatchSearch_CardPickerGrid">
+          <button
+            v-for="card in pickerCardOptions"
+            :key="card.cardId"
+            class="MatchSearch_CardPick"
+            type="button"
+            :disabled="pickerForm.cardIds.length >= 8"
+            @click="addCard(pickerForm, card)"
+          >
+            <CommonImageFrame :src="card.imageUrl" :alt="card.imageAlt" :card="card" density="compact" ratio="portrait" />
+            <span>
+              <strong>{{ card.name }}</strong>
+              <small>{{ card.cardCode || "-" }} / {{ card.faction }} / {{ card.unitType || "-" }} / {{ card.cost || "-" }}</small>
+            </span>
+            <em>{{ integer(card.usageCount) }}</em>
+          </button>
+        </div>
+        <div v-else class="Common_StatusPanel">没有匹配单卡</div>
+
+        <footer class="MatchSearch_CardPickerFoot">
+          <button type="button" @click="closeCardPicker">完成</button>
+        </footer>
+      </section>
+    </div>
   </main>
 </template>
 
@@ -654,6 +702,60 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   padding: 0 11px;
 }
 
+.MatchSearch_FieldLabel {
+  color: var(--color-muted);
+  font-family: var(--font-control);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.MatchSearch_CardPickerTrigger {
+  width: 100%;
+  min-height: 52px;
+  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--color-border);
+  color: var(--color-brown);
+  background: #fffaf0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.MatchSearch_CardPickerTrigger strong,
+.MatchSearch_CardPickerTrigger small {
+  display: block;
+  font-family: var(--font-control);
+}
+
+.MatchSearch_CardPickerTrigger strong {
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.MatchSearch_CardPickerTrigger small {
+  margin-top: 3px;
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.MatchSearch_CardPickerTrigger em {
+  min-width: 34px;
+  color: var(--color-gold);
+  font-family: var(--font-number);
+  font-size: 18px;
+  font-style: normal;
+  font-weight: 900;
+  text-align: right;
+}
+
+.MatchSearch_CardPickerTrigger:hover {
+  border-color: rgba(169, 42, 36, 0.72);
+}
+
 .MatchSearch_CardResults {
   max-height: 324px;
   overflow-y: auto;
@@ -678,6 +780,11 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 
 .MatchSearch_CardPick:hover {
   border-color: rgba(169, 42, 36, 0.72);
+}
+
+.MatchSearch_CardPick:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
 }
 
 .MatchSearch_CardPick :deep(.Common_ImageFrame),
@@ -745,6 +852,147 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   font-size: 18px;
   font-weight: 900;
   cursor: pointer;
+}
+
+.MatchSearch_CardPickerBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  padding: 28px;
+  display: grid;
+  place-items: center;
+  background: rgba(28, 20, 12, 0.36);
+}
+
+.MatchSearch_CardPicker {
+  width: min(960px, 100%);
+  max-height: min(760px, calc(100vh - 56px));
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  border: 1px solid rgba(185, 133, 36, 0.56);
+  background: var(--color-surface);
+  box-shadow: 0 18px 48px rgba(55, 35, 12, 0.26);
+}
+
+.MatchSearch_CardPickerHead {
+  padding: 16px 18px 12px;
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid rgba(216, 192, 151, 0.78);
+}
+
+.MatchSearch_CardPickerHead h2 {
+  margin: 0;
+  color: var(--color-brown);
+  font-family: var(--font-serif);
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.MatchSearch_CardPickerHead button,
+.MatchSearch_CardPickerFoot button,
+.MatchSearch_CardPickerSelected button {
+  border: 1px solid rgba(185, 133, 36, 0.52);
+  color: #76521c;
+  background: #fffaf0;
+  font-family: var(--font-control);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.MatchSearch_CardPickerHead button {
+  width: 38px;
+  height: 38px;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.MatchSearch_CardPickerControls {
+  padding: 14px 18px 10px;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) repeat(3, minmax(120px, 0.42fr));
+  gap: 10px;
+  border-bottom: 1px solid rgba(216, 192, 151, 0.52);
+}
+
+.MatchSearch_CardPickerControls label {
+  display: grid;
+  gap: 5px;
+  color: var(--color-muted);
+  font-family: var(--font-control);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.MatchSearch_CardPickerControls input,
+.MatchSearch_CardPickerControls select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--color-border);
+  color: var(--color-brown);
+  background: #fffaf0;
+  font-family: var(--font-control);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.MatchSearch_CardPickerControls input {
+  padding: 0 11px;
+}
+
+.MatchSearch_CardPickerSelected {
+  min-height: 44px;
+  padding: 8px 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  border-bottom: 1px solid rgba(216, 192, 151, 0.52);
+}
+
+.MatchSearch_CardPickerSelected span {
+  flex: 0 0 auto;
+  color: var(--color-muted);
+  font-family: var(--font-control);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.MatchSearch_CardPickerSelected button {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.MatchSearch_CardPickerGrid {
+  min-height: 0;
+  padding: 12px 18px 16px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.MatchSearch_CardPickerGrid .MatchSearch_CardPick {
+  min-height: 76px;
+  background: rgba(255, 250, 240, 0.86);
+}
+
+.MatchSearch_CardPickerFoot {
+  padding: 10px 18px 16px;
+  display: flex;
+  justify-content: end;
+  border-top: 1px solid rgba(216, 192, 151, 0.68);
+}
+
+.MatchSearch_CardPickerFoot button {
+  min-width: 112px;
+  min-height: 38px;
+  color: #fffaf0;
+  background: var(--color-primary);
 }
 
 .MatchSearch_ResultPanel {
@@ -920,8 +1168,48 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
     grid-template-columns: 1fr;
   }
 
-  .MatchSearch_CardResults {
-    max-height: 280px;
+  .MatchSearch_CardPickerBackdrop {
+    padding: 0;
+    align-items: end;
+    place-items: end stretch;
+  }
+
+  .MatchSearch_CardPicker {
+    width: 100%;
+    max-height: min(92vh, 780px);
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+  }
+
+  .MatchSearch_CardPickerHead {
+    padding: 14px var(--space-md) 10px;
+  }
+
+  .MatchSearch_CardPickerHead h2 {
+    font-size: 24px;
+  }
+
+  .MatchSearch_CardPickerControls {
+    padding: 12px var(--space-md) 10px;
+    grid-template-columns: 1fr;
+  }
+
+  .MatchSearch_CardPickerSelected {
+    padding: 8px var(--space-md);
+  }
+
+  .MatchSearch_CardPickerGrid {
+    padding: 10px var(--space-md) 12px;
+    grid-template-columns: 1fr;
+  }
+
+  .MatchSearch_CardPickerFoot {
+    padding: 10px var(--space-md) max(14px, env(safe-area-inset-bottom));
+  }
+
+  .MatchSearch_CardPickerFoot button {
+    width: 100%;
   }
 
   .MatchSearch_SelectedCard {

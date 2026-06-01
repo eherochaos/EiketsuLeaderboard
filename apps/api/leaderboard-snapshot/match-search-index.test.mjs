@@ -40,6 +40,26 @@ function side(id, matchId, sideIndex, role, result, weaponName, weaponSummary, s
   };
 }
 
+function officialGeneralRow(overrides = {}) {
+  const fields = Array.from({ length: 25 }, () => "");
+  Object.assign(fields, {
+    0: "card-b",
+    1: "card-b-ds",
+    2: "card-b-face",
+    3: "Beta",
+    5: "0",
+    6: "0",
+    8: "ST",
+    12: "2",
+    13: "0",
+    15: "0",
+    17: "6",
+    18: "3",
+    ...overrides,
+  });
+  return fields.join(",");
+}
+
 async function createFixture(root) {
   const legacyRoot = join(root, "legacy-service");
   const tableRoot = join(legacyRoot, "tables");
@@ -123,7 +143,21 @@ async function createFixture(root) {
       { hash_id: "card-f", card_code: "玄001", name: "Zeta", faction: "玄", cost: "1.0", unitType: "剣豪" },
     ],
   });
-  await writeJson(join(cardRoot, "card_catalog_overlay.json"), { cards: [] });
+  await writeJson(join(cardRoot, "card_catalog_overlay.json"), {
+    cards: [
+      { hash_id: "card-a", image_url: "https://cards.example.test/alpha.jpg" },
+      { hash_id: "card-c", image_keys: { card_small: "catalog-card-c" } },
+    ],
+  });
+  await writeJson(join(cardRoot, "datalist_api_base.json"), {
+    path: ["card_small,general/card_small/,.jpg?260520a"],
+    general: [officialGeneralRow()],
+    color: ["0,Blue"],
+    period: ["0,Edo"],
+    cost: ["0,1.0"],
+    unitType: ["0,Spear"],
+    skill: [],
+  });
   return { legacyRoot, snapshotFile };
 }
 
@@ -135,6 +169,9 @@ async function testBuildIndexAndSearchFilters() {
 
     assert.equal(index.metadata.sourceRunId, 9);
     assert.equal(index.metadata.matchCount, 2);
+    assert.equal(index.cards.find((card) => card.cardId === "card-a").imageUrl, "https://cards.example.test/alpha.jpg");
+    assert.equal(index.cards.find((card) => card.cardId === "card-b").imageUrl, "https://image.eiketsu-taisen.net/general/card_small/card-b.jpg?260520a");
+    assert.equal(index.cards.find((card) => card.cardId === "card-c").imageUrl, "https://image.eiketsu-taisen.net/general/card_small/catalog-card-c.jpg?260520a");
     assert.equal(index.cards.find((card) => card.cardId === "card-a").unitType, "槍兵");
     assert.equal(index.weapons.find((weapon) => weapon.name === "孫子").usageCount, 2);
 

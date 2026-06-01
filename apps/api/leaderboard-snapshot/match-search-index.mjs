@@ -10,6 +10,7 @@ const DEFAULT_SNAPSHOT_FILE = resolve("apps/api/data/leaderboard-snapshot.json")
 const DEFAULT_INDEX_FILE = resolve("apps/api/data/match-search-index.json");
 const MAX_PAGE_SIZE = 50;
 const DEFAULT_PAGE_SIZE = 20;
+const OFFICIAL_ASSET_BASE_URL = "https://image.eiketsu-taisen.net/";
 const OFFICIAL_FACTION_ORDER = ["蒼", "緋", "碧", "玄", "紫", "琥", "黄"];
 const OFFICIAL_CARD_TYPE_PREFIXES = new Set(["ST", "EX", "PL"]);
 const CARD_UNIT_TYPE_REPAIRS = {
@@ -49,6 +50,23 @@ function indexedLabels(rows, labelIndex = 1) {
   return (rows || []).map((row) => csvParts(row)[labelIndex] || "");
 }
 
+function officialDatalistAssetTemplates(data) {
+  const templates = {};
+  for (const row of data?.path || []) {
+    const [name, prefix, suffix] = csvParts(row);
+    if (!name || !prefix || !suffix) continue;
+    templates[name] = { prefix, suffix };
+  }
+  return templates;
+}
+
+function officialDatalistAssetUrl(templates, name, assetCode) {
+  const template = templates[name];
+  const code = String(assetCode || "").trim();
+  if (!template || !code) return "";
+  return `${OFFICIAL_ASSET_BASE_URL}${template.prefix}${encodeURIComponent(code)}${template.suffix}`;
+}
+
 function officialDatalistSkills(rawSkillIndexes, skillLabels) {
   const values = Array.isArray(rawSkillIndexes) ? rawSkillIndexes : String(rawSkillIndexes || "").split(":");
   return values
@@ -72,9 +90,15 @@ function officialDatalistCards(data) {
   const costLabels = indexedLabels(data?.cost);
   const unitTypeLabels = indexedLabels(data?.unitType);
   const skillLabels = indexedLabels(data?.skill);
+  const assetTemplates = officialDatalistAssetTemplates(data);
 
   return (data?.general || []).map((row) => {
     const fields = csvParts(row);
+    const imageKeys = {
+      card_small: fields[0] || "",
+      card_ds: fields[1] || "",
+      card_face: fields[2] || ""
+    };
     return {
       hash_id: fields[0] || "",
       card_code: officialDatalistCardCode(fields, colorLabels),
@@ -85,7 +109,9 @@ function officialDatalistCards(data) {
       unitType: unitTypeLabels[toNumber(fields[15])] || "",
       force: fields[17] || "",
       intelligence: fields[18] || "",
-      skills: officialDatalistSkills(fields.slice(19, 22), skillLabels)
+      skills: officialDatalistSkills(fields.slice(19, 22), skillLabels),
+      image_keys: imageKeys,
+      image_url: officialDatalistAssetUrl(assetTemplates, "card_small", imageKeys.card_small)
     };
   }).filter((card) => card.hash_id);
 }
@@ -154,11 +180,17 @@ async function loadCardCatalog(legacyRoot) {
   const overlay = await readOptionalJson(resolve(legacyRoot, "cards/card_catalog_overlay.json"), { cards: [] });
   const officialDatalist = await readOptionalJson(resolve(legacyRoot, "cards/datalist_api_base.json"), null);
   const officialCards = officialDatalist ? officialDatalistCards(officialDatalist) : [];
+  const officialAssetTemplates = officialDatalist ? officialDatalistAssetTemplates(officialDatalist) : {};
   const byHash = new Map();
 
   for (const card of [...(base.cards || []), ...(overlay.cards || []), ...officialCards]) {
     for (const hashId of cardHashIds(card)) {
-      byHash.set(hashId, mergeNonEmptyCardData(byHash.get(hashId) || {}, card));
+      const merged = mergeNonEmptyCardData(byHash.get(hashId) || {}, card);
+      if (!firstImageUrl(merged)) {
+        const imageUrl = officialDatalistAssetUrl(officialAssetTemplates, "card_small", cardSmallAssetCode(merged));
+        if (imageUrl) merged.image_url = imageUrl;
+      }
+      byHash.set(hashId, merged);
     }
   }
 
@@ -188,6 +220,58 @@ function cardSkillList(card) {
     .filter(Boolean);
 }
 
+function jsonObject(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function cardSmallAssetCode(card) {
+  for (const imageKeysKey of ["image_keys", "imageKeys", "image_keys_json"]) {
+    const imageKeys = jsonObject(card?.[imageKeysKey]);
+    const assetCode = firstText(imageKeys.card_small, imageKeys.cardSmall, imageKeys.card_small_code, imageKeys.cardSmallCode);
+    if (assetCode) return assetCode;
+  }
+  return firstText(card?.card_small_code, card?.cardSmallCode);
+}
+
+function firstImageUrl(card) {
+  for (const containerKey of ["image_urls", "imageUrls", "images", "image_urls_json"]) {
+    const imageUrls = jsonObject(card?.[containerKey]);
+    for (const key of [
+      "card_small",
+      "cardSmall",
+      "card_small_url",
+      "cardSmallUrl",
+      "small",
+      "card_ds",
+      "cardDs",
+      "card_ds_url",
+      "cardDsUrl",
+      "card_face",
+      "cardFace",
+      "card_face_url",
+      "cardFaceUrl",
+      "face"
+    ]) {
+      const url = String(imageUrls[key] || "").trim();
+      if (/^https?:\/\//.test(url)) return url;
+    }
+  }
+
+  for (const key of ["image_url", "imageUrl", "card_small_url", "cardSmallUrl", "card_ds_url", "cardDsUrl", "card_face_url", "cardFaceUrl"]) {
+    const url = String(card?.[key] || "").trim();
+    if (/^https?:\/\//.test(url)) return url;
+  }
+
+  return "";
+}
+
 function cardView(cardId, cardCatalog, usageCount = 0) {
   const card = cardCatalog[cardId] || {};
   const name = firstText(card?.name, card?.card_code, String(cardId).slice(0, 8));
@@ -203,7 +287,7 @@ function cardView(cardId, cardCatalog, usageCount = 0) {
     intelligence: firstText(card?.intelligence, card?.intellect, card?.wisdom, card?.["知力"]),
     era: firstText(card?.era, card?.period, card?.timePeriod, card?.eraName, card?.periodName),
     skills: cardSkillList(card),
-    imageUrl: "",
+    imageUrl: firstImageUrl(card),
     imageAlt: name,
     usageCount
   };
