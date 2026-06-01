@@ -1,8 +1,13 @@
 <script setup lang="ts">
-// 顶部只承担页面切换和品牌识别；具体页面入口不在这里扩展。
-defineProps<{
-  current: "home" | "tier";
+const props = defineProps<{
+  current: "home" | "tier" | "status";
 }>();
+
+const navItems = [
+  { key: "home", label: "首页", href: "/leaderboard/" },
+  { key: "tier", label: "TierList", href: "/tier-list/" },
+  { key: "status", label: "数据状态", href: "/leaderboard-status/" }
+] as const;
 </script>
 
 <template>
@@ -12,14 +17,22 @@ defineProps<{
         <span class="Common_Header_BrandSymbol" aria-hidden="true"></span>
         <span>Eiketsu Leaderboard</span>
       </a>
-      <a v-if="current === 'home'" class="Common_NavPrimary" href="/tier-list/">TierList</a>
-      <a v-else class="Common_NavPrimary" href="/leaderboard/">首页</a>
+      <span class="Common_Header_Links">
+        <a
+          v-for="item in navItems"
+          v-show="item.key !== props.current"
+          :key="item.key"
+          class="Common_NavPrimary"
+          :href="item.href"
+        >
+          {{ item.label }}
+        </a>
+      </span>
     </nav>
   </header>
 </template>
 
 <style scoped>
-/* 顶部外壳：固定在页面顶部，提供深棕导航底。 */
 .Common_Header {
   position: sticky;
   top: 0;
@@ -30,7 +43,6 @@ defineProps<{
   box-shadow: 0 4px 18px rgba(20, 13, 9, 0.2);
 }
 
-/* 顶部内容容器：限制宽度并让品牌和入口分居两侧。 */
 .Common_Header_Nav {
   width: min(100%, var(--page-max));
   height: 64px;
@@ -42,7 +54,6 @@ defineProps<{
   gap: 20px;
 }
 
-/* 品牌文字：使用标题字体，承担产品识别。 */
 .Common_Header_Brand {
   display: inline-flex;
   align-items: center;
@@ -55,7 +66,6 @@ defineProps<{
   letter-spacing: 0;
 }
 
-/* 品牌菱形：作为轻量家纹感标识。 */
 .Common_Header_BrandSymbol {
   width: 16px;
   height: 16px;
@@ -66,20 +76,36 @@ defineProps<{
   box-shadow: 0 0 0 3px rgba(185, 133, 36, 0.18);
 }
 
-/* 手机端：降低导航高度和品牌字号。 */
+.Common_Header_Links {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
 @media (max-width: 760px) {
   .Common_Header,
   .Common_Header_Nav {
     height: 60px;
   }
 
+  .Common_Header_Nav {
+    gap: 10px;
+  }
+
   .Common_Header_Brand {
     font-size: 18px;
   }
 
+  .Common_Header_Links {
+    gap: 6px;
+  }
+
   .Common_NavPrimary {
     min-height: 38px;
-    padding: 0 14px;
+    padding: 0 10px;
+    font-size: 13px;
   }
 }
 </style>

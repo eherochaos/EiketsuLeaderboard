@@ -4,58 +4,134 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
+import time
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
 DEFAULT_LEGACY_ROOT = Path("apps/api/data/legacy-service")
 DEFAULT_SNAPSHOT_FILE = Path("apps/api/data/leaderboard-snapshot.json")
+DEFAULT_STATUS_FILE = Path("apps/api/data/leaderboard-refresh-status.json")
+STATUS_SCHEMA_VERSION = 1
+RECENT_STATUS_LIMIT = 20
 
 
 CommandRunner = Callable[[list[str], dict[str, str]], subprocess.CompletedProcess[str]]
 Exporter = Callable[[Path], dict[str, Any]]
+RunRefresher = Callable[[], dict[str, Any]]
 
 
 def refresh_static_snapshot_after_upload(
     repo_root: Path | None = None,
     legacy_root: Path | None = None,
     snapshot_file: Path | None = None,
+    status_file: Path | None = None,
     live_snapshot_file: Path | None = None,
+    live_status_file: Path | None = None,
     node_bin: str = "node",
+    refresh_run: bool = True,
     exporter: Exporter | None = None,
+    run_refresher: RunRefresher | None = None,
     runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     root = (repo_root or Path.cwd()).resolve()
     legacy = _resolve(root, legacy_root or DEFAULT_LEGACY_ROOT)
     snapshot = _resolve(root, snapshot_file or DEFAULT_SNAPSHOT_FILE)
+    status_path = _resolve(root, status_file or DEFAULT_STATUS_FILE)
     live_snapshot = _resolve(root, live_snapshot_file) if live_snapshot_file else None
+    live_status = _resolve(root, live_status_file) if live_status_file else None
     lock_path = snapshot.with_name(f".{snapshot.name}.refresh.lock")
 
     lock_handle = _acquire_lock(lock_path)
     if lock_handle is None:
-        return {"status": "skipped", "reason": "refresh already running"}
+        result = {"status": "skipped", "reason": "refresh already running"}
+        _write_refresh_status(status_path, live_status, legacy, snapshot, result)
+        return result
 
+    started_at = _utc_now()
+    started_clock = time.monotonic()
+    _write_refresh_status(
+        status_path,
+        live_status,
+        legacy,
+        snapshot,
+        {"status": "running", "startedAt": started_at},
+        started_at=started_at,
+    )
     try:
+        run_result = (
+            _refresh_server_run(run_refresher or _default_run_refresher)
+            if refresh_run
+            else {"status": "skipped", "reason": "run refresh disabled"}
+        )
         export_manifest = _refresh_legacy_export(legacy, exporter or _default_exporter)
         official_card_result = _refresh_official_card_data(root, legacy, node_bin, runner or _default_runner)
         snapshot_result = _refresh_snapshot(root, legacy, snapshot, node_bin, runner or _default_runner)
         live_result = _publish_live_snapshot(snapshot, live_snapshot) if live_snapshot else None
-        return {
+        result = {
             "status": "completed",
-            "legacy_root": str(legacy),
-            "snapshot_file": str(snapshot),
-            "live_snapshot_file": str(live_snapshot) if live_snapshot else "",
+            "durationMs": _duration_ms(started_clock),
+            "run": run_result,
             "export": export_manifest,
             "official_card_data": official_card_result,
             "snapshot": snapshot_result,
             "live_snapshot": live_result,
         }
+        _write_refresh_status(
+            status_path,
+            live_status,
+            legacy,
+            snapshot,
+            result,
+            started_at=started_at,
+            finished_at=_utc_now(),
+            export_manifest=export_manifest,
+            run_result=run_result,
+        )
+        return result
+    except Exception as exc:
+        result = {
+            "status": "failed",
+            "durationMs": _duration_ms(started_clock),
+            "error": _sanitize_text(str(exc)),
+        }
+        _write_refresh_status(
+            status_path,
+            live_status,
+            legacy,
+            snapshot,
+            result,
+            started_at=started_at,
+            finished_at=_utc_now(),
+        )
+        raise
     finally:
         lock_handle.close()
         lock_path.unlink(missing_ok=True)
+
+
+def write_refresh_status_only(
+    repo_root: Path | None = None,
+    legacy_root: Path | None = None,
+    snapshot_file: Path | None = None,
+    status_file: Path | None = None,
+    live_status_file: Path | None = None,
+    refresh_status: str = "completed",
+    refresh_reason: str = "status updated",
+) -> dict[str, Any]:
+    root = (repo_root or Path.cwd()).resolve()
+    legacy = _resolve(root, legacy_root or DEFAULT_LEGACY_ROOT)
+    snapshot = _resolve(root, snapshot_file or DEFAULT_SNAPSHOT_FILE)
+    status_path = _resolve(root, status_file or DEFAULT_STATUS_FILE)
+    live_status = _resolve(root, live_status_file) if live_status_file else None
+    result = {"status": refresh_status, "reason": _sanitize_text(refresh_reason)}
+    _write_refresh_status(status_path, live_status, legacy, snapshot, result, finished_at=_utc_now())
+    return result
 
 
 def _refresh_legacy_export(legacy_root: Path, exporter: Exporter) -> dict[str, Any]:
@@ -110,11 +186,200 @@ def _refresh_snapshot(
 
 
 def _publish_live_snapshot(snapshot_file: Path, live_snapshot_file: Path) -> dict[str, Any]:
-    live_snapshot_file.parent.mkdir(parents=True, exist_ok=True)
-    temporary = live_snapshot_file.with_name(f".{live_snapshot_file.name}.{os.getpid()}.tmp")
-    shutil.copyfile(snapshot_file, temporary)
-    os.replace(temporary, live_snapshot_file)
+    _copy_file_atomically(snapshot_file, live_snapshot_file)
     return {"status": "completed"}
+
+
+def _refresh_server_run(run_refresher: RunRefresher) -> dict[str, Any]:
+    result = run_refresher()
+    return _sanitize_json(result if isinstance(result, dict) else {"status": "completed", "result": result})
+
+
+def _default_run_refresher() -> dict[str, Any]:
+    try:
+        from eiketsu_env.config import load_settings
+        from eiketsu_env.services.leaderboard import refresh_public_leaderboard_snapshots
+    except ModuleNotFoundError:
+        return {"status": "skipped", "reason": "server run refresh module unavailable"}
+
+    return refresh_public_leaderboard_snapshots(load_settings())
+
+
+def _write_refresh_status(
+    status_file: Path,
+    live_status_file: Path | None,
+    legacy_root: Path,
+    snapshot_file: Path,
+    refresh_result: dict[str, Any],
+    *,
+    started_at: str = "",
+    finished_at: str = "",
+    export_manifest: dict[str, Any] | None = None,
+    run_result: dict[str, Any] | None = None,
+) -> None:
+    payload = _build_refresh_status(
+        legacy_root,
+        snapshot_file,
+        refresh_result,
+        started_at=started_at,
+        finished_at=finished_at,
+        export_manifest=export_manifest,
+        run_result=run_result,
+    )
+    _atomic_write_json(status_file, payload)
+    if live_status_file:
+        _copy_file_atomically(status_file, live_status_file)
+
+
+def _build_refresh_status(
+    legacy_root: Path,
+    snapshot_file: Path,
+    refresh_result: dict[str, Any],
+    *,
+    started_at: str = "",
+    finished_at: str = "",
+    export_manifest: dict[str, Any] | None = None,
+    run_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    generated_at = finished_at or _utc_now()
+    safe_refresh = _sanitize_json(refresh_result)
+    refresh = {
+        "status": str(safe_refresh.get("status") or "unknown"),
+        "reason": str(safe_refresh.get("reason") or ""),
+        "error": str(safe_refresh.get("error") or ""),
+        "startedAt": started_at or str(safe_refresh.get("startedAt") or ""),
+        "finishedAt": finished_at,
+        "durationMs": int(safe_refresh.get("durationMs") or 0),
+    }
+    recent_runs = _read_recent_runs(legacy_root / "tables" / "server_leaderboard_runs.jsonl")
+    recent_uploads = _read_recent_uploads(legacy_root / "tables" / "server_uploads.jsonl")
+    manifest = export_manifest if export_manifest is not None else _read_export_manifest(legacy_root)
+    return {
+        "schemaVersion": STATUS_SCHEMA_VERSION,
+        "generatedAt": generated_at,
+        "refresh": refresh,
+        "runRefresh": _sanitize_json(run_result or safe_refresh.get("run") or {}),
+        "snapshot": _read_snapshot_summary(snapshot_file),
+        "export": _sanitize_export_manifest(manifest),
+        "latestRun": recent_runs[0] if recent_runs else None,
+        "recentRuns": recent_runs,
+        "latestUpload": recent_uploads[0] if recent_uploads else None,
+        "recentUploads": recent_uploads,
+    }
+
+
+def _read_snapshot_summary(snapshot_file: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(snapshot_file.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+    metadata = payload.get("metadata") if isinstance(payload, dict) else {}
+    metadata = metadata if isinstance(metadata, dict) else {}
+    home = payload.get("home") if isinstance(payload, dict) else {}
+    home = home if isinstance(home, dict) else {}
+    return {
+        "sourceRunId": metadata.get("sourceRunId"),
+        "sourceKind": metadata.get("sourceKind"),
+        "targetVersion": metadata.get("targetVersion"),
+        "dateFrom": metadata.get("dateFrom"),
+        "dateTo": metadata.get("dateTo"),
+        "updatedAt": metadata.get("updatedAt"),
+        "sampleSize": metadata.get("sampleSize"),
+        "clusterRows": len(payload.get("clusterRows") or []) if isinstance(payload, dict) else 0,
+        "tierRows": len(payload.get("tierRows") or []) if isinstance(payload, dict) else 0,
+        "homeTierRows": len(home.get("tierRows") or []),
+    }
+
+
+def _read_recent_runs(path: Path, limit: int = RECENT_STATUS_LIMIT) -> list[dict[str, Any]]:
+    rows = _read_recent_jsonl(path, limit)
+    return [
+        {
+            "id": row.get("id"),
+            "status": row.get("status"),
+            "targetVersion": row.get("target_version"),
+            "dateFrom": row.get("date_from"),
+            "dateTo": row.get("date_to"),
+            "uploadWatermark": row.get("upload_watermark"),
+            "uploadCount": row.get("upload_count"),
+            "packageCount": row.get("package_count"),
+            "matchCount": row.get("match_count"),
+            "sideSampleCount": row.get("side_sample_count"),
+            "rowCount": row.get("row_count"),
+            "startedAt": row.get("started_at"),
+            "generatedAt": row.get("generated_at"),
+            "error": _sanitize_text(row.get("error_text") or ""),
+        }
+        for row in rows
+    ]
+
+
+def _read_recent_uploads(path: Path, limit: int = RECENT_STATUS_LIMIT) -> list[dict[str, Any]]:
+    rows = _read_recent_jsonl(path, limit)
+    return [
+        {
+            "id": row.get("id"),
+            "targetVersion": row.get("target_version"),
+            "dateFrom": row.get("date_from"),
+            "dateTo": row.get("date_to"),
+            "status": row.get("status"),
+            "matchCount": row.get("match_count"),
+            "importedMatchCount": row.get("imported_match_count"),
+            "createdAt": row.get("created_at"),
+            "updatedAt": row.get("updated_at"),
+            "errors": _sanitize_json(row.get("error_summary_json") or []),
+        }
+        for row in rows
+    ]
+
+
+def _read_recent_jsonl(path: Path, limit: int) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    rows: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+    return list(reversed(rows[-limit:]))
+
+
+def _read_export_manifest(legacy_root: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads((legacy_root / "manifest.json").read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _sanitize_export_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    tables = manifest.get("tables") if isinstance(manifest, dict) else {}
+    cards = manifest.get("cards") if isinstance(manifest, dict) else {}
+    return {
+        "tables": tables if isinstance(tables, dict) else {},
+        "cards": cards if isinstance(cards, dict) else {},
+    }
+
+
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def _copy_file_atomically(source_file: Path, target_file: Path) -> None:
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target_file.with_name(f".{target_file.name}.{os.getpid()}.tmp")
+    shutil.copyfile(source_file, temporary)
+    os.replace(temporary, target_file)
 
 
 def _default_exporter(output_dir: Path) -> dict[str, Any]:
@@ -139,6 +404,43 @@ def _snapshot_env(legacy_root: Path, snapshot_file: Path | None) -> dict[str, st
     return env
 
 
+_WINDOWS_PATH_RE = re.compile(r"[A-Za-z]:\\[^\s'\"<>]+")
+_UNIX_PATH_RE = re.compile(r"(?<!\w)/(?:[^\s'\"<>:]+/)+[^\s'\"<>]*")
+_SECRET_VALUE_RE = re.compile(r"(?i)\b(token|cookie|secret|password|authorization)\b\s*[:=]\s*[^\s,;]+")
+
+
+def _sanitize_text(value: Any) -> str:
+    text = str(value or "")
+    text = _SECRET_VALUE_RE.sub(lambda match: f"{match.group(1)}=[redacted]", text)
+    text = _WINDOWS_PATH_RE.sub("[path]", text)
+    text = _UNIX_PATH_RE.sub("[path]", text)
+    return text[:400]
+
+
+def _sanitize_json(value: Any) -> Any:
+    if isinstance(value, dict):
+        safe = {}
+        for key, item in value.items():
+            key_text = str(key)
+            if re.search(r"(?i)(token|cookie|secret|password|authorization|content_hash|user_id)", key_text):
+                continue
+            safe[key_text] = _sanitize_json(item)
+        return safe
+    if isinstance(value, list):
+        return [_sanitize_json(item) for item in value[:RECENT_STATUS_LIMIT]]
+    if isinstance(value, str):
+        return _sanitize_text(value)
+    return value
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _duration_ms(started_clock: float) -> int:
+    return int(round((time.monotonic() - started_clock) * 1000))
+
+
 def _resolve(root: Path, path: Path | None) -> Path:
     if path is None:
         raise ValueError("path is required")
@@ -159,19 +461,41 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
     parser.add_argument("--legacy-root", type=Path, default=DEFAULT_LEGACY_ROOT)
     parser.add_argument("--snapshot-file", type=Path, default=DEFAULT_SNAPSHOT_FILE)
+    parser.add_argument("--status-file", type=Path, default=DEFAULT_STATUS_FILE)
     parser.add_argument("--live-snapshot-file", type=Path, default=None)
+    parser.add_argument("--live-status-file", type=Path, default=None)
     parser.add_argument("--node-bin", default="node")
+    parser.add_argument("--skip-run-refresh", action="store_true")
+    parser.add_argument("--status-only", action="store_true")
+    parser.add_argument("--refresh-status", default="completed")
+    parser.add_argument("--refresh-reason", default="status updated")
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
+    if args.status_only:
+        result = write_refresh_status_only(
+            repo_root=args.repo_root,
+            legacy_root=args.legacy_root,
+            snapshot_file=args.snapshot_file,
+            status_file=args.status_file,
+            live_status_file=args.live_status_file,
+            refresh_status=args.refresh_status,
+            refresh_reason=args.refresh_reason,
+        )
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return 0
+
     result = refresh_static_snapshot_after_upload(
         repo_root=args.repo_root,
         legacy_root=args.legacy_root,
         snapshot_file=args.snapshot_file,
+        status_file=args.status_file,
         live_snapshot_file=args.live_snapshot_file,
+        live_status_file=args.live_status_file,
         node_bin=args.node_bin,
+        refresh_run=not args.skip_run_refresh,
     )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0

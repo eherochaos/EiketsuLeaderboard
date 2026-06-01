@@ -9,6 +9,10 @@ export default defineConfig(({ mode }) => {
     "/api/leaderboard-snapshot": {
       target: leaderboardApiOrigin,
       changeOrigin: true
+    },
+    "/api/leaderboard-refresh-status": {
+      target: leaderboardApiOrigin,
+      changeOrigin: true
     }
   };
 
@@ -25,6 +29,7 @@ export default defineConfig(({ mode }) => {
         input: {
           main: resolve(__dirname, "index.html"),
           leaderboard: resolve(__dirname, "leaderboard/index.html"),
+          leaderboardStatus: resolve(__dirname, "leaderboard-status/index.html"),
           tierList: resolve(__dirname, "tier-list/index.html")
         }
       }

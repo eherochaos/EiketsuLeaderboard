@@ -12,3 +12,9 @@ export type {
   LeaderboardSnapshot,
   NamingSource,
 } from "../../../packages/contracts/leaderboard-snapshot.js";
+
+export type {
+  LeaderboardRefreshRun,
+  LeaderboardRefreshStatus,
+  LeaderboardRefreshUpload,
+} from "../../../packages/contracts/leaderboard-refresh-status.js";
