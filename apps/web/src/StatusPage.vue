@@ -68,6 +68,10 @@ function runPeriod(run: LeaderboardRefreshRun): string {
 function uploadPeriod(upload: LeaderboardRefreshUpload): string {
   return periodLabel(upload.dateFrom, upload.dateTo);
 }
+
+function uploadUserLabel(upload: LeaderboardRefreshUpload): string {
+  return upload.contributorName || upload.userPublicId || "-";
+}
 </script>
 
 <template>
@@ -128,6 +132,7 @@ function uploadPeriod(upload: LeaderboardRefreshUpload): string {
           <thead>
             <tr>
               <th>ID</th>
+              <th>用户</th>
               <th>版本</th>
               <th>日期</th>
               <th>状态</th>
@@ -138,6 +143,7 @@ function uploadPeriod(upload: LeaderboardRefreshUpload): string {
           <tbody>
             <tr v-for="upload in recentUploads" :key="upload.id">
               <td class="Common_RankCell">#{{ upload.id }}</td>
+              <td class="StatusPage_UserCell">{{ uploadUserLabel(upload) }}</td>
               <td>{{ upload.targetVersion || "-" }}</td>
               <td>{{ uploadPeriod(upload) }}</td>
               <td>{{ statusLabel(upload.status) }}</td>
@@ -317,6 +323,11 @@ function uploadPeriod(upload: LeaderboardRefreshUpload): string {
 
 .StatusPage_Table td:first-child {
   color: var(--color-gold);
+}
+
+.StatusPage_UserCell {
+  max-width: 180px;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 760px) {

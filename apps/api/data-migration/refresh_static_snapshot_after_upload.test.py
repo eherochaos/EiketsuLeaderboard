@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from refresh_static_snapshot_after_upload import refresh_static_snapshot_after_upload
+from refresh_static_snapshot_after_upload import refresh_static_snapshot_after_upload, write_refresh_status_only
 
 
 class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
@@ -70,7 +70,7 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo_root = Path(temp_dir)
             snapshot_file = repo_root / "apps/api/data/leaderboard-snapshot.json"
-            snapshot_file.parent.mkdir(parents=True)
+            snapshot_file.parent.mkdir(parents=True, exist_ok=True)
             snapshot_file.with_name(f".{snapshot_file.name}.refresh.lock").write_text("busy", encoding="utf-8")
 
             result = refresh_static_snapshot_after_upload(repo_root=repo_root, snapshot_file=snapshot_file)
@@ -111,6 +111,65 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             self.assertEqual(status["refresh"]["status"], "failed")
             self.assertNotIn(str(repo_root), status_text)
             self.assertNotIn("abc123", status_text)
+
+    def test_refresh_status_includes_sanitized_upload_user_info(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            legacy_root = repo_root / "apps/api/data/legacy-service"
+            tables_root = legacy_root / "tables"
+            snapshot_file = repo_root / "apps/api/data/leaderboard-snapshot.json"
+            status_file = repo_root / "apps/api/data/leaderboard-refresh-status.json"
+            tables_root.mkdir(parents=True)
+            snapshot_file.parent.mkdir(parents=True, exist_ok=True)
+            snapshot_file.write_text(json.dumps({"metadata": {"sourceRunId": 8}}), encoding="utf-8")
+            (tables_root / "server_users.jsonl").write_text(
+                json.dumps(
+                    {
+                        "id": 11,
+                        "public_id": "u_public",
+                        "contributor_name": "alice token=secret",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (tables_root / "server_uploads.jsonl").write_text(
+                json.dumps(
+                    {
+                        "id": 21,
+                        "user_id": 11,
+                        "target_version": "Ver.3.5.0B",
+                        "date_from": "2026-06-01",
+                        "date_to": "2026-06-01",
+                        "status": "completed",
+                        "match_count": 12,
+                        "imported_match_count": 10,
+                        "error_summary_json": [],
+                        "created_at": "2026-06-01T12:00:00",
+                        "updated_at": "2026-06-01T12:01:00",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            write_refresh_status_only(
+                repo_root=repo_root,
+                legacy_root=legacy_root,
+                snapshot_file=snapshot_file,
+                status_file=status_file,
+            )
+
+            status_text = status_file.read_text(encoding="utf-8")
+            status = json.loads(status_text)
+            upload = status["latestUpload"]
+            self.assertEqual(upload["id"], 21)
+            self.assertEqual(upload["contributorName"], "alice token=[redacted]")
+            self.assertEqual(upload["userPublicId"], "u_public")
+            self.assertNotIn("user_id", json.dumps(upload, ensure_ascii=False))
+            self.assertNotIn("secret", status_text)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ from eiketsu_env.db.session import make_session_factory
 
 SNAPSHOT_RUNTIME_TABLES = [
     "server_share_config",
+    "server_users",
     "server_uploads",
     "server_leaderboard_runs",
     "server_leaderboard_rows",

@@ -21,6 +21,8 @@ export interface LeaderboardRefreshRun {
 
 export interface LeaderboardRefreshUpload {
   id: number;
+  contributorName?: string;
+  userPublicId?: string;
   targetVersion: string;
   dateFrom: string;
   dateTo: string;
