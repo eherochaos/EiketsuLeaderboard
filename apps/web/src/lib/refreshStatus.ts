@@ -1,11 +1,21 @@
 import type { LeaderboardRefreshStatus } from "../../../../packages/contracts/leaderboard-refresh-status.js";
 
-const refreshStatusUrl = import.meta.env.VITE_LEADERBOARD_REFRESH_STATUS_URL || "/api/leaderboard-refresh-status";
+const configuredRefreshStatusUrl = import.meta.env.VITE_LEADERBOARD_REFRESH_STATUS_URL;
+const defaultRefreshStatusUrls = ["/api/leaderboard-refresh-status", "/assets/leaderboard-refresh-status.json"];
 
 export async function loadRefreshStatus(): Promise<LeaderboardRefreshStatus> {
-  const response = await fetch(refreshStatusUrl, { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`数据状态读取失败：${response.status}`);
+  const urls = configuredRefreshStatusUrl ? [configuredRefreshStatusUrl] : defaultRefreshStatusUrls;
+  let lastError = "";
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, { cache: "no-store" });
+      if (response.ok) {
+        return await response.json() as LeaderboardRefreshStatus;
+      }
+      lastError = String(response.status);
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : "network";
+    }
   }
-  return await response.json() as LeaderboardRefreshStatus;
+  throw new Error(`数据状态读取失败：${lastError || "unknown"}`);
 }

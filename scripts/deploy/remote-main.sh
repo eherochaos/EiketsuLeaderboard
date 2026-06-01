@@ -72,6 +72,18 @@ run_node() {
   fail 'node runtime is missing'
 }
 
+docker_container_running() {
+  local container="$1"
+  [ -n "$container" ] || return 1
+  command -v docker >/dev/null 2>&1 || return 1
+  docker ps --format '{{.Names}}' | grep -Fx "$container" >/dev/null 2>&1
+}
+
+require_fastapi_container() {
+  command -v docker >/dev/null 2>&1 || fail 'docker runtime is missing'
+  docker_container_running "$DEPLOY_FASTAPI_CONTAINER" || fail 'fastapi container is not running'
+}
+
 publish_live_frontend() {
   if [ -n "$DEPLOY_LIVE_FRONTEND_ROOT" ]; then
     local live_parent
@@ -88,7 +100,8 @@ publish_live_frontend() {
     ensure_deploy_owner "$DEPLOY_LIVE_FRONTEND_ROOT"
   fi
 
-  if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -Fx "$DEPLOY_FASTAPI_CONTAINER" >/dev/null 2>&1; then
+  if [ -n "$DEPLOY_FASTAPI_CONTAINER" ]; then
+    require_fastapi_container
     docker exec "$DEPLOY_FASTAPI_CONTAINER" sh -c "rm -rf '$DEPLOY_FASTAPI_FRONTEND_ROOT.next' '$DEPLOY_FASTAPI_FRONTEND_ROOT.prev' && mkdir -p '$DEPLOY_FASTAPI_FRONTEND_ROOT.next'"
     tar -C apps/web/dist -cf - . | docker exec -i "$DEPLOY_FASTAPI_CONTAINER" tar -C "$DEPLOY_FASTAPI_FRONTEND_ROOT.next" -xf -
     docker exec "$DEPLOY_FASTAPI_CONTAINER" sh -c "if [ -d '$DEPLOY_FASTAPI_FRONTEND_ROOT' ]; then mv '$DEPLOY_FASTAPI_FRONTEND_ROOT' '$DEPLOY_FASTAPI_FRONTEND_ROOT.prev'; fi && mv '$DEPLOY_FASTAPI_FRONTEND_ROOT.next' '$DEPLOY_FASTAPI_FRONTEND_ROOT'"
@@ -119,6 +132,55 @@ publish_live_status() {
   ensure_deploy_owner "$DEPLOY_LIVE_STATUS_FILE"
 }
 
+publish_frontend_status_asset() {
+  local source_file="$DATA_ROOT/leaderboard-refresh-status.json"
+  [ -f "$source_file" ] || fail 'leaderboard refresh status file is missing'
+  if [ -n "$DEPLOY_LIVE_FRONTEND_ROOT" ]; then
+    ensure_writable_dir "$DEPLOY_LIVE_FRONTEND_ROOT/assets"
+    cp "$source_file" "$DEPLOY_LIVE_FRONTEND_ROOT/assets/leaderboard-refresh-status.json"
+    ensure_deploy_owner "$DEPLOY_LIVE_FRONTEND_ROOT/assets/leaderboard-refresh-status.json"
+  fi
+  if [ -n "$DEPLOY_FASTAPI_CONTAINER" ]; then
+    require_fastapi_container
+    docker exec "$DEPLOY_FASTAPI_CONTAINER" sh -c "mkdir -p '$DEPLOY_FASTAPI_FRONTEND_ROOT/assets'"
+    docker cp "$source_file" "$DEPLOY_FASTAPI_CONTAINER:$DEPLOY_FASTAPI_FRONTEND_ROOT/assets/leaderboard-refresh-status.json"
+  fi
+}
+
+install_fastapi_routes() {
+  require_fastapi_container
+  docker cp scripts/deploy/install-fastapi-leaderboard-routes.py "$DEPLOY_FASTAPI_CONTAINER:/tmp/install-fastapi-leaderboard-routes.py"
+  docker exec "$DEPLOY_FASTAPI_CONTAINER" python /tmp/install-fastapi-leaderboard-routes.py
+  docker exec "$DEPLOY_FASTAPI_CONTAINER" rm -f /tmp/install-fastapi-leaderboard-routes.py
+}
+
+restart_service() {
+  if [ -n "$DEPLOY_RESTART_COMMAND" ]; then
+    bash -lc "$DEPLOY_RESTART_COMMAND"
+    return
+  fi
+  if [ -n "$DEPLOY_FASTAPI_CONTAINER" ] && docker_container_running "$DEPLOY_FASTAPI_CONTAINER"; then
+    docker restart "$DEPLOY_FASTAPI_CONTAINER" >/dev/null
+    return
+  fi
+  log 'skip restart'
+}
+
+smoke_check_live_routes() {
+  [ -n "$DEPLOY_SMOKE_URL_BASE" ] || return 0
+  command -v curl >/dev/null 2>&1 || return 0
+  local base="${DEPLOY_SMOKE_URL_BASE%/}"
+  local attempt
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if curl -fsS "$base/health" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 2
+  done
+  curl -fsS "$base/leaderboard-status/" >/dev/null || fail 'leaderboard status page is not live'
+  curl -fsS "$base/api/leaderboard-refresh-status" >/dev/null || fail 'leaderboard refresh status api is not live'
+}
+
 refresh_public_run() {
   if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -Fx "$DEPLOY_EXPORT_CONTAINER" >/dev/null 2>&1; then
     docker cp apps/api/data-migration/refresh_public_leaderboard_run.py "$DEPLOY_EXPORT_CONTAINER:/tmp/refresh_public_leaderboard_run.py"
@@ -146,6 +208,7 @@ DEPLOY_LIVE_FRONTEND_ROOT="$(decode_env "${DEPLOY_LIVE_FRONTEND_ROOT_B64:-}")"
 DEPLOY_LIVE_SNAPSHOT_FILE="$(decode_env "${DEPLOY_LIVE_SNAPSHOT_FILE_B64:-}")"
 DEPLOY_LIVE_STATUS_FILE="$(decode_env "${DEPLOY_LIVE_STATUS_FILE_B64:-}")"
 DEPLOY_RESTART_COMMAND="$(decode_env "${DEPLOY_RESTART_COMMAND_B64:-}")"
+DEPLOY_SMOKE_URL_BASE="${DEPLOY_SMOKE_URL_BASE:-http://127.0.0.1:8000}"
 DEPLOY_EXPORT_POSTGRES="${DEPLOY_EXPORT_POSTGRES:-1}"
 DEPLOY_EXPORT_CONTAINER="${DEPLOY_EXPORT_CONTAINER:-eiketsu-env-db-api-1}"
 DEPLOY_EXPORT_ASSET_ROOT="${DEPLOY_EXPORT_ASSET_ROOT:-/home/ubuntu/eiketsu-env-db/assets}"
@@ -262,12 +325,14 @@ log 'publish live snapshot'
 publish_live_snapshot
 log 'publish live status'
 publish_live_status
+log 'publish frontend status asset'
+publish_frontend_status_asset
+log 'install fastapi routes'
+install_fastapi_routes
 
-if [ -n "$DEPLOY_RESTART_COMMAND" ]; then
-  log 'restart service'
-  bash -lc "$DEPLOY_RESTART_COMMAND"
-else
-  log 'skip restart'
-fi
+log 'restart service'
+restart_service
+log 'smoke check live routes'
+smoke_check_live_routes
 
 log 'done'
