@@ -18,3 +18,19 @@ export type {
   LeaderboardRefreshStatus,
   LeaderboardRefreshUpload,
 } from "../../../packages/contracts/leaderboard-refresh-status.js";
+
+export type {
+  MatchSearchCardMatchMode,
+  MatchSearchCardOption,
+  MatchSearchItem,
+  MatchSearchOptions,
+  MatchSearchRequest,
+  MatchSearchResponse,
+  MatchSearchResultFilter,
+  MatchSearchSideRequest,
+  MatchSearchSideResult,
+  MatchSearchStrategyFilter,
+  MatchSearchWeaponActivation,
+  MatchSearchWeaponActivationFilter,
+  MatchSearchWeaponOption,
+} from "../../../packages/contracts/match-search.js";

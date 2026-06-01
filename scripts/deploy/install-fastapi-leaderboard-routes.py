@@ -6,6 +6,7 @@ from pathlib import Path
 
 
 MARKER = "# BEGIN CODEX LEADERBOARD STATUS ROUTES"
+END_MARKER = "# END CODEX LEADERBOARD STATUS ROUTES"
 
 ROUTE_BLOCK = f"""
     {MARKER}
@@ -28,10 +29,46 @@ ROUTE_BLOCK = f"""
             raise HTTPException(status_code=404, detail="status file not found")
         return FileResponse(path, media_type="application/json")
 
+    def _codex_leaderboard_node_api_base():
+        import os as _codex_os
+
+        return (_codex_os.environ.get("EIKETSU_LEADERBOARD_NODE_API_BASE") or "http://eiketsu-leaderboard-api:8001").rstrip("/")
+
+    def _codex_proxy_leaderboard_node_api(path, method="GET", body=None, content_type="application/json"):
+        from urllib.error import HTTPError as _CodexHTTPError
+        from urllib.error import URLError as _CodexURLError
+        from urllib.request import Request as _CodexUrlRequest
+        from urllib.request import urlopen as _codex_urlopen
+        from fastapi.responses import Response as _CodexResponse
+
+        target = f"{{_codex_leaderboard_node_api_base()}}{{path}}"
+        headers = {{"Accept": "application/json"}}
+        if body is not None:
+            headers["Content-Type"] = content_type or "application/json"
+        request = _CodexUrlRequest(target, data=body, headers=headers, method=method)
+        try:
+            with _codex_urlopen(request, timeout=20) as upstream:
+                response_body = upstream.read()
+                media_type = upstream.headers.get("content-type") or "application/json"
+                return _CodexResponse(content=response_body, status_code=upstream.status, media_type=media_type)
+        except _CodexHTTPError as exc:
+            media_type = exc.headers.get("content-type") or "application/json"
+            return _CodexResponse(content=exc.read(), status_code=exc.code, media_type=media_type)
+        except _CodexURLError:
+            raise HTTPException(status_code=502, detail="leaderboard api unavailable")
+
     @app.get("/leaderboard-status")
     @app.get("/leaderboard-status/")
     def leaderboard_status_page():
         path = _codex_leaderboard_frontend_root() / "leaderboard-status" / "index.html"
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="static file not found")
+        return FileResponse(path, media_type="text/html; charset=utf-8")
+
+    @app.get("/match-search")
+    @app.get("/match-search/")
+    def match_search_page():
+        path = _codex_leaderboard_frontend_root() / "match-search" / "index.html"
         if not path.is_file():
             raise HTTPException(status_code=404, detail="static file not found")
         return FileResponse(path, media_type="text/html; charset=utf-8")
@@ -60,7 +97,19 @@ ROUTE_BLOCK = f"""
             if candidate.is_file():
                 return _codex_json_file_response(candidate)
         raise HTTPException(status_code=404, detail="status file not found")
-    # END CODEX LEADERBOARD STATUS ROUTES
+
+    @app.get("/api/match-search-options")
+    def api_match_search_options():
+        return _codex_proxy_leaderboard_node_api("/api/match-search-options")
+
+    from fastapi import Request as _CodexRequest
+
+    @app.post("/api/match-search")
+    async def api_match_search(request: _CodexRequest):
+        body = await request.body()
+        content_type = request.headers.get("content-type") or "application/json"
+        return _codex_proxy_leaderboard_node_api("/api/match-search", method="POST", body=body, content_type=content_type)
+    {END_MARKER}
 """
 
 
@@ -78,8 +127,19 @@ def main() -> int:
 
     source_path = Path(source)
     text = source_path.read_text(encoding="utf-8")
-    if MARKER in text:
-        print("leaderboard status routes already installed")
+    marker_start = text.find(f"    {MARKER}")
+    if marker_start >= 0:
+        marker_end = text.find(f"    {END_MARKER}", marker_start)
+        if marker_end < 0:
+            print("cannot locate leaderboard routes end marker", file=sys.stderr)
+            return 1
+        block_end = text.find("\n", marker_end)
+        if block_end < 0:
+            block_end = len(text)
+        else:
+            block_end += 1
+        source_path.write_text(text[:marker_start] + ROUTE_BLOCK + text[block_end:], encoding="utf-8")
+        print("leaderboard routes updated")
         return 0
 
     needle = "\n    return app\n"

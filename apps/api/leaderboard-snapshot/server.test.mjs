@@ -60,6 +60,27 @@ async function testMissingRefreshStatusDoesNotExposePath() {
   }
 }
 
+async function testMissingMatchSearchIndexDoesNotExposePath() {
+  const missingFile = resolve("apps/api/leaderboard-snapshot/__missing_match_search__.json");
+  const server = createLeaderboardSnapshotServer({ matchSearchIndexFile: missingFile });
+  const address = await listen(server);
+  const originalConsoleError = console.error;
+
+  try {
+    console.error = () => {};
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/match-search-options`);
+    const bodyText = await response.text();
+    const body = JSON.parse(bodyText);
+
+    assert.equal(response.status, 500);
+    assert.equal(body.error, "match search data is not available");
+    assert.equal(bodyText.includes(missingFile), false);
+  } finally {
+    console.error = originalConsoleError;
+    await close(server);
+  }
+}
+
 function testSnapshot(sourceRunId, summary) {
   return {
     metadata: {
@@ -78,6 +99,68 @@ function testSnapshot(sourceRunId, summary) {
     },
     clusterRows: [],
     tierRows: []
+  };
+}
+
+function testMatchSearchIndex(matchId, weaponName = "孫子") {
+  return {
+    schemaVersion: 1,
+    metadata: {
+      sourceRunId: 1,
+      targetVersion: "Ver.test",
+      dateFrom: "2026-06-01",
+      dateTo: "2026-06-01",
+      matchCount: 1,
+      videoMatchCount: 1
+    },
+    cards: [
+      {
+        cardId: "card-a",
+        name: "Alpha",
+        faction: "蒼",
+        cardCode: "蒼001",
+        unitType: "槍兵",
+        imageUrl: "",
+        imageAlt: "Alpha",
+        usageCount: 1
+      }
+    ],
+    weapons: [{ name: weaponName, usageCount: 1, activatedCount: 1, notActivatedCount: 0, unknownCount: 0 }],
+    matches: [
+      {
+        matchId,
+        version: "Ver.test",
+        mode: "全国対戦",
+        playedAt: "2026-06-01 12:00",
+        videoUrl: "https://eiketsu.example.test/play/1",
+        playUrl: "https://eiketsu.example.test/play/1",
+        detailUrl: "",
+        m3u8Url: "",
+        replayId: "",
+        sideA: {
+          result: "win",
+          playerName: "alice",
+          castleRate: "52.1",
+          weaponName,
+          weaponActivated: "yes",
+          weaponSummary: "35c 発動",
+          schoolName: "士気",
+          cardIds: ["card-a"],
+          strategyCounts: { "card-a": 1 }
+        },
+        sideB: {
+          result: "loss",
+          playerName: "bob",
+          castleRate: "47.9",
+          weaponName: "再起",
+          weaponActivated: "no",
+          weaponSummary: "未発動",
+          schoolName: "士気",
+          cardIds: [],
+          strategyCounts: {}
+        }
+      }
+    ]
   };
 }
 
@@ -159,6 +242,64 @@ async function testRefreshStatusFileReplacementIsReloaded() {
   }
 }
 
+async function testMatchSearchEndpointsUseStaticIndex() {
+  const root = await mkdtemp(join(tmpdir(), "match-search-server-"));
+  const matchSearchIndexFile = join(root, "match-search-index.json");
+  const server = createLeaderboardSnapshotServer({ matchSearchIndexFile });
+
+  try {
+    await writeFile(matchSearchIndexFile, `${JSON.stringify(testMatchSearchIndex(1))}\n`, "utf8");
+    const address = await listen(server);
+    const options = await fetch(`http://127.0.0.1:${address.port}/api/match-search-options`);
+    const optionsBody = await options.json();
+    assert.equal(options.status, 200);
+    assert.equal(optionsBody.cards[0].name, "Alpha");
+
+    const search = await fetch(`http://127.0.0.1:${address.port}/api/match-search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sideA: { cardIds: ["card-a"], weaponActivated: "yes" } })
+    });
+    const searchBody = await search.json();
+    assert.equal(search.status, 200);
+    assert.equal(searchBody.total, 1);
+    assert.equal(searchBody.items[0].matchId, 1);
+
+    const badRequest = await fetch(`http://127.0.0.1:${address.port}/api/match-search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}"
+    });
+    assert.equal(badRequest.status, 400);
+  } finally {
+    await close(server);
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testMatchSearchIndexReplacementIsReloaded() {
+  const root = await mkdtemp(join(tmpdir(), "match-search-reload-"));
+  const matchSearchIndexFile = join(root, "match-search-index.json");
+  const server = createLeaderboardSnapshotServer({ matchSearchIndexFile });
+
+  try {
+    await writeFile(matchSearchIndexFile, `${JSON.stringify(testMatchSearchIndex(1, "孫子"))}\n`, "utf8");
+    const address = await listen(server);
+    const first = await fetch(`http://127.0.0.1:${address.port}/api/match-search-options`);
+    assert.equal((await first.json()).weapons[0].name, "孫子");
+
+    await writeFile(matchSearchIndexFile, `${JSON.stringify(testMatchSearchIndex(2, "再起之法"))}\n`, "utf8");
+    const second = await fetch(`http://127.0.0.1:${address.port}/api/match-search-options`);
+    const secondBody = await second.json();
+
+    assert.equal(second.status, 200);
+    assert.equal(secondBody.weapons[0].name, "再起之法");
+  } finally {
+    await close(server);
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 async function testSmokeAcceptsSnapshotEndpoint() {
   const root = await mkdtemp(join(tmpdir(), "leaderboard-snapshot-smoke-"));
   const snapshotFile = join(root, "leaderboard-snapshot.json");
@@ -197,9 +338,12 @@ async function testSmokeRejectsHtmlFallback() {
 
 await testMissingDataDoesNotExposePath();
 await testMissingRefreshStatusDoesNotExposePath();
+await testMissingMatchSearchIndexDoesNotExposePath();
 await testSnapshotFileIsServedWithoutBuild();
 await testSnapshotFileReplacementIsReloaded();
 await testRefreshStatusFileReplacementIsReloaded();
+await testMatchSearchEndpointsUseStaticIndex();
+await testMatchSearchIndexReplacementIsReloaded();
 await testSmokeAcceptsSnapshotEndpoint();
 await testSmokeRejectsHtmlFallback();
 

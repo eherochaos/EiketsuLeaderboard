@@ -17,6 +17,7 @@ from typing import Any
 DEFAULT_LEGACY_ROOT = Path("apps/api/data/legacy-service")
 DEFAULT_SNAPSHOT_FILE = Path("apps/api/data/leaderboard-snapshot.json")
 DEFAULT_STATUS_FILE = Path("apps/api/data/leaderboard-refresh-status.json")
+DEFAULT_MATCH_SEARCH_INDEX_FILE = Path("apps/api/data/match-search-index.json")
 STATUS_SCHEMA_VERSION = 1
 RECENT_STATUS_LIMIT = 20
 
@@ -30,6 +31,7 @@ def refresh_static_snapshot_after_upload(
     repo_root: Path | None = None,
     legacy_root: Path | None = None,
     snapshot_file: Path | None = None,
+    match_search_index_file: Path | None = None,
     status_file: Path | None = None,
     live_snapshot_file: Path | None = None,
     live_status_file: Path | None = None,
@@ -42,6 +44,7 @@ def refresh_static_snapshot_after_upload(
     root = (repo_root or Path.cwd()).resolve()
     legacy = _resolve(root, legacy_root or DEFAULT_LEGACY_ROOT)
     snapshot = _resolve(root, snapshot_file or DEFAULT_SNAPSHOT_FILE)
+    match_search_index = _resolve(root, match_search_index_file or DEFAULT_MATCH_SEARCH_INDEX_FILE)
     status_path = _resolve(root, status_file or DEFAULT_STATUS_FILE)
     live_snapshot = _resolve(root, live_snapshot_file) if live_snapshot_file else None
     live_status = _resolve(root, live_status_file) if live_status_file else None
@@ -72,6 +75,7 @@ def refresh_static_snapshot_after_upload(
         export_manifest = _refresh_legacy_export(legacy, exporter or _default_exporter)
         official_card_result = _refresh_official_card_data(root, legacy, node_bin, runner or _default_runner)
         snapshot_result = _refresh_snapshot(root, legacy, snapshot, node_bin, runner or _default_runner)
+        match_search_result = _refresh_match_search_index(root, legacy, snapshot, match_search_index, node_bin, runner or _default_runner)
         live_result = _publish_live_snapshot(snapshot, live_snapshot) if live_snapshot else None
         result = {
             "status": "completed",
@@ -80,6 +84,7 @@ def refresh_static_snapshot_after_upload(
             "export": export_manifest,
             "official_card_data": official_card_result,
             "snapshot": snapshot_result,
+            "match_search_index": match_search_result,
             "live_snapshot": live_result,
         }
         _write_refresh_status(
@@ -182,6 +187,19 @@ def _refresh_snapshot(
 ) -> dict[str, Any]:
     command = [node_bin, str(repo_root / "apps/api/leaderboard-snapshot/refresh-snapshot.mjs")]
     runner(command, _snapshot_env(legacy_root, snapshot_file))
+    return {"status": "completed"}
+
+
+def _refresh_match_search_index(
+    repo_root: Path,
+    legacy_root: Path,
+    snapshot_file: Path,
+    match_search_index_file: Path,
+    node_bin: str,
+    runner: CommandRunner,
+) -> dict[str, Any]:
+    command = [node_bin, str(repo_root / "apps/api/leaderboard-snapshot/match-search-index.mjs")]
+    runner(command, _snapshot_env(legacy_root, snapshot_file, match_search_index_file))
     return {"status": "completed"}
 
 
@@ -426,11 +444,17 @@ def _default_runner(command: list[str], env: dict[str, str]) -> subprocess.Compl
     return subprocess.run(command, check=True, env=env, text=True, capture_output=True)
 
 
-def _snapshot_env(legacy_root: Path, snapshot_file: Path | None) -> dict[str, str]:
+def _snapshot_env(
+    legacy_root: Path,
+    snapshot_file: Path | None,
+    match_search_index_file: Path | None = None,
+) -> dict[str, str]:
     env = dict(os.environ)
     env["LEADERBOARD_LEGACY_ROOT"] = str(legacy_root)
     if snapshot_file is not None:
         env["LEADERBOARD_SNAPSHOT_FILE"] = str(snapshot_file)
+    if match_search_index_file is not None:
+        env["LEADERBOARD_MATCH_SEARCH_INDEX_FILE"] = str(match_search_index_file)
     return env
 
 
@@ -491,6 +515,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
     parser.add_argument("--legacy-root", type=Path, default=DEFAULT_LEGACY_ROOT)
     parser.add_argument("--snapshot-file", type=Path, default=DEFAULT_SNAPSHOT_FILE)
+    parser.add_argument("--match-search-index-file", type=Path, default=DEFAULT_MATCH_SEARCH_INDEX_FILE)
     parser.add_argument("--status-file", type=Path, default=DEFAULT_STATUS_FILE)
     parser.add_argument("--live-snapshot-file", type=Path, default=None)
     parser.add_argument("--live-status-file", type=Path, default=None)
@@ -521,6 +546,7 @@ def main() -> int:
         repo_root=args.repo_root,
         legacy_root=args.legacy_root,
         snapshot_file=args.snapshot_file,
+        match_search_index_file=args.match_search_index_file,
         status_file=args.status_file,
         live_snapshot_file=args.live_snapshot_file,
         live_status_file=args.live_status_file,
