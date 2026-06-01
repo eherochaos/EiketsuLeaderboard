@@ -35,6 +35,11 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
                 if command[-1].endswith("refresh-snapshot.mjs"):
                     snapshot_file.parent.mkdir(parents=True, exist_ok=True)
                     snapshot_file.write_text(json.dumps({"metadata": {"sourceRunId": 7}}), encoding="utf-8")
+                if command[-1].endswith("match-search-index.mjs"):
+                    Path(env["LEADERBOARD_MATCH_SEARCH_INDEX_FILE"]).write_text(
+                        json.dumps({"metadata": {"sourceRunId": 7}, "matches": []}),
+                        encoding="utf-8",
+                    )
                 return subprocess.CompletedProcess(command, 0, "", "")
 
             result = refresh_static_snapshot_after_upload(
@@ -62,9 +67,10 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             self.assertEqual(status["snapshot"]["sourceRunId"], 7)
             self.assertEqual(live_status["snapshot"]["sourceRunId"], 7)
             self.assertNotIn(str(repo_root), json.dumps(status, ensure_ascii=False))
-            self.assertEqual(len(calls), 2)
+            self.assertEqual(len(calls), 3)
             self.assertEqual(calls[-1][1]["LEADERBOARD_LEGACY_ROOT"], str(legacy_root))
             self.assertEqual(calls[-1][1]["LEADERBOARD_SNAPSHOT_FILE"], str(snapshot_file))
+            self.assertTrue(calls[-1][1]["LEADERBOARD_MATCH_SEARCH_INDEX_FILE"].endswith("match-search-index.json"))
 
     def test_refresh_static_snapshot_skips_when_lock_exists(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

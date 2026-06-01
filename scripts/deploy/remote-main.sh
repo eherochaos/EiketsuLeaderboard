@@ -44,6 +44,7 @@ run_node() {
     LEADERBOARD_LEGACY_ROOT="${LEADERBOARD_LEGACY_ROOT:-}" \
     LEADERBOARD_SNAPSHOT_FILE="${LEADERBOARD_SNAPSHOT_FILE:-}" \
     LEADERBOARD_REFRESH_STATUS_FILE="${LEADERBOARD_REFRESH_STATUS_FILE:-}" \
+    LEADERBOARD_MATCH_SEARCH_INDEX_FILE="${LEADERBOARD_MATCH_SEARCH_INDEX_FILE:-}" \
       node "$@"
     return
   fi
@@ -56,9 +57,11 @@ run_node() {
     local docker_legacy_root
     local docker_snapshot_file
     local docker_status_file
+    local docker_match_search_index_file
     docker_legacy_root="$(to_work_path "${LEADERBOARD_LEGACY_ROOT:-}")"
     docker_snapshot_file="$(to_work_path "${LEADERBOARD_SNAPSHOT_FILE:-}")"
     docker_status_file="$(to_work_path "${LEADERBOARD_REFRESH_STATUS_FILE:-}")"
+    docker_match_search_index_file="$(to_work_path "${LEADERBOARD_MATCH_SEARCH_INDEX_FILE:-}")"
     docker run --rm \
       --user "$(id -u):$(id -g)" \
       -v "$DEPLOY_PATH:/work" \
@@ -66,6 +69,7 @@ run_node() {
       -e "LEADERBOARD_LEGACY_ROOT=$docker_legacy_root" \
       -e "LEADERBOARD_SNAPSHOT_FILE=$docker_snapshot_file" \
       -e "LEADERBOARD_REFRESH_STATUS_FILE=$docker_status_file" \
+      -e "LEADERBOARD_MATCH_SEARCH_INDEX_FILE=$docker_match_search_index_file" \
       node:22-alpine node "${docker_args[@]}"
     return
   fi
@@ -154,6 +158,27 @@ install_fastapi_routes() {
   docker exec "$DEPLOY_FASTAPI_CONTAINER" rm -f /tmp/install-fastapi-leaderboard-routes.py
 }
 
+start_leaderboard_node_api() {
+  require_fastapi_container
+  local network_name
+  network_name="$(docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$DEPLOY_FASTAPI_CONTAINER" | head -n 1)"
+  [ -n "$network_name" ] || fail 'fastapi container network is missing'
+
+  docker rm -f "$DEPLOY_NODE_API_CONTAINER" >/dev/null 2>&1 || true
+  docker run -d \
+    --restart unless-stopped \
+    --name "$DEPLOY_NODE_API_CONTAINER" \
+    --network "$network_name" \
+    -v "$DEPLOY_PATH:/work:ro" \
+    -w /work \
+    -e HOST=0.0.0.0 \
+    -e "PORT=$DEPLOY_NODE_API_PORT" \
+    -e LEADERBOARD_SNAPSHOT_FILE=/work/apps/api/data/leaderboard-snapshot.json \
+    -e LEADERBOARD_REFRESH_STATUS_FILE=/work/apps/api/data/leaderboard-refresh-status.json \
+    -e LEADERBOARD_MATCH_SEARCH_INDEX_FILE=/work/apps/api/data/match-search-index.json \
+    node:22-alpine node apps/api/leaderboard-snapshot/server.mjs >/dev/null
+}
+
 restart_service() {
   if [ -n "$DEPLOY_RESTART_COMMAND" ]; then
     bash -lc "$DEPLOY_RESTART_COMMAND"
@@ -178,7 +203,12 @@ smoke_check_live_routes() {
     sleep 2
   done
   curl -fsS "$base/leaderboard-status/" >/dev/null || fail 'leaderboard status page is not live'
+  curl -fsS "$base/match-search/" >/dev/null || fail 'match search page is not live'
   curl -fsS "$base/api/leaderboard-refresh-status" >/dev/null || fail 'leaderboard refresh status api is not live'
+  curl -fsS "$base/api/match-search-options" >/dev/null || fail 'match search options api is not live'
+  curl -fsS -X POST "$base/api/match-search" \
+    -H 'Content-Type: application/json' \
+    -d '{"sideA":{"result":"win"},"pageSize":1}' >/dev/null || fail 'match search api is not live'
 }
 
 refresh_public_run() {
@@ -209,6 +239,8 @@ DEPLOY_LIVE_SNAPSHOT_FILE="$(decode_env "${DEPLOY_LIVE_SNAPSHOT_FILE_B64:-}")"
 DEPLOY_LIVE_STATUS_FILE="$(decode_env "${DEPLOY_LIVE_STATUS_FILE_B64:-}")"
 DEPLOY_RESTART_COMMAND="$(decode_env "${DEPLOY_RESTART_COMMAND_B64:-}")"
 DEPLOY_SMOKE_URL_BASE="${DEPLOY_SMOKE_URL_BASE:-http://127.0.0.1:8000}"
+DEPLOY_NODE_API_CONTAINER="${DEPLOY_NODE_API_CONTAINER:-eiketsu-leaderboard-api}"
+DEPLOY_NODE_API_PORT="${DEPLOY_NODE_API_PORT:-8001}"
 DEPLOY_EXPORT_POSTGRES="${DEPLOY_EXPORT_POSTGRES:-1}"
 DEPLOY_EXPORT_CONTAINER="${DEPLOY_EXPORT_CONTAINER:-eiketsu-env-db-api-1}"
 DEPLOY_EXPORT_ASSET_ROOT="${DEPLOY_EXPORT_ASSET_ROOT:-/home/ubuntu/eiketsu-env-db/assets}"
@@ -265,6 +297,7 @@ publish_live_frontend
 DATA_ROOT='apps/api/data'
 LEGACY_ROOT="$DATA_ROOT/legacy-service"
 STATUS_FILE="$DATA_ROOT/leaderboard-refresh-status.json"
+MATCH_SEARCH_INDEX_FILE="$DATA_ROOT/match-search-index.json"
 if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ]; then
   log 'refresh leaderboard run'
   refresh_public_run
@@ -311,11 +344,18 @@ LEADERBOARD_LEGACY_ROOT="$LEGACY_ROOT" \
 LEADERBOARD_SNAPSHOT_FILE="$DATA_ROOT/leaderboard-snapshot.json" \
   run_node apps/api/leaderboard-snapshot/refresh-snapshot.mjs
 ensure_deploy_owner "$DATA_ROOT"
+log 'refresh match search index'
+LEADERBOARD_LEGACY_ROOT="$LEGACY_ROOT" \
+LEADERBOARD_SNAPSHOT_FILE="$DATA_ROOT/leaderboard-snapshot.json" \
+LEADERBOARD_MATCH_SEARCH_INDEX_FILE="$MATCH_SEARCH_INDEX_FILE" \
+  run_node apps/api/leaderboard-snapshot/match-search-index.mjs
+ensure_deploy_owner "$DATA_ROOT"
 log 'write refresh status'
 python3 apps/api/data-migration/refresh_static_snapshot_after_upload.py \
   --repo-root "$DEPLOY_PATH" \
   --legacy-root "$LEGACY_ROOT" \
   --snapshot-file "$DATA_ROOT/leaderboard-snapshot.json" \
+  --match-search-index-file "$MATCH_SEARCH_INDEX_FILE" \
   --status-file "$STATUS_FILE" \
   --status-only \
   --refresh-status completed \
@@ -329,6 +369,8 @@ log 'publish frontend status asset'
 publish_frontend_status_asset
 log 'install fastapi routes'
 install_fastapi_routes
+log 'start leaderboard node api'
+start_leaderboard_node_api
 
 log 'restart service'
 restart_service

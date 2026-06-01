@@ -1,11 +1,12 @@
 <script setup lang="ts">
 const props = defineProps<{
-  current: "home" | "tier" | "status";
+  current: "home" | "tier" | "status" | "matchSearch";
 }>();
 
 const navItems = [
   { key: "home", label: "首页", href: "/leaderboard/" },
   { key: "tier", label: "TierList", href: "/tier-list/" },
+  { key: "matchSearch", label: "对局搜索", href: "/match-search/" },
   { key: "status", label: "数据状态", href: "/leaderboard-status/" }
 ] as const;
 </script>
@@ -77,6 +78,7 @@ const navItems = [
 }
 
 .Common_Header_Links {
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
@@ -99,7 +101,14 @@ const navItems = [
   }
 
   .Common_Header_Links {
+    flex: 1 1 auto;
+    overflow-x: auto;
+    scrollbar-width: none;
     gap: 6px;
+  }
+
+  .Common_Header_Links::-webkit-scrollbar {
+    display: none;
   }
 
   .Common_NavPrimary {
