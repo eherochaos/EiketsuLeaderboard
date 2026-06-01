@@ -1,0 +1,12 @@
+data/
+dist/
+build/
+.venv/
+.tmp/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.spec.bak
+*.exe
