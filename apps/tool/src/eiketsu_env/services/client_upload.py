@@ -288,8 +288,9 @@ def apply_client_date_override(config: ShareConfig, date_from: str = "", date_to
 
 def minimum_client_date_from(config: ShareConfig) -> str:
     known_start = version_start_date(config.target_version)
-    candidates = [item for item in (config.date_from, known_start) if item]
-    return max(candidates) if candidates else config.date_from
+    if config.date_from:
+        return config.date_from
+    return known_start
 
 
 def doctor_client(settings: Settings, transport: JsonTransport | None = None) -> dict[str, Any]:

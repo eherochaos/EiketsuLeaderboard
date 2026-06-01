@@ -220,6 +220,16 @@ def test_client_date_override_rejects_date_before_effective_start():
         raise AssertionError("date_to before version start should fail")
 
 
+def test_client_date_window_prefers_server_config_for_known_version():
+    config = client_upload.ShareConfig(target_version="Ver.3.5.0B", date_from="2026-05-27", date_to="2026-06-01")
+
+    assert minimum_client_date_from(config) == "2026-05-27"
+    effective = apply_client_date_override(config, date_from="", date_to="")
+
+    assert effective.date_from == "2026-05-27"
+    assert effective.date_to == "2026-06-01"
+
+
 def test_cleanup_raw_snapshots_removes_files_and_rows(tmp_path):
     settings = _settings(tmp_path)
     raw_file = settings.raw_dir / "2026-05-10" / "detail" / "sample.html"
