@@ -1216,115 +1216,409 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 }
 
 @media (max-width: 760px) {
+  .MatchSearchPage {
+    padding-top: 8px;
+  }
+
+  .MatchSearchPage.Common_PageShell {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
   .MatchSearch_Hero {
     min-height: 0;
-    padding: var(--space-md);
-    grid-template-columns: 1fr;
-    gap: 12px;
+    padding: 8px 10px;
+    grid-template-columns: minmax(0, 1fr) 68px;
+    gap: 8px;
+    box-shadow: none;
+  }
+
+  .MatchSearch_Hero .Common_Eyebrow {
+    display: none;
   }
 
   .MatchSearch_Hero h1 {
-    font-size: 32px;
+    margin-bottom: 4px;
+    font-size: 24px;
+    line-height: 1;
+  }
+
+  .MatchSearch_MetaLine {
+    gap: 3px 8px;
+    font-size: 10px;
+    line-height: 1.15;
+  }
+
+  .MatchSearch_MetaLine span {
+    white-space: nowrap;
   }
 
   .MatchSearch_ActionBox {
-    text-align: left;
+    padding: 6px 8px;
+    text-align: right;
+  }
+
+  .MatchSearch_ActionBox span {
+    font-size: 10px;
+  }
+
+  .MatchSearch_ActionBox strong {
+    margin-top: 2px;
+    font-size: 19px;
   }
 
   .MatchSearch_Toolbar {
-    align-items: stretch;
-    flex-direction: column;
+    min-height: 38px;
+    margin-top: 6px;
+    padding: 5px;
+    align-items: center;
+    flex-direction: row;
+    gap: 5px;
+    box-shadow: none;
   }
 
   .MatchSearch_Segmented {
-    width: 100%;
-    grid-template-columns: repeat(2, 1fr);
+    flex: 0 0 84px;
+    width: 84px;
+    grid-template-columns: repeat(2, 42px);
   }
 
-  .MatchSearch_SearchButton,
+  .MatchSearch_Segmented button,
+  .MatchSearch_SearchButton {
+    min-height: 32px;
+    font-size: 11px;
+  }
+
+  .MatchSearch_SearchButton {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+
   .MatchSearch_SearchError,
   .MatchSearch_ToolbarCount {
-    width: 100%;
+    flex: 0 1 88px;
+    width: auto;
     margin-left: 0;
+    overflow: hidden;
+    font-size: 11px;
+    line-height: 1.1;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .MatchSearch_FormGrid {
+    margin-top: 6px;
+    gap: 6px;
   }
 
   .MatchSearch_SidePanel {
-    padding: var(--space-md);
+    padding: 8px;
+    box-shadow: none;
+  }
+
+  .MatchSearch_SideHead {
+    align-items: center;
+    margin-bottom: 6px;
+    padding-bottom: 5px;
+  }
+
+  .MatchSearch_SideHead .Common_Eyebrow {
+    display: none;
+  }
+
+  .MatchSearch_SideHead h2 {
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .MatchSearch_SideHead button {
+    min-width: 46px;
+    min-height: 28px;
+    font-size: 11px;
   }
 
   .MatchSearch_ControlRow,
   .MatchSearch_FilterRow {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .MatchSearch_FieldBlock {
+    margin-top: 6px;
+    gap: 4px;
+  }
+
+  .MatchSearch_ControlRow label,
+  .MatchSearch_FieldBlock label,
+  .MatchSearch_FieldLabel {
+    gap: 2px;
+    font-size: 10px;
+  }
+
+  .MatchSearch_ControlRow select,
+  .MatchSearch_FieldBlock select,
+  .MatchSearch_FieldBlock input,
+  .MatchSearch_SelectedCard select {
+    min-height: 30px;
+    font-size: 12px;
+  }
+
+  .MatchSearch_FieldBlock input {
+    padding: 0 8px;
+  }
+
+  .MatchSearch_CardPickerTrigger {
+    min-height: 34px;
+    padding: 5px 8px;
+  }
+
+  .MatchSearch_CardPickerTrigger strong {
+    font-size: 12px;
+  }
+
+  .MatchSearch_CardPickerTrigger small {
+    margin-top: 1px;
+    font-size: 10px;
+  }
+
+  .MatchSearch_CardPickerTrigger em {
+    min-width: 24px;
+    font-size: 14px;
+  }
+
+  .MatchSearch_SelectedList {
+    margin-top: 6px;
+    gap: 5px;
+  }
+
+  .MatchSearch_SelectedCard {
+    padding: 4px;
+    grid-template-columns: 32px minmax(0, 1fr) 78px 28px;
+    gap: 5px;
+  }
+
+  .MatchSearch_CardPick :deep(.Common_ImageFrame),
+  .MatchSearch_SelectedCard :deep(.Common_ImageFrame) {
+    width: 32px;
+    height: 51px;
+  }
+
+  .MatchSearch_CardPick strong,
+  .MatchSearch_SelectedCard strong {
+    font-size: 12px;
+  }
+
+  .MatchSearch_CardPick small,
+  .MatchSearch_SelectedCard small {
+    margin-top: 1px;
+    font-size: 10px;
   }
 
   .MatchSearch_CardPickerBackdrop {
     padding: 0;
-    align-items: end;
-    place-items: end stretch;
+    place-items: stretch;
   }
 
   .MatchSearch_CardPicker {
     width: 100%;
-    max-height: min(92vh, 780px);
-    border-right: 0;
-    border-bottom: 0;
-    border-left: 0;
+    height: 100svh;
+    max-height: none;
+    border: 0;
   }
 
   .MatchSearch_CardPickerHead {
-    padding: 10px var(--space-md) 6px;
+    padding: 5px 8px;
+    align-items: center;
+  }
+
+  .MatchSearch_CardPickerHead .Common_Eyebrow {
+    display: none;
   }
 
   .MatchSearch_CardPickerHead h2 {
-    font-size: 21px;
+    font-size: 18px;
+  }
+
+  .MatchSearch_CardPickerHead button {
+    width: 30px;
+    height: 30px;
   }
 
   .MatchSearch_CardPickerControls {
-    padding: 8px var(--space-md) 6px;
-    grid-template-columns: 1fr;
+    padding: 5px 8px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  .MatchSearch_CardPickerControls label {
+    grid-column: 1 / -1;
+    gap: 2px;
+    font-size: 10px;
+  }
+
+  .MatchSearch_CardPickerControls input,
+  .MatchSearch_CardPickerControls select {
+    min-height: 30px;
+    font-size: 11px;
+  }
+
+  .MatchSearch_CardPickerControls input {
+    padding: 0 8px;
   }
 
   .MatchSearch_CardPickerSelected {
-    padding: 5px var(--space-md);
+    min-height: 28px;
+    padding: 3px 8px;
+  }
+
+  .MatchSearch_CardPickerSelected span,
+  .MatchSearch_CardPickerSelected button {
+    font-size: 10px;
   }
 
   .MatchSearch_CardPickerGrid {
-    padding: 6px var(--space-md) 8px;
+    padding: 4px 8px 6px;
     grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .MatchSearch_CardPickerGrid .MatchSearch_CardPick {
+    min-height: 48px;
+    padding: 2px 4px;
+    grid-template-columns: 30px minmax(0, 1fr) 32px;
+    gap: 5px;
+  }
+
+  .MatchSearch_CardPickerGrid .MatchSearch_CardPick :deep(.Common_ImageFrame) {
+    width: 30px;
+    height: 48px;
+  }
+
+  .MatchSearch_CardPickerGrid .MatchSearch_CardPick strong {
+    font-size: 12px;
+  }
+
+  .MatchSearch_CardPickerGrid .MatchSearch_CardPick small {
+    font-size: 9px;
+  }
+
+  .MatchSearch_CardPickerGrid .MatchSearch_CardPick em {
+    font-size: 13px;
   }
 
   .MatchSearch_CardPickerFoot {
-    padding: 7px var(--space-md) max(10px, env(safe-area-inset-bottom));
+    padding: 5px 8px max(8px, env(safe-area-inset-bottom));
   }
 
   .MatchSearch_CardPickerFoot button {
     width: 100%;
+    min-height: 34px;
   }
 
-  .MatchSearch_SelectedCard {
-    grid-template-columns: 38px minmax(0, 1fr) 34px;
+  .MatchSearch_ResultPanel {
+    margin-top: 8px;
+    padding: 8px;
+    overflow-x: hidden;
   }
 
-  .MatchSearch_SelectedCard select {
-    grid-column: 1 / -1;
+  .MatchSearch_ResultPanel .Common_SectionHeading {
+    align-items: center;
+    flex-direction: row;
+    gap: 8px;
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+  }
+
+  .MatchSearch_ResultPanel .Common_SectionHeading h2 {
+    font-size: 22px;
+  }
+
+  .MatchSearch_ResultList {
+    gap: 6px;
   }
 
   .MatchSearch_ResultItem {
     width: 100%;
+    padding: 6px;
   }
 
   .MatchSearch_ResultHead {
-    align-items: stretch;
-    grid-template-columns: 1fr;
+    margin-bottom: 4px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
     gap: 6px;
   }
 
+  .MatchSearch_ResultHead > div {
+    grid-template-columns: 1fr;
+    gap: 1px;
+  }
+
+  .MatchSearch_ResultHead strong {
+    font-size: 16px;
+  }
+
+  .MatchSearch_ResultHead span {
+    font-size: 10px;
+  }
+
   .MatchSearch_ResultHead a {
+    min-height: 28px;
+    padding: 0 8px;
     justify-content: center;
+    font-size: 11px;
+  }
+
+  .MatchSearch_ResultSides {
+    gap: 6px;
   }
 
   .MatchSearch_ResultSides section {
     width: 100%;
+    gap: 3px;
+  }
+
+  .MatchSearch_ResultSideMeta {
+    gap: 1px;
+  }
+
+  .MatchSearch_ResultSideTitle {
+    font-size: 12px;
+  }
+
+  .MatchSearch_ResultSides p,
+  .MatchSearch_ResultSideInline {
+    font-size: 10px;
+    line-height: 1.12;
+  }
+
+  .MatchSearch_ResultSides :deep(.Common_DeckRail_Mini) {
+    --Common_DeckRail_SlotHeight: 52px;
+
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: var(--Common_DeckRail_SlotWidth);
+    gap: 3px;
+    width: 100%;
+    padding: 4px;
+    overflow-x: auto;
+  }
+
+  .MatchSearch_ResultSides :deep(.Common_DeckRail_Mini .Common_DeckRail_EmptySlot) {
+    display: none;
+  }
+
+  .MatchSearch_Pager {
+    margin-top: 8px;
+    gap: 8px;
+  }
+
+  .MatchSearch_Pager button {
+    min-width: 76px;
+    min-height: 30px;
   }
 }
 </style>
