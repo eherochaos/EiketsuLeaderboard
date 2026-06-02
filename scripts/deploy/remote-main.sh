@@ -193,6 +193,11 @@ start_leaderboard_node_api() {
     node:22-alpine node apps/api/leaderboard-snapshot/server.mjs >/dev/null
 }
 
+stop_leaderboard_node_api() {
+  command -v docker >/dev/null 2>&1 || return 0
+  docker rm -f "$DEPLOY_NODE_API_CONTAINER" >/dev/null 2>&1 || true
+}
+
 install_upload_refresh_worker() {
   command -v systemctl >/dev/null 2>&1 || fail 'systemd runtime is missing'
   local worker_script="$DATA_ROOT/run-upload-refresh-worker.sh"
@@ -482,15 +487,16 @@ log 'publish live status'
 publish_live_status
 log 'install upload refresh worker'
 install_upload_refresh_worker
-log 'start leaderboard node api'
-start_leaderboard_node_api
-
+log 'stop leaderboard node api before restart'
+stop_leaderboard_node_api
 log 'restart service before route install'
 restart_service
 log 'install fastapi routes'
 install_fastapi_routes
 log 'reload fastapi routes'
 reload_fastapi_routes
+log 'start leaderboard node api'
+start_leaderboard_node_api
 log 'smoke check api routes'
 smoke_check_api_routes
 log 'publish live frontend'

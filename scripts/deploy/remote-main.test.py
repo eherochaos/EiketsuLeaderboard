@@ -15,10 +15,11 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assert_order(
             "log 'publish web dist'",
             "log 'refresh leaderboard snapshot'",
-            "log 'start leaderboard node api'",
+            "log 'stop leaderboard node api before restart'",
             "log 'restart service before route install'",
             "log 'install fastapi routes'",
             "log 'reload fastapi routes'",
+            "log 'start leaderboard node api'",
             "log 'smoke check api routes'",
             "log 'publish live frontend'",
             "log 'smoke check live routes'",
@@ -46,6 +47,11 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn("require_fastapi_container", route_reload)
         self.assertIn("docker restart \"$DEPLOY_FASTAPI_CONTAINER\"", route_reload)
         self.assertNotIn("DEPLOY_RESTART_COMMAND", route_reload)
+
+    def test_node_api_is_removed_before_service_restart(self) -> None:
+        stop_node = self.function_body("stop_leaderboard_node_api")
+        self.assertIn("docker rm -f \"$DEPLOY_NODE_API_CONTAINER\"", stop_node)
+        self.assertIn("|| true", stop_node)
 
     def assert_order(self, *needles: str) -> None:
         positions = [self.text.index(needle) for needle in needles]
