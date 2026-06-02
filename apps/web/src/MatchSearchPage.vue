@@ -1416,13 +1416,14 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 
   .MatchSearch_SelectedList {
     margin-top: 6px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 5px;
   }
 
   .MatchSearch_SelectedCard {
-    padding: 4px;
-    grid-template-columns: 32px minmax(0, 1fr) 78px 28px;
-    gap: 5px;
+    padding: 3px 4px;
+    grid-template-columns: minmax(0, 1fr) 66px 22px;
+    gap: 4px;
   }
 
   .MatchSearch_CardPick :deep(.Common_ImageFrame),
@@ -1431,15 +1432,38 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
     height: 51px;
   }
 
+  .MatchSearch_SelectedCard :deep(.Common_ImageFrame),
+  .MatchSearch_SelectedCard small {
+    display: none;
+  }
+
   .MatchSearch_CardPick strong,
   .MatchSearch_SelectedCard strong {
     font-size: 12px;
+  }
+
+  .MatchSearch_SelectedCard strong {
+    font-size: 10px;
+    line-height: 1;
   }
 
   .MatchSearch_CardPick small,
   .MatchSearch_SelectedCard small {
     margin-top: 1px;
     font-size: 10px;
+  }
+
+  .MatchSearch_SelectedCard select {
+    min-height: 24px;
+    padding: 0 2px;
+    font-size: 10px;
+  }
+
+  .MatchSearch_SelectedCard button {
+    width: 22px;
+    height: 22px;
+    border-color: rgba(185, 133, 36, 0.38);
+    font-size: 13px;
   }
 
   .MatchSearch_CardPickerBackdrop {
