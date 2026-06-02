@@ -70,6 +70,8 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             self.assertEqual(live_status["snapshot"]["sourceRunId"], 7)
             self.assertNotIn(str(repo_root), json.dumps(status, ensure_ascii=False))
             self.assertEqual(len(calls), 3)
+            self.assertTrue(calls[1][1]["LEADERBOARD_TIER_LIST_SNAPSHOT_FILE"].endswith("tier-list-snapshot.json"))
+            self.assertTrue(calls[1][1]["LEADERBOARD_TIER_LIST_CONFIGS_FILE"].endswith("tier-list-configs.json"))
             self.assertEqual(calls[-1][1]["LEADERBOARD_LEGACY_ROOT"], str(legacy_root))
             self.assertEqual(calls[-1][1]["LEADERBOARD_SNAPSHOT_FILE"], str(snapshot_file))
             self.assertTrue(calls[-1][1]["LEADERBOARD_MATCH_SEARCH_INDEX_FILE"].endswith("match-search-index.json"))

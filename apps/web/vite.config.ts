@@ -14,6 +14,14 @@ export default defineConfig(({ mode }) => {
       target: leaderboardApiOrigin,
       changeOrigin: true
     },
+    "/api/tier-list-snapshot": {
+      target: leaderboardApiOrigin,
+      changeOrigin: true
+    },
+    "/api/tier-list-deck-config": {
+      target: leaderboardApiOrigin,
+      changeOrigin: true
+    },
     "/api/match-search-options": {
       target: leaderboardApiOrigin,
       changeOrigin: true

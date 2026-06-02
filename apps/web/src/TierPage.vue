@@ -1,17 +1,20 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import CommonHeader from "./components/Common_Header.vue";
 import CommonDeckRail from "./components/Common_DeckRail.vue";
 import CommonImageFrame from "./components/Common_ImageFrame.vue";
 import CommonMetricTags from "./components/Common_MetricTags.vue";
 import TierPageDeckConfigPanel from "./components/TierPage_DeckConfigPanel.vue";
 import { dateOnly, integer, percent, sourceLabels } from "./lib/format";
-import { loadSnapshot } from "./lib/snapshot";
-import type { CardView, DeckClusterVariant, DeckRow, LeaderboardSnapshot } from "./types";
+import { loadTierListDeckConfig, loadTierListSnapshot } from "./lib/tierList";
+import type { CardView, DeckConfigStats, TierListClusterVariant, TierListRow, TierListScope, TierListSnapshot } from "./types";
 
 type SortKey = "rankScore" | "winRate" | "playerAverageWinRate" | "usageRate" | "kabukiPoints" | "sampleSize";
 
-const snapshot = ref<LeaderboardSnapshot | null>(null);
+const INITIAL_VISIBLE_ROWS = 100;
+const VISIBLE_ROWS_STEP = 100;
+
+const snapshot = ref<TierListSnapshot | null>(null);
 const loading = ref(true);
 const error = ref("");
 const factionFilter = ref("all");
@@ -20,6 +23,20 @@ const sortKey = ref<SortKey>("rankScore");
 const clusterSameName = ref(false);
 const clusterVariantIndexes = ref<Record<string, number>>({});
 const expandedDeckIds = ref(new Set<string>());
+const visibleRowLimit = ref(INITIAL_VISIBLE_ROWS);
+const mobileViewport = ref(false);
+const deckConfigs = ref<Record<string, DeckConfigStats>>({});
+const deckConfigLoadingIds = ref(new Set<string>());
+const deckConfigErrors = ref<Record<string, string>>({});
+let mobileMediaQuery: MediaQueryList | null = null;
+const emptyDeckConfig: DeckConfigStats = {
+  weapons: [],
+  styles: [],
+  souls: [],
+  strategies: [],
+  schoolStages: [],
+  unfavorableMatchups: []
+};
 
 const sortOptions: { value: SortKey; label: string }[] = [
   { value: "rankScore", label: "综合 Rank" },
@@ -30,9 +47,16 @@ const sortOptions: { value: SortKey; label: string }[] = [
   { value: "sampleSize", label: "样本数" }
 ];
 
+function updateViewportMode(): void {
+  mobileViewport.value = Boolean(mobileMediaQuery?.matches);
+}
+
 onMounted(async () => {
+  mobileMediaQuery = window.matchMedia("(max-width: 760px)");
+  updateViewportMode();
+  mobileMediaQuery.addEventListener("change", updateViewportMode);
   try {
-    snapshot.value = await loadSnapshot();
+    snapshot.value = await loadTierListSnapshot();
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : "快照读取失败";
   } finally {
@@ -40,15 +64,20 @@ onMounted(async () => {
   }
 });
 
+onBeforeUnmount(() => {
+  mobileMediaQuery?.removeEventListener("change", updateViewportMode);
+  mobileMediaQuery = null;
+});
+
 const rows = computed(() => snapshot.value?.tierRows ?? []);
-const clusterRows = computed(() => snapshot.value?.clusterRows ?? snapshot.value?.home?.tierRows ?? []);
+const clusterRows = computed(() => snapshot.value?.clusterRows ?? []);
 const metadata = computed(() => snapshot.value?.metadata ?? null);
 const factions = computed(() => {
   const values = new Set([...rows.value, ...clusterRows.value].map((row) => row.faction).filter(Boolean));
   return Array.from(values).sort((left, right) => left.localeCompare(right, "ja"));
 });
 
-function compareRows(left: DeckRow, right: DeckRow): number {
+function compareRows(left: TierListRow, right: TierListRow): number {
   if (sortKey.value === "rankScore") {
     return left.rankScore - right.rankScore || right.sampleSize - left.sampleSize || right.winRate - left.winRate || left.deckName.localeCompare(right.deckName, "ja");
   }
@@ -75,6 +104,9 @@ const filteredClusterRows = computed(() => {
 const usePublishedClusters = computed(() => clusterSameName.value && filteredClusterRows.value.length > 0);
 
 const visibleRows = computed(() => usePublishedClusters.value ? filteredClusterRows.value : filteredRows.value);
+const renderedRows = computed(() => visibleRows.value.slice(0, visibleRowLimit.value));
+const hasMoreRows = computed(() => renderedRows.value.length < visibleRows.value.length);
+const renderedCountLabel = computed(() => `${integer(renderedRows.value.length)} / ${integer(visibleRows.value.length)}`);
 
 const filterCountLabel = computed(() => {
   if (!clusterSameName.value) return `${integer(filteredRows.value.length)} 条`;
@@ -84,30 +116,85 @@ const filterCountLabel = computed(() => {
 
 const topDeck = computed(() => visibleRows.value[0] ?? null);
 
-function deckStateKey(deck: DeckRow): string {
+watch([factionFilter, sourceFilter, sortKey, clusterSameName], () => {
+  visibleRowLimit.value = INITIAL_VISIBLE_ROWS;
+});
+
+function deckStateKey(deck: TierListRow): string {
   return usePublishedClusters.value ? `cluster:${deck.deckId}` : `deck:${deck.deckId}`;
 }
 
-function deckConfigPanelId(deck: DeckRow): string {
+function deckConfigPanelId(deck: TierListRow): string {
   return `tier-config-${deckStateKey(deck).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 }
 
-function isDeckExpanded(deck: DeckRow): boolean {
+function isDeckExpanded(deck: TierListRow): boolean {
   return expandedDeckIds.value.has(deckStateKey(deck));
 }
 
-function toggleDeckConfig(deck: DeckRow): void {
+function deckConfigScope(): TierListScope {
+  return usePublishedClusters.value ? "cluster" : "deck";
+}
+
+function deckConfigFor(deck: TierListRow): DeckConfigStats | null {
+  return deckConfigs.value[deckStateKey(deck)] ?? null;
+}
+
+function deckConfigError(deck: TierListRow): string {
+  return deckConfigErrors.value[deckStateKey(deck)] ?? "";
+}
+
+function isDeckConfigLoading(deck: TierListRow): boolean {
+  return deckConfigLoadingIds.value.has(deckStateKey(deck));
+}
+
+async function ensureDeckConfig(deck: TierListRow): Promise<void> {
+  const stateKey = deckStateKey(deck);
+  if (deckConfigs.value[stateKey] || deckConfigLoadingIds.value.has(stateKey)) return;
+
+  const deckId = String(deck.deckId || "").trim();
+  if (!deckId) {
+    deckConfigErrors.value = { ...deckConfigErrors.value, [stateKey]: "配置情报读取失败" };
+    return;
+  }
+
+  const loadingIds = new Set(deckConfigLoadingIds.value);
+  loadingIds.add(stateKey);
+  deckConfigLoadingIds.value = loadingIds;
+  deckConfigErrors.value = { ...deckConfigErrors.value, [stateKey]: "" };
+
+  try {
+    const response = await loadTierListDeckConfig(deckConfigScope(), deckId);
+    deckConfigs.value = { ...deckConfigs.value, [stateKey]: response.deckConfig };
+  } catch (caught) {
+    deckConfigErrors.value = {
+      ...deckConfigErrors.value,
+      [stateKey]: caught instanceof Error ? caught.message : "配置情报读取失败"
+    };
+  } finally {
+    const nextLoadingIds = new Set(deckConfigLoadingIds.value);
+    nextLoadingIds.delete(stateKey);
+    deckConfigLoadingIds.value = nextLoadingIds;
+  }
+}
+
+function loadMoreRows(): void {
+  visibleRowLimit.value = Math.min(visibleRows.value.length, visibleRowLimit.value + VISIBLE_ROWS_STEP);
+}
+
+async function toggleDeckConfig(deck: TierListRow): Promise<void> {
   const next = new Set(expandedDeckIds.value);
   const key = deckStateKey(deck);
   if (next.has(key)) {
     next.delete(key);
   } else {
     next.add(key);
+    void ensureDeckConfig(deck);
   }
   expandedDeckIds.value = next;
 }
 
-function deckSlots(deck: DeckRow): (CardView | null)[] {
+function deckSlots(deck: TierListRow): (CardView | null)[] {
   const cards = activeClusterVariant(deck)?.deckCards ?? deck.deckCards;
   return Array.from({ length: 8 }, (_, index) => cards[index] ?? null);
 }
@@ -116,25 +203,25 @@ function factionLabel(value: string): string {
   return value === "unknown" ? "未识别" : value;
 }
 
-function deckSubtitle(deck: DeckRow): string {
+function deckSubtitle(deck: TierListRow): string {
   const parts = [factionLabel(deck.faction)];
   if (deck.categoryName && deck.categoryName !== deck.deckName) parts.push(deck.categoryName);
   return parts.join(" · ");
 }
 
-function displayRowKey(deck: DeckRow): string {
+function displayRowKey(deck: TierListRow): string {
   return deckStateKey(deck);
 }
 
-function clusterVariantKey(deck: DeckRow): string {
+function clusterVariantKey(deck: TierListRow): string {
   return deck.deckId || deck.deckName;
 }
 
-function clusterVariants(deck: DeckRow): DeckClusterVariant[] {
+function clusterVariants(deck: TierListRow): TierListClusterVariant[] {
   return usePublishedClusters.value ? deck.clusterVariants ?? [] : [];
 }
 
-function activeClusterVariant(deck: DeckRow): DeckClusterVariant | null {
+function activeClusterVariant(deck: TierListRow): TierListClusterVariant | null {
   const variants = clusterVariants(deck);
   if (!variants.length) return null;
   const savedIndex = clusterVariantIndexes.value[clusterVariantKey(deck)] ?? 0;
@@ -142,15 +229,15 @@ function activeClusterVariant(deck: DeckRow): DeckClusterVariant | null {
   return variants[activeIndex] ?? variants[0] ?? null;
 }
 
-function deckImageUrl(deck: DeckRow): string {
+function deckImageUrl(deck: TierListRow): string {
   return activeClusterVariant(deck)?.imageUrl || deck.imageUrl;
 }
 
-function deckImageAlt(deck: DeckRow): string {
+function deckImageAlt(deck: TierListRow): string {
   return activeClusterVariant(deck)?.imageAlt || deck.imageAlt;
 }
 
-function deckImageCard(deck: DeckRow): CardView | null {
+function deckImageCard(deck: TierListRow): CardView | null {
   const variant = activeClusterVariant(deck);
   const cards = variant?.deckCards ?? deck.deckCards;
   const imageUrl = deckImageUrl(deck);
@@ -161,11 +248,11 @@ function deckImageCard(deck: DeckRow): CardView | null {
   )) || cards[0] || null;
 }
 
-function hasClusterVariants(deck: DeckRow): boolean {
+function hasClusterVariants(deck: TierListRow): boolean {
   return clusterVariants(deck).length > 1;
 }
 
-function clusterVariantLabel(deck: DeckRow): string {
+function clusterVariantLabel(deck: TierListRow): string {
   const variants = clusterVariants(deck);
   if (!variants.length) return "";
   const savedIndex = clusterVariantIndexes.value[clusterVariantKey(deck)] ?? 0;
@@ -173,7 +260,7 @@ function clusterVariantLabel(deck: DeckRow): string {
   return `${activeIndex + 1}/${variants.length}`;
 }
 
-function clusterVariantTitle(deck: DeckRow): string {
+function clusterVariantTitle(deck: TierListRow): string {
   const variants = clusterVariants(deck);
   if (!variants.length) return "";
   const savedIndex = clusterVariantIndexes.value[clusterVariantKey(deck)] ?? 0;
@@ -181,7 +268,7 @@ function clusterVariantTitle(deck: DeckRow): string {
   return `式样 ${activeIndex + 1}/${variants.length}，按样本数排序，点击切换`;
 }
 
-function switchClusterVariant(deck: DeckRow): void {
+function switchClusterVariant(deck: TierListRow): void {
   const variants = clusterVariants(deck);
   if (variants.length <= 1) return;
   const key = clusterVariantKey(deck);
@@ -256,7 +343,7 @@ function switchClusterVariant(deck: DeckRow): void {
           <p class="Common_Eyebrow">Ranking</p>
           <h2 id="TierPage_Table_Title">榜单明细</h2>
         </div>
-        <table class="Common_TableLayout TierPage_Table">
+        <table v-if="!mobileViewport" class="Common_TableLayout TierPage_Table">
           <colgroup>
             <col class="Common_TableColumn Common_TableColumn_Fixed" style="--Common_TableColumnWidth: var(--TierPage_TableRankColumn)">
             <col class="Common_TableColumn">
@@ -273,7 +360,7 @@ function switchClusterVariant(deck: DeckRow): void {
             </tr>
           </thead>
           <tbody>
-            <template v-for="(deck, index) in visibleRows" :key="displayRowKey(deck)">
+            <template v-for="(deck, index) in renderedRows" :key="displayRowKey(deck)">
             <tr>
               <td class="Common_RankCell">{{ index + 1 }}</td>
               <td class="TierPage_DeckCell">
@@ -321,18 +408,22 @@ function switchClusterVariant(deck: DeckRow): void {
             <tr v-if="isDeckExpanded(deck)" class="TierPage_ConfigRow">
               <td :colspan="4">
                 <TierPageDeckConfigPanel
+                  v-if="deckConfigFor(deck)"
                   :id="deckConfigPanelId(deck)"
-                  :config="deck.deckConfig"
+                  :config="deckConfigFor(deck) || emptyDeckConfig"
                   :sample-size="deck.sampleSize"
                 />
+                <section v-else class="Common_StatusPanel TierPage_ConfigStatus">
+                  {{ deckConfigError(deck) || (isDeckConfigLoading(deck) ? "正在读取配置情报..." : "配置情报读取失败") }}
+                </section>
               </td>
             </tr>
             </template>
           </tbody>
         </table>
 
-        <div class="Common_MobileCardList TierPage_MobileList">
-          <article v-for="(deck, index) in visibleRows" :key="`${displayRowKey(deck)}-mobile`" class="TierPage_MobileRow">
+        <div v-else class="Common_MobileCardList TierPage_MobileList">
+          <article v-for="(deck, index) in renderedRows" :key="`${displayRowKey(deck)}-mobile`" class="TierPage_MobileRow">
             <div class="TierPage_MobileHead">
               <span class="Common_RankCell">#{{ index + 1 }}</span>
               <CommonImageFrame :src="deckImageUrl(deck)" :alt="deckImageAlt(deck)" :card="deckImageCard(deck)" show-details density="full" ratio="portrait" />
@@ -371,17 +462,24 @@ function switchClusterVariant(deck: DeckRow): void {
               {{ isDeckExpanded(deck) ? "收起配置" : "配置详情" }}
             </button>
             <TierPageDeckConfigPanel
-              v-if="isDeckExpanded(deck)"
+              v-if="isDeckExpanded(deck) && deckConfigFor(deck)"
               :id="deckConfigPanelId(deck)"
-              :config="deck.deckConfig"
+              :config="deckConfigFor(deck) || emptyDeckConfig"
               :sample-size="deck.sampleSize"
             />
+            <section v-else-if="isDeckExpanded(deck)" class="Common_StatusPanel TierPage_ConfigStatus">
+              {{ deckConfigError(deck) || (isDeckConfigLoading(deck) ? "正在读取配置情报..." : "配置情报读取失败") }}
+            </section>
             <div class="TierPage_MobileDeckSection">
               <span>核心构成</span>
               <CommonDeckRail :cards="deckSlots(deck)" rail-class="Common_DeckRail Common_DeckRail_Mobile" />
             </div>
             <CommonMetricTags :tags="deck.evidenceTags" />
           </article>
+        </div>
+        <div v-if="hasMoreRows" class="TierPage_LoadMore">
+          <span>已显示 {{ renderedCountLabel }}</span>
+          <button type="button" @click="loadMoreRows">加载更多</button>
         </div>
       </section>
     </template>
@@ -745,6 +843,36 @@ function switchClusterVariant(deck: DeckRow): void {
 }
 
 /* 平板端：保留桌面表格，但允许横向滚动。 */
+.TierPage_ConfigStatus {
+  margin-top: 0;
+  padding: 14px;
+  box-shadow: none;
+}
+
+.TierPage_LoadMore {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--color-muted);
+  font-family: var(--font-control);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.TierPage_LoadMore button {
+  min-height: 34px;
+  padding: 0 18px;
+  border: 1px solid rgba(185, 133, 36, 0.58);
+  color: #76521c;
+  background: #fff4d9;
+  font-family: var(--font-control);
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
 @media (max-width: 1099px) {
   /* 表格最小宽度，避免列被压坏。 */
   .TierPage_Table {

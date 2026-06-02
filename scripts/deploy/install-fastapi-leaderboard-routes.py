@@ -34,7 +34,18 @@ ROUTE_BLOCK = f"""
 
         return (_codex_os.environ.get("EIKETSU_LEADERBOARD_NODE_API_BASE") or "http://eiketsu-leaderboard-api:8001").rstrip("/")
 
-    def _codex_proxy_leaderboard_node_api(path, method="GET", body=None, content_type="application/json"):
+    from fastapi import Request as _CodexRequest
+    globals()["_CodexRequest"] = _CodexRequest
+
+    def _codex_proxy_headers(upstream_headers):
+        headers = {{}}
+        for name in ("cache-control", "etag", "last-modified", "vary", "content-encoding"):
+            value = upstream_headers.get(name)
+            if value:
+                headers[name] = value
+        return headers
+
+    def _codex_proxy_leaderboard_node_api(path, method="GET", body=None, content_type="application/json", forward_headers=None):
         from urllib.error import HTTPError as _CodexHTTPError
         from urllib.error import URLError as _CodexURLError
         from urllib.request import Request as _CodexUrlRequest
@@ -43,6 +54,15 @@ ROUTE_BLOCK = f"""
 
         target = f"{{_codex_leaderboard_node_api_base()}}{{path}}"
         headers = {{"Accept": "application/json"}}
+        if forward_headers:
+            for source_name, target_name in (
+                ("accept-encoding", "Accept-Encoding"),
+                ("if-none-match", "If-None-Match"),
+                ("if-modified-since", "If-Modified-Since"),
+            ):
+                value = forward_headers.get(source_name)
+                if value:
+                    headers[target_name] = value
         if body is not None:
             headers["Content-Type"] = content_type or "application/json"
         request = _CodexUrlRequest(target, data=body, headers=headers, method=method)
@@ -50,10 +70,10 @@ ROUTE_BLOCK = f"""
             with _codex_urlopen(request, timeout=20) as upstream:
                 response_body = upstream.read()
                 media_type = upstream.headers.get("content-type") or "application/json"
-                return _CodexResponse(content=response_body, status_code=upstream.status, media_type=media_type)
+                return _CodexResponse(content=response_body, status_code=upstream.status, media_type=media_type, headers=_codex_proxy_headers(upstream.headers))
         except _CodexHTTPError as exc:
             media_type = exc.headers.get("content-type") or "application/json"
-            return _CodexResponse(content=exc.read(), status_code=exc.code, media_type=media_type)
+            return _CodexResponse(content=exc.read(), status_code=exc.code, media_type=media_type, headers=_codex_proxy_headers(exc.headers))
         except _CodexURLError:
             raise HTTPException(status_code=502, detail="leaderboard api unavailable")
 
@@ -98,12 +118,25 @@ ROUTE_BLOCK = f"""
                 return _codex_json_file_response(candidate)
         raise HTTPException(status_code=404, detail="status file not found")
 
+    @app.get("/api/leaderboard-snapshot")
+    def api_leaderboard_snapshot(request: _CodexRequest):
+        return _codex_proxy_leaderboard_node_api("/api/leaderboard-snapshot", forward_headers=request.headers)
+
+    @app.get("/api/tier-list-snapshot")
+    def api_tier_list_snapshot(request: _CodexRequest):
+        return _codex_proxy_leaderboard_node_api("/api/tier-list-snapshot", forward_headers=request.headers)
+
+    @app.get("/api/tier-list-deck-config")
+    def api_tier_list_deck_config(request: _CodexRequest):
+        query = request.url.query
+        path = "/api/tier-list-deck-config"
+        if query:
+            path = f"{{path}}?{{query}}"
+        return _codex_proxy_leaderboard_node_api(path, forward_headers=request.headers)
+
     @app.get("/api/match-search-options")
     def api_match_search_options():
         return _codex_proxy_leaderboard_node_api("/api/match-search-options")
-
-    from fastapi import Request as _CodexRequest
-    globals()["_CodexRequest"] = _CodexRequest
 
     @app.post("/api/match-search")
     async def api_match_search(request: _CodexRequest):

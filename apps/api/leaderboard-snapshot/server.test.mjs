@@ -81,6 +81,27 @@ async function testMissingMatchSearchIndexDoesNotExposePath() {
   }
 }
 
+async function testMissingTierListDataDoesNotExposePath() {
+  const missingFile = resolve("apps/api/leaderboard-snapshot/__missing_tier_list__.json");
+  const server = createLeaderboardSnapshotServer({ tierListSnapshotFile: missingFile });
+  const address = await listen(server);
+  const originalConsoleError = console.error;
+
+  try {
+    console.error = () => {};
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/tier-list-snapshot`);
+    const bodyText = await response.text();
+    const body = JSON.parse(bodyText);
+
+    assert.equal(response.status, 500);
+    assert.equal(body.error, "tier list data is not available");
+    assert.equal(bodyText.includes(missingFile), false);
+  } finally {
+    console.error = originalConsoleError;
+    await close(server);
+  }
+}
+
 function testSnapshot(sourceRunId, summary) {
   return {
     metadata: {
@@ -164,6 +185,48 @@ function testMatchSearchIndex(matchId, weaponName = "孫子") {
   };
 }
 
+function testTierListSnapshot(sourceRunId, deckName) {
+  return {
+    schemaVersion: 1,
+    metadata: {
+      sourceRunId,
+      dateFrom: "2026-06-01",
+      dateTo: "2026-06-02",
+      updatedAt: "2026-06-02T00:00:00Z",
+      sampleSize: 10
+    },
+    tierRows: [{ deckId: "deck-a", deckName, deckCards: [], evidenceTags: [] }],
+    clusterRows: []
+  };
+}
+
+function testTierListConfigs() {
+  return {
+    schemaVersion: 1,
+    metadata: { sourceRunId: 1 },
+    deckConfigs: {
+      "deck-a": {
+        weapons: [{ name: "weapon-a", usageRate: 50, sampleSize: 2, lowSample: false }],
+        styles: [],
+        souls: [],
+        strategies: [{ cardId: "card-a", name: "strategy-a", usageRate: 25, sampleSize: 1, strategyCount: 1, averageCount: 1 }],
+        schoolStages: [{ name: "stage-a", stage: "1", usageRate: 25, sampleSize: 1, lowSample: false, averageCount: 1 }],
+        unfavorableMatchups: [{ deckId: "enemy", deckName: "Enemy", usageRate: 20, sampleSize: 1 }]
+      }
+    },
+    clusterConfigs: {
+      "cluster-a": {
+        weapons: [],
+        styles: [],
+        souls: [],
+        strategies: [],
+        schoolStages: [],
+        unfavorableMatchups: []
+      }
+    }
+  };
+}
+
 async function testSnapshotFileIsServedWithoutBuild() {
   const root = await mkdtemp(join(tmpdir(), "leaderboard-snapshot-server-"));
   const snapshotFile = join(root, "leaderboard-snapshot.json");
@@ -213,6 +276,62 @@ async function testSnapshotFileReplacementIsReloaded() {
     assert.equal(second.status, 200);
     assert.equal(secondBody.metadata.sourceRunId, 2);
     assert.equal(secondBody.home.summary, "second snapshot");
+  } finally {
+    await close(server);
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testTierListSnapshotUsesStaticCacheHeaders() {
+  const root = await mkdtemp(join(tmpdir(), "tier-list-cache-"));
+  const tierListSnapshotFile = join(root, "tier-list-snapshot.json");
+  const server = createLeaderboardSnapshotServer({ tierListSnapshotFile });
+
+  try {
+    await writeFile(tierListSnapshotFile, `${JSON.stringify(testTierListSnapshot(1, "first"))}\n`, "utf8");
+    const address = await listen(server);
+    const first = await fetch(`http://127.0.0.1:${address.port}/api/tier-list-snapshot`, {
+      headers: { "Accept-Encoding": "gzip" }
+    });
+    const firstBody = await first.json();
+    const etag = first.headers.get("etag");
+
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get("cache-control"), "no-cache");
+    assert.equal(first.headers.get("content-encoding"), "gzip");
+    assert.ok(etag);
+    assert.equal(firstBody.metadata.sourceRunId, 1);
+
+    const cached = await fetch(`http://127.0.0.1:${address.port}/api/tier-list-snapshot`, {
+      headers: { "If-None-Match": etag }
+    });
+    assert.equal(cached.status, 304);
+  } finally {
+    await close(server);
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testTierListDeckConfigEndpointUsesStaticConfigFile() {
+  const root = await mkdtemp(join(tmpdir(), "tier-list-config-"));
+  const tierListConfigsFile = join(root, "tier-list-configs.json");
+  const server = createLeaderboardSnapshotServer({ tierListConfigsFile });
+
+  try {
+    await writeFile(tierListConfigsFile, `${JSON.stringify(testTierListConfigs())}\n`, "utf8");
+    const address = await listen(server);
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/tier-list-deck-config?scope=deck&deckId=deck-a`);
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.metadata.sourceRunId, 1);
+    assert.equal(body.scope, "deck");
+    assert.equal(body.deckConfig.strategies[0].name, "strategy-a");
+
+    const missing = await fetch(`http://127.0.0.1:${address.port}/api/tier-list-deck-config?scope=deck&deckId=missing`);
+    const missingText = await missing.text();
+    assert.equal(missing.status, 404);
+    assert.equal(/token|cookie|secret|C:\\|E:\\/.test(missingText), false);
   } finally {
     await close(server);
     await rm(root, { recursive: true, force: true });
@@ -339,8 +458,11 @@ async function testSmokeRejectsHtmlFallback() {
 await testMissingDataDoesNotExposePath();
 await testMissingRefreshStatusDoesNotExposePath();
 await testMissingMatchSearchIndexDoesNotExposePath();
+await testMissingTierListDataDoesNotExposePath();
 await testSnapshotFileIsServedWithoutBuild();
 await testSnapshotFileReplacementIsReloaded();
+await testTierListSnapshotUsesStaticCacheHeaders();
+await testTierListDeckConfigEndpointUsesStaticConfigFile();
 await testRefreshStatusFileReplacementIsReloaded();
 await testMatchSearchEndpointsUseStaticIndex();
 await testMatchSearchIndexReplacementIsReloaded();

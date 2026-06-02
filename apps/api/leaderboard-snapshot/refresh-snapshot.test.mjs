@@ -246,11 +246,20 @@ async function testRefreshWritesAtomicSnapshot() {
     }
     const outputText = await readFile(outputPath, "utf8");
     const output = JSON.parse(outputText);
+    const tierListText = await readFile(join(root, "published", "tier-list-snapshot.json"), "utf8");
+    const tierList = JSON.parse(tierListText);
+    const tierListConfigsText = await readFile(join(root, "published", "tier-list-configs.json"), "utf8");
+    const tierListConfigs = JSON.parse(tierListConfigsText);
 
     assert.equal(snapshot.metadata.sourceRunId, 1);
     assert.equal(output.metadata.sourceKind, "server_leaderboard");
     assert.equal(output.tierRows.length, 2);
     assert.equal(output.clusterRows.length, 2);
+    assert.equal(tierList.tierRows.length, 2);
+    assert.equal(tierList.clusterRows.length, 2);
+    assert.equal(tierList.tierRows[0].deckConfig, undefined);
+    assert.ok(tierListConfigs.deckConfigs[output.tierRows[0].deckId].strategies.length > 0);
+    assert.ok(tierListConfigs.clusterConfigs[output.clusterRows[0].deckId].schoolStages.length > 0);
     assert.equal(output.home.tierRows.length, 2);
     assert.match(output.home.tierRows[0].deckName, /バランスデッキ$/);
     assert.equal(output.home.tierRows[0].sampleSize, 10);
