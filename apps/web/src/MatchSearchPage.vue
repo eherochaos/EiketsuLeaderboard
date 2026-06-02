@@ -1543,12 +1543,10 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
     position: relative;
     min-height: 0;
     padding: 0;
-    display: block;
-    aspect-ratio: 5 / 8;
-    height: auto;
+    grid-template-columns: 1fr;
+    gap: 0;
+    height: clamp(136px, calc((100vw - 31px) * 0.4), 166px);
     overflow: hidden;
-    line-height: 0;
-    background: #211711;
   }
 
   .MatchSearch_CardPickerGrid .MatchSearch_CardPick :deep(.Common_ImageFrame) {
@@ -1563,11 +1561,8 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
     --Common_ImageFrame_StatSize: clamp(12px, 24%, 16px);
     --Common_ImageFrame_SkillSize: 12px;
 
-    position: absolute;
-    inset: 0;
     width: 100%;
     height: 100%;
-    aspect-ratio: auto;
   }
 
   .MatchSearch_CardPickerGrid .MatchSearch_CardPick > * {
