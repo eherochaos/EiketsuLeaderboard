@@ -52,6 +52,7 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
                 exporter=fake_exporter,
                 run_refresher=lambda: {"status": "completed", "run_id": 6},
                 runner=fake_runner,
+                refresh_reason="upload refresh completed",
             )
 
             self.assertEqual(result["status"], "completed")
@@ -63,6 +64,7 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             status = json.loads(status_file.read_text(encoding="utf-8"))
             live_status = json.loads(live_status_file.read_text(encoding="utf-8"))
             self.assertEqual(status["refresh"]["status"], "completed")
+            self.assertEqual(status["refresh"]["reason"], "upload refresh completed")
             self.assertEqual(status["runRefresh"]["run_id"], 6)
             self.assertEqual(status["snapshot"]["sourceRunId"], 7)
             self.assertEqual(live_status["snapshot"]["sourceRunId"], 7)
