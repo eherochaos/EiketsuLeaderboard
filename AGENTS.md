@@ -21,6 +21,7 @@
 - 不要擅自修改 package.json
 - 不要擅自修改 .github/
 - 做完后开 PR
+- GitHub 相关操作统一走 GitHub 插件
 - PR 里说明：改了什么、没改什么、怎么验证
 
 ## MUST NOT:
