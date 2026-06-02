@@ -32,6 +32,7 @@ jobs:
       DEPLOY_LIVE_FRONTEND_ROOT: ${{ secrets.DEPLOY_LIVE_FRONTEND_ROOT || '/home/ubuntu/eiketsu-env-db/frontend/eiketsu-leaderboard' }}
       DEPLOY_LIVE_SNAPSHOT_FILE: ${{ secrets.DEPLOY_LIVE_SNAPSHOT_FILE || '/home/ubuntu/eiketsu-leaderboard-data/snapshots/leaderboard-snapshot.json' }}
       DEPLOY_RESTART_COMMAND: ${{ secrets.DEPLOY_RESTART_COMMAND }}
+      DEPLOY_PUBLIC_URL_BASE: ${{ secrets.DEPLOY_PUBLIC_URL_BASE }}
 
     steps:
       - name: Checkout
@@ -121,3 +122,13 @@ jobs:
           ssh -p "$DEPLOY_PORT" -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
             "DEPLOY_PATH_B64=$DEPLOY_PATH_B64 DEPLOY_EXPORT_POSTGRES=$DEPLOY_EXPORT_POSTGRES DEPLOY_EXPORT_CONTAINER_B64=$DEPLOY_EXPORT_CONTAINER_B64 DEPLOY_EXPORT_ASSET_ROOT_B64=$DEPLOY_EXPORT_ASSET_ROOT_B64 DEPLOY_FASTAPI_CONTAINER_B64=$DEPLOY_FASTAPI_CONTAINER_B64 DEPLOY_FASTAPI_FRONTEND_ROOT_B64=$DEPLOY_FASTAPI_FRONTEND_ROOT_B64 DEPLOY_LIVE_FRONTEND_ROOT_B64=$DEPLOY_LIVE_FRONTEND_ROOT_B64 DEPLOY_LIVE_SNAPSHOT_FILE_B64=$DEPLOY_LIVE_SNAPSHOT_FILE_B64 DEPLOY_RESTART_COMMAND_B64=$DEPLOY_RESTART_COMMAND_B64 bash -s" \
             < scripts/deploy/remote-main.sh
+
+      - name: Smoke public deployment
+        run: |
+          public_base="${DEPLOY_PUBLIC_URL_BASE:-http://$DEPLOY_HOST:8000}"
+          public_base="${public_base%/}"
+          snapshot_file="$RUNNER_TEMP/tier-list-snapshot.json"
+          curl -fsS "$public_base/api/tier-list-snapshot" -o "$snapshot_file"
+          deck_id="$(node -e 'const fs = require("fs"); const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); const row = (data.tierRows || [])[0]; if (!row || !row.deckId) process.exit(1); console.log(encodeURIComponent(String(row.deckId)));' "$snapshot_file")"
+          curl -fsS "$public_base/api/tier-list-deck-config?scope=deck&deckId=$deck_id" >/dev/null
+          curl -fsS "$public_base/tier-list/" >/dev/null
