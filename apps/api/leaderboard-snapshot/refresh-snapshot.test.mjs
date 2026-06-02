@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { refreshLeaderboardSnapshot } from "./refresh-snapshot.mjs";
 
-const deckA = "card-a1,card-a2";
+const deckA = "legacy-card-a1,card-a2";
 const deckB = "card-b1,card-b2";
 
 async function writeJson(path, payload) {
@@ -166,7 +166,7 @@ async function createLegacyFixture(root) {
     }
   ]);
   await writeJsonl(join(tableRoot, "server_leaderboard_rows.jsonl"), [
-    deckRow(1, deckA, [card("card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 1, 0, 1),
+    deckRow(1, deckA, [card("legacy-card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 1, 0, 1),
     deckRow(2, deckB, [card("card-b1", "緋001", "Gamma"), card("card-b2", "緋002", "Delta")], 2, 1, 0),
     archetypeRow(3, "Published Cluster", [card("card-b1", "緋001", "Gamma"), card("card-b2", "緋002", "Delta")], 1, 4, 1, deckB, [
       { deck_fingerprint: deckA, sample_count: 2 },
@@ -175,7 +175,7 @@ async function createLegacyFixture(root) {
     archetypeRow(4, "Published Cluster", [card("card-b1", "緋001", "Gamma"), card("card-a2", "蒼002", "Beta")], 2, 1, 0, deckB, [
       { deck_fingerprint: deckB, sample_count: 1 }
     ]),
-    archetypeRow(5, "Late Better Cluster", [card("card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 99, 10, 0, deckA, [
+    archetypeRow(5, "Late Better Cluster", [card("legacy-card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 99, 10, 0, deckA, [
       { deck_fingerprint: deckA, sample_count: 10 }
     ])
   ]);
@@ -279,7 +279,7 @@ async function testRefreshWritesAtomicSnapshot() {
     assert.ok(logs.some((line) => line.includes("repairedCardUnitType value=妲嶅叺 repaired=槍兵")));
     assert.equal(output.tierRows[0].deckCards[0].force, "6");
     assert.equal(output.tierRows[0].deckCards[0].intelligence, "3");
-    const skillCard = output.tierRows.flatMap((row) => row.deckCards).find((card) => card.cardId === "card-a1");
+    const skillCard = output.tierRows.flatMap((row) => row.deckCards).find((card) => card.cardId === "legacy-card-a1");
     assert.ok(skillCard);
     assert.deepEqual(skillCard.skills, ["伏兵", "気合"]);
     const noSkillCard = output.tierRows.flatMap((row) => row.deckCards).find((card) => card.cardId === "card-a2");

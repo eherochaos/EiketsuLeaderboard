@@ -78,6 +78,26 @@ async function createFixture(root) {
       updatedAt: "2026-06-02T00:00:00Z",
       sampleSize: 4,
     },
+    tierRows: [
+      {
+        deckCards: [
+          {
+            cardId: "card-g",
+            name: "SnapshotOnly",
+            faction: "黄",
+            cardCode: "黄999",
+            cost: "2.5",
+            unitType: "剣豪",
+            force: "9",
+            intelligence: "4",
+            era: "特殊",
+            skills: ["気合"],
+            imageUrl: "https://cards.example.test/snapshot-only.jpg",
+            imageAlt: "SnapshotOnly"
+          }
+        ]
+      }
+    ]
   });
   await writeJsonl(join(tableRoot, "matches.jsonl"), [
     {
@@ -121,7 +141,7 @@ async function createFixture(root) {
     { id: 11, match_id: 1, side_index: 0, deck_fingerprint: "card-a,card-b" },
     { id: 12, match_id: 1, side_index: 1, deck_fingerprint: "card-c,card-d" },
     { id: 21, match_id: 2, side_index: 0, deck_fingerprint: "card-a,card-e" },
-    { id: 22, match_id: 2, side_index: 1, deck_fingerprint: "card-c,card-f" },
+    { id: 22, match_id: 2, side_index: 1, deck_fingerprint: "card-c,card-g" },
   ]);
   await writeJsonl(join(tableRoot, "match_deck_units.jsonl"), [
     { id: 1, deck_id: 11, slot: 1, card_hash: "card-a" },
@@ -131,7 +151,7 @@ async function createFixture(root) {
     { id: 5, deck_id: 21, slot: 1, card_hash: "card-a" },
     { id: 6, deck_id: 21, slot: 2, card_hash: "card-e" },
     { id: 7, deck_id: 22, slot: 1, card_hash: "card-c" },
-    { id: 8, deck_id: 22, slot: 2, card_hash: "card-f" },
+    { id: 8, deck_id: 22, slot: 2, card_hash: "card-g" },
   ]);
   await writeJson(join(cardRoot, "card_catalog.json"), {
     cards: [
@@ -172,6 +192,11 @@ async function testBuildIndexAndSearchFilters() {
     assert.equal(index.cards.find((card) => card.cardId === "card-a").imageUrl, "https://cards.example.test/alpha.jpg");
     assert.equal(index.cards.find((card) => card.cardId === "card-b").imageUrl, "https://image.eiketsu-taisen.net/general/card_small/card-b.jpg?260520a");
     assert.equal(index.cards.find((card) => card.cardId === "card-c").imageUrl, "https://image.eiketsu-taisen.net/general/card_small/catalog-card-c.jpg?260520a");
+    assert.equal(index.cards.find((card) => card.cardId === "card-b").force, "6");
+    assert.equal(index.cards.find((card) => card.cardId === "card-b").intelligence, "3");
+    assert.equal(index.cards.find((card) => card.cardId === "card-g").imageUrl, "https://cards.example.test/snapshot-only.jpg");
+    assert.equal(index.cards.find((card) => card.cardId === "card-g").force, "9");
+    assert.deepEqual(index.cards.find((card) => card.cardId === "card-g").skills, ["気合"]);
     assert.equal(index.cards.find((card) => card.cardId === "card-a").unitType, "槍兵");
     assert.equal(index.weapons.find((weapon) => weapon.name === "孫子").usageCount, 2);
 

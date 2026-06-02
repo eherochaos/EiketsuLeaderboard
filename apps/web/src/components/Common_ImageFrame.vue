@@ -128,12 +128,11 @@ const unitTypeIconUrl = computed(() => UNIT_TYPE_ICON_URLS[unitType.value] ?? ""
 const costIconUrl = computed(() => COST_ICON_URLS[cost.value] ?? "");
 const skillLabels = computed(() => (detailCard.value?.skills ?? []).map(text).filter(Boolean).slice(0, 3));
 const hasOverlays = computed(() => Boolean((props.showDetails || props.showOverlays) && detailCard.value));
-const hasBottomOverlays = computed(() => props.density !== "mini");
 const skillBadges = computed(() => skillLabels.value.map((label) => ({
   label,
   abbreviation: skillAbbreviation(label)
-})).filter((skill) => hasOverlays.value && hasBottomOverlays.value && skill.abbreviation));
-const hasPowerStats = computed(() => hasOverlays.value && hasBottomOverlays.value);
+})).filter((skill) => hasOverlays.value && skill.abbreviation));
+const hasPowerStats = computed(() => Boolean(hasOverlays.value && (force.value || intelligence.value)));
 const detailRows = computed(() => [
   { label: "勢力", value: text(detailCard.value?.faction) },
   { label: "兵種", value: unitType.value },
@@ -230,14 +229,14 @@ const detailTitle = computed(() => {
 }
 
 .Common_ImageFrame.Common_ImageFrame_compact {
-  --Common_ImageFrame_UnitOffsetX: -3px;
-  --Common_ImageFrame_UnitOffsetY: -1px;
-  --Common_ImageFrame_CostOffsetX: 8px;
-  --Common_ImageFrame_CostOffsetY: -1px;
-  --Common_ImageFrame_StatsOffsetX: -3px;
-  --Common_ImageFrame_StatsOffsetY: 2px;
-  --Common_ImageFrame_SkillOffsetX: 3px;
-  --Common_ImageFrame_SkillOffsetY: 2px;
+  --Common_ImageFrame_UnitOffsetX: 0px;
+  --Common_ImageFrame_UnitOffsetY: 0px;
+  --Common_ImageFrame_CostOffsetX: 0px;
+  --Common_ImageFrame_CostOffsetY: 0px;
+  --Common_ImageFrame_StatsOffsetX: 0px;
+  --Common_ImageFrame_StatsOffsetY: 0px;
+  --Common_ImageFrame_SkillOffsetX: 0px;
+  --Common_ImageFrame_SkillOffsetY: 0px;
   --Common_ImageFrame_UnitSize: clamp(15px, 34%, 21px);
   --Common_ImageFrame_CostWidth: clamp(23px, 90%, 50px);
   --Common_ImageFrame_StatSize: clamp(13px, 29%, 17px);
@@ -245,24 +244,30 @@ const detailTitle = computed(() => {
 }
 
 .Common_ImageFrame.Common_ImageFrame_mini {
-  --Common_ImageFrame_UnitOffsetX: -2px;
-  --Common_ImageFrame_UnitOffsetY: -1px;
-  --Common_ImageFrame_CostOffsetX: 6px;
-  --Common_ImageFrame_CostOffsetY: -1px;
+  --Common_ImageFrame_UnitOffsetX: 0px;
+  --Common_ImageFrame_UnitOffsetY: 0px;
+  --Common_ImageFrame_CostOffsetX: 0px;
+  --Common_ImageFrame_CostOffsetY: 0px;
+  --Common_ImageFrame_StatsOffsetX: 0px;
+  --Common_ImageFrame_StatsOffsetY: 0px;
+  --Common_ImageFrame_SkillOffsetX: 0px;
+  --Common_ImageFrame_SkillOffsetY: 0px;
   --Common_ImageFrame_OverlayMask: color-mix(in srgb, var(--color-panel-strong) 28%, transparent);
   --Common_ImageFrame_UnitSize: clamp(12px, 34%, 18px);
   --Common_ImageFrame_CostWidth: clamp(18px, 82%, 34px);
+  --Common_ImageFrame_StatSize: clamp(10px, 27%, 13px);
+  --Common_ImageFrame_SkillSize: 10px;
 }
 
 .Common_ImageFrame.Common_ImageFrame_full {
-  --Common_ImageFrame_UnitOffsetX: -4px;
-  --Common_ImageFrame_UnitOffsetY: -2px;
-  --Common_ImageFrame_CostOffsetX: 10px;
-  --Common_ImageFrame_CostOffsetY: -2px;
-  --Common_ImageFrame_StatsOffsetX: -4px;
-  --Common_ImageFrame_StatsOffsetY: 2px;
-  --Common_ImageFrame_SkillOffsetX: 4px;
-  --Common_ImageFrame_SkillOffsetY: 2px;
+  --Common_ImageFrame_UnitOffsetX: 0px;
+  --Common_ImageFrame_UnitOffsetY: 0px;
+  --Common_ImageFrame_CostOffsetX: 0px;
+  --Common_ImageFrame_CostOffsetY: 0px;
+  --Common_ImageFrame_StatsOffsetX: 0px;
+  --Common_ImageFrame_StatsOffsetY: 0px;
+  --Common_ImageFrame_SkillOffsetX: 0px;
+  --Common_ImageFrame_SkillOffsetY: 0px;
   --Common_ImageFrame_UnitSize: clamp(18px, 36%, 26px);
   --Common_ImageFrame_CostWidth: clamp(26px, 70%, 50px);
   --Common_ImageFrame_StatSize: clamp(15px, 32%, 20px);
