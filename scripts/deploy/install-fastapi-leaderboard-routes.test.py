@@ -19,6 +19,7 @@ class InstallFastApiLeaderboardRoutesTests(unittest.TestCase):
         self.assertIn("@app.post(\"/api/match-search\")", MODULE.ROUTE_BLOCK)
         self.assertIn("@app.get(\"/api/tier-list-snapshot\")", MODULE.ROUTE_BLOCK)
         self.assertIn("@app.get(\"/api/tier-list-deck-config\")", MODULE.ROUTE_BLOCK)
+        self.assertIn("_codex_proxy_leaderboard_node_api(\"/api/leaderboard-refresh-status\"", MODULE.ROUTE_BLOCK)
         self.assertIn("_codex_proxy_leaderboard_node_api(\"/api/tier-list-snapshot\"", MODULE.ROUTE_BLOCK)
         self.assertIn("path = \"/api/tier-list-deck-config\"", MODULE.ROUTE_BLOCK)
         self.assertIn("from fastapi import Request as _CodexRequest", MODULE.ROUTE_BLOCK)
@@ -33,6 +34,8 @@ class InstallFastApiLeaderboardRoutesTests(unittest.TestCase):
         self.assertIn("if-modified-since", MODULE.ROUTE_BLOCK)
         self.assertIn("forward_headers=request.headers", MODULE.ROUTE_BLOCK)
         self.assertNotIn("_CodexBody", MODULE.ROUTE_BLOCK)
+        self.assertNotIn("status file not found", MODULE.ROUTE_BLOCK)
+        self.assertNotIn("leaderboard-refresh-status.json", MODULE.ROUTE_BLOCK)
 
 
 if __name__ == "__main__":

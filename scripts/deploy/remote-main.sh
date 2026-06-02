@@ -300,6 +300,40 @@ tier_list_smoke_deck_id() {
   python3 -c 'import json,sys,urllib.parse; data=json.load(open(sys.argv[1], encoding="utf-8")); rows=data.get("tierRows") or []; print(urllib.parse.quote(str(rows[0].get("deckId") or ""), safe="") if rows else "")' "$TIER_LIST_SNAPSHOT_FILE"
 }
 
+api_source_run() {
+  python3 - "$1" <<'PY'
+import json
+import sys
+import urllib.request
+
+with urllib.request.urlopen(sys.argv[1], timeout=30) as response:
+    payload = json.load(response)
+
+metadata = payload.get("metadata") if isinstance(payload, dict) else {}
+snapshot = payload.get("snapshot") if isinstance(payload, dict) else {}
+metadata = metadata if isinstance(metadata, dict) else {}
+snapshot = snapshot if isinstance(snapshot, dict) else {}
+value = metadata.get("sourceRunId", snapshot.get("sourceRunId"))
+print("" if value is None else value)
+PY
+}
+
+smoke_check_run_consistency() {
+  local base="${DEPLOY_SMOKE_URL_BASE%/}"
+  local leaderboard_run
+  local tier_run
+  local match_run
+  local status_run
+  leaderboard_run="$(api_source_run "$base/api/leaderboard-snapshot")"
+  tier_run="$(api_source_run "$base/api/tier-list-snapshot")"
+  match_run="$(api_source_run "$base/api/match-search-options")"
+  status_run="$(api_source_run "$base/api/leaderboard-refresh-status")"
+  [ -n "$leaderboard_run" ] || fail 'leaderboard snapshot sourceRunId is missing'
+  [ "$leaderboard_run" = "$tier_run" ] || fail 'tier list snapshot run does not match leaderboard snapshot'
+  [ "$leaderboard_run" = "$match_run" ] || fail 'match search index run does not match leaderboard snapshot'
+  [ "$leaderboard_run" = "$status_run" ] || fail 'refresh status run does not match leaderboard snapshot'
+}
+
 smoke_check_api_routes() {
   [ -n "$DEPLOY_SMOKE_URL_BASE" ] || return 0
   command -v curl >/dev/null 2>&1 || return 0
@@ -315,6 +349,7 @@ smoke_check_api_routes() {
   curl -fsS -X POST "$base/api/match-search" \
     -H 'Content-Type: application/json' \
     -d '{"sideA":{"result":"win"},"pageSize":1}' >/dev/null || fail 'match search api is not live'
+  smoke_check_run_consistency
 }
 
 smoke_check_live_routes() {

@@ -32,8 +32,17 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn("/api/tier-list-deck-config?scope=deck&deckId=", api_smoke)
         self.assertIn("/api/match-search-options", api_smoke)
         self.assertIn("-X POST \"$base/api/match-search\"", api_smoke)
+        self.assertIn("smoke_check_run_consistency", api_smoke)
         self.assertIn("/tier-list/", live_smoke)
         self.assertNotIn("/api/tier-list-snapshot", live_smoke)
+
+    def test_api_smoke_checks_public_run_consistency(self) -> None:
+        consistency = self.function_body("smoke_check_run_consistency")
+        self.assertIn("$base/api/leaderboard-snapshot", consistency)
+        self.assertIn("$base/api/tier-list-snapshot", consistency)
+        self.assertIn("$base/api/match-search-options", consistency)
+        self.assertIn("$base/api/leaderboard-refresh-status", consistency)
+        self.assertIn("refresh status run does not match leaderboard snapshot", consistency)
 
     def test_upload_worker_receives_tier_list_paths(self) -> None:
         worker_install = self.function_body("install_upload_refresh_worker")
