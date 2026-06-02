@@ -494,7 +494,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
             @click="toggleCard(pickerForm, card)"
           >
             <CommonImageFrame :src="card.imageUrl" :alt="card.imageAlt" :card="card" density="compact" ratio="portrait" />
-            <span>
+            <span class="MatchSearch_CardPickText">
               <strong>{{ card.name }}</strong>
               <small>{{ card.cardCode || "-" }} / {{ card.faction }} / {{ card.unitType || "-" }} / {{ card.cost || "-" }}</small>
             </span>
@@ -1530,8 +1530,8 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
     pointer-events: none;
   }
 
-  .MatchSearch_CardPickerGrid .MatchSearch_CardPick span,
-  .MatchSearch_CardPickerGrid .MatchSearch_CardPick small {
+  .MatchSearch_CardPickerGrid .MatchSearch_CardPickText,
+  .MatchSearch_CardPickerGrid .MatchSearch_CardPickText small {
     display: none;
   }
 
