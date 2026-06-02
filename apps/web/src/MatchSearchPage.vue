@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onMounted, reactive, ref } from "vue";
 import CommonDeckRail from "./components/Common_DeckRail.vue";
 import CommonHeader from "./components/Common_Header.vue";
 import CommonImageFrame from "./components/Common_ImageFrame.vue";
@@ -42,6 +42,7 @@ const error = ref("");
 const searchError = ref("");
 const cardMatchMode = ref<MatchSearchCardMatchMode>("all");
 const pickerSide = ref<SideKey | null>(null);
+const resultPanelRef = ref<HTMLElement | null>(null);
 
 const sideForms = reactive<Record<SideKey, SideForm>>({
   sideA: createSideForm(),
@@ -79,8 +80,12 @@ const costs = computed(() => uniqueSorted(cards.value.map((card) => card.cost ||
 const canSearch = computed(() => hasAnyFilter(sideForms.sideA) || hasAnyFilter(sideForms.sideB));
 const pickerForm = computed(() => sideForms[pickerSide.value ?? "sideA"]);
 const pickerTitle = computed(() => pickerSide.value ? sideLabels[pickerSide.value].title : "");
-const pickerCardOptions = computed(() => filteredCardOptions(pickerForm.value, 96));
 const pickerSelectedCards = computed(() => selectedCards(pickerForm.value));
+const pickerCardOptions = computed(() => {
+  const selected = pickerSelectedCards.value;
+  const candidates = filteredCardOptions(pickerForm.value, Math.max(0, 96 - selected.length));
+  return [...selected, ...candidates];
+});
 
 function createSideForm(): SideForm {
   return {
@@ -167,6 +172,18 @@ function addCard(side: SideForm, card: MatchSearchCardOption): void {
   side.cardQuery = "";
 }
 
+function isCardSelected(side: SideForm, cardId: string): boolean {
+  return side.cardIds.includes(cardId);
+}
+
+function toggleCard(side: SideForm, card: MatchSearchCardOption): void {
+  if (isCardSelected(side, card.cardId)) {
+    removeCard(side, card.cardId);
+    return;
+  }
+  addCard(side, card);
+}
+
 function removeCard(side: SideForm, cardId: string): void {
   side.cardIds = side.cardIds.filter((value) => value !== cardId);
   delete side.strategyByCard[cardId];
@@ -207,6 +224,8 @@ async function runSearch(nextPage = 1): Promise<void> {
       sideA: requestSide(sideForms.sideA),
       sideB: requestSide(sideForms.sideB),
     });
+    await nextTick();
+    resultPanelRef.value?.scrollIntoView({ block: "start", behavior: "smooth" });
   } catch (caught) {
     searchError.value = caught instanceof Error ? caught.message : "搜索失败";
   } finally {
@@ -379,7 +398,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
         </article>
       </section>
 
-      <section class="Common_TableCard MatchSearch_ResultPanel" aria-labelledby="match-result-title">
+      <section ref="resultPanelRef" class="Common_TableCard MatchSearch_ResultPanel" aria-labelledby="match-result-title">
         <div class="Common_SectionHeading Common_SectionHeading_Compact">
           <div>
             <p class="Common_Eyebrow">Results</p>
@@ -404,6 +423,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
                   <div class="MatchSearch_ResultSideTitle">
                     <strong>{{ sideLabels[sideKey].title }} {{ resultLabel(item[sideKey].result) }}</strong>
                     <span>{{ item[sideKey].playerName || "-" }}</span>
+                    <span class="MatchSearch_ResultHitNote">{{ sideHitNote(item, sideKey) }}</span>
                   </div>
                   <p>{{ sideHitNote(item, sideKey) }}</p>
                   <div class="MatchSearch_ResultSideInline">
@@ -468,9 +488,10 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
             v-for="card in pickerCardOptions"
             :key="card.cardId"
             class="MatchSearch_CardPick"
+            :class="{ MatchSearch_CardPick_Selected: isCardSelected(pickerForm, card.cardId) }"
             type="button"
-            :disabled="pickerForm.cardIds.length >= 8"
-            @click="addCard(pickerForm, card)"
+            :disabled="pickerForm.cardIds.length >= 8 && !isCardSelected(pickerForm, card.cardId)"
+            @click="toggleCard(pickerForm, card)"
           >
             <CommonImageFrame :src="card.imageUrl" :alt="card.imageAlt" :card="card" density="compact" ratio="portrait" />
             <span>
@@ -1141,6 +1162,10 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   font-weight: 800;
 }
 
+.MatchSearch_ResultHitNote {
+  display: none;
+}
+
 .MatchSearch_ResultSides p {
   margin: 0;
   min-height: 0;
@@ -1481,32 +1506,68 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 
   .MatchSearch_CardPickerGrid {
     padding: 4px 8px 6px;
-    grid-template-columns: 1fr;
-    gap: 4px;
-  }
-
-  .MatchSearch_CardPickerGrid .MatchSearch_CardPick {
-    min-height: 48px;
-    padding: 2px 4px;
-    grid-template-columns: 30px minmax(0, 1fr) 32px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    align-content: start;
     gap: 5px;
   }
 
+  .MatchSearch_CardPickerGrid .MatchSearch_CardPick {
+    position: relative;
+    min-height: 0;
+    padding: 0;
+    grid-template-columns: 1fr;
+    gap: 0;
+    height: clamp(104px, 34vw, 138px);
+    overflow: hidden;
+  }
+
   .MatchSearch_CardPickerGrid .MatchSearch_CardPick :deep(.Common_ImageFrame) {
-    width: 30px;
-    height: 48px;
+    width: 100%;
+    height: 100%;
   }
 
-  .MatchSearch_CardPickerGrid .MatchSearch_CardPick strong {
-    font-size: 12px;
+  .MatchSearch_CardPickerGrid .MatchSearch_CardPick > * {
+    pointer-events: none;
   }
 
+  .MatchSearch_CardPickerGrid .MatchSearch_CardPick span,
   .MatchSearch_CardPickerGrid .MatchSearch_CardPick small {
-    font-size: 9px;
+    display: none;
   }
 
   .MatchSearch_CardPickerGrid .MatchSearch_CardPick em {
-    font-size: 13px;
+    display: none;
+  }
+
+  .MatchSearch_CardPick_Selected::before {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    content: "";
+    background: rgba(43, 24, 12, 0.46);
+  }
+
+  .MatchSearch_CardPick_Selected::after {
+    position: absolute;
+    right: 4px;
+    bottom: 3px;
+    z-index: 3;
+    width: 18px;
+    height: 18px;
+    display: grid;
+    place-items: center;
+    color: #fffaf0;
+    background: var(--color-primary);
+    border-radius: 999px;
+    content: "✓";
+    font-family: var(--font-control);
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .MatchSearch_CardPick_Selected::before,
+  .MatchSearch_CardPick_Selected::after {
+    pointer-events: none;
   }
 
   .MatchSearch_CardPickerFoot {
@@ -1522,6 +1583,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
     margin-top: 8px;
     padding: 8px;
     overflow-x: hidden;
+    scroll-margin-top: 70px;
   }
 
   .MatchSearch_ResultPanel .Common_SectionHeading {
@@ -1537,12 +1599,12 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   }
 
   .MatchSearch_ResultList {
-    gap: 6px;
+    gap: 5px;
   }
 
   .MatchSearch_ResultItem {
     width: 100%;
-    padding: 6px;
+    padding: 5px;
   }
 
   .MatchSearch_ResultHead {
@@ -1573,37 +1635,61 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   }
 
   .MatchSearch_ResultSides {
-    gap: 6px;
+    gap: 4px;
   }
 
   .MatchSearch_ResultSides section {
     width: 100%;
-    gap: 3px;
+    gap: 2px;
   }
 
   .MatchSearch_ResultSideMeta {
-    gap: 1px;
+    gap: 0;
   }
 
   .MatchSearch_ResultSideTitle {
-    font-size: 12px;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    font-size: 11px;
+    line-height: 1.05;
   }
 
-  .MatchSearch_ResultSides p,
+  .MatchSearch_ResultSideTitle strong {
+    flex: 0 0 auto;
+  }
+
+  .MatchSearch_ResultSideTitle > span:not(.MatchSearch_ResultHitNote) {
+    flex: 0 1 auto;
+    max-width: 88px;
+  }
+
+  .MatchSearch_ResultHitNote {
+    flex: 1 1 auto;
+    display: block;
+    min-width: 0;
+    color: var(--color-muted);
+  }
+
+  .MatchSearch_ResultSides p {
+    display: none;
+  }
+
   .MatchSearch_ResultSideInline {
-    font-size: 10px;
-    line-height: 1.12;
+    font-size: 9px;
+    line-height: 1.05;
+    gap: 1px 6px;
   }
 
   .MatchSearch_ResultSides :deep(.Common_DeckRail_Mini) {
-    --Common_DeckRail_SlotHeight: 52px;
+    --Common_DeckRail_SlotHeight: 48px;
 
     grid-template-columns: none;
     grid-auto-flow: column;
     grid-auto-columns: var(--Common_DeckRail_SlotWidth);
-    gap: 3px;
+    gap: 2px;
     width: 100%;
-    padding: 4px;
+    padding: 3px;
     overflow-x: auto;
   }
 
