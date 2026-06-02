@@ -1533,9 +1533,9 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 
   .MatchSearch_CardPickerGrid {
     padding: 4px 8px 6px;
-    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     align-content: start;
-    gap: 4px;
+    gap: 5px;
     background: #fffaf0;
   }
 
