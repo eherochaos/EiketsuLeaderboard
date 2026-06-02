@@ -493,7 +493,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
             :disabled="pickerForm.cardIds.length >= 8 && !isCardSelected(pickerForm, card.cardId)"
             @click="toggleCard(pickerForm, card)"
           >
-            <CommonImageFrame :src="card.imageUrl" :alt="card.imageAlt" :card="card" density="compact" ratio="portrait" />
+            <CommonImageFrame :src="card.imageUrl" :alt="card.imageAlt" :card="card" show-overlays density="compact" ratio="portrait" />
             <span class="MatchSearch_CardPickText">
               <strong>{{ card.name }}</strong>
               <small>{{ card.cardCode || "-" }} / {{ card.faction }} / {{ card.unitType || "-" }} / {{ card.cost || "-" }}</small>
@@ -1522,6 +1522,17 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   }
 
   .MatchSearch_CardPickerGrid .MatchSearch_CardPick :deep(.Common_ImageFrame) {
+    --Common_ImageFrame_UnitOffsetX: 0px;
+    --Common_ImageFrame_UnitOffsetY: 0px;
+    --Common_ImageFrame_CostOffsetX: 0px;
+    --Common_ImageFrame_CostOffsetY: 0px;
+    --Common_ImageFrame_StatsOffsetX: 0px;
+    --Common_ImageFrame_StatsOffsetY: -1px;
+    --Common_ImageFrame_SkillOffsetX: -1px;
+    --Common_ImageFrame_SkillOffsetY: -1px;
+    --Common_ImageFrame_StatSize: clamp(12px, 24%, 16px);
+    --Common_ImageFrame_SkillSize: 12px;
+
     width: 100%;
     height: 100%;
   }

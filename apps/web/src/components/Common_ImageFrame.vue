@@ -76,12 +76,14 @@ const props = withDefaults(defineProps<{
   ratio?: "square" | "portrait";
   card?: ImageFrameCard | null;
   showDetails?: boolean;
+  showOverlays?: boolean;
   density?: "compact" | "full";
 }>(), {
   src: "",
   ratio: "square",
   card: null,
   showDetails: false,
+  showOverlays: false,
   density: "compact"
 });
 
@@ -125,11 +127,12 @@ const intelligence = computed(() => text(detailCard.value?.intelligence));
 const unitTypeIconUrl = computed(() => UNIT_TYPE_ICON_URLS[unitType.value] ?? "");
 const costIconUrl = computed(() => COST_ICON_URLS[cost.value] ?? "");
 const skillLabels = computed(() => (detailCard.value?.skills ?? []).map(text).filter(Boolean).slice(0, 3));
+const hasOverlays = computed(() => Boolean((props.showDetails || props.showOverlays) && detailCard.value));
 const skillBadges = computed(() => skillLabels.value.map((label) => ({
   label,
   abbreviation: skillAbbreviation(label)
-})).filter((skill) => skill.abbreviation));
-const hasPowerStats = computed(() => hasDetails.value);
+})).filter((skill) => hasOverlays.value && skill.abbreviation));
+const hasPowerStats = computed(() => hasOverlays.value);
 const detailRows = computed(() => [
   { label: "勢力", value: text(detailCard.value?.faction) },
   { label: "兵種", value: unitType.value },
@@ -164,10 +167,10 @@ const detailTitle = computed(() => {
       <img v-if="src && !failed" class="Common_ImageFrame_Image" :src="src" :alt="alt" loading="lazy" @error="failed = true">
       <span v-else class="Common_ImageFrame_Fallback">{{ alt }}</span>
 
-      <span v-if="hasDetails && unitTypeIconUrl" class="Common_ImageFrame_UnitIcon" aria-hidden="true">
+      <span v-if="hasOverlays && unitTypeIconUrl" class="Common_ImageFrame_UnitIcon" aria-hidden="true">
         <img :src="unitTypeIconUrl" alt="" loading="lazy">
       </span>
-      <span v-if="hasDetails && costIconUrl" class="Common_ImageFrame_CostIcon" aria-hidden="true">
+      <span v-if="hasOverlays && costIconUrl" class="Common_ImageFrame_CostIcon" aria-hidden="true">
         <img :src="costIconUrl" alt="" loading="lazy">
       </span>
       <span v-if="hasPowerStats" class="Common_ImageFrame_PowerStats" aria-hidden="true">
