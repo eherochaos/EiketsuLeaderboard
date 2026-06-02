@@ -200,8 +200,9 @@ stop_leaderboard_node_api() {
 
 install_upload_refresh_worker() {
   command -v systemctl >/dev/null 2>&1 || fail 'systemd runtime is missing'
-  local worker_script="$DATA_ROOT/run-upload-refresh-worker.sh"
-  ensure_writable_dir "$DATA_ROOT"
+  local worker_root="$DEPLOY_PATH/$DATA_ROOT"
+  local worker_script="$worker_root/run-upload-refresh-worker.sh"
+  ensure_writable_dir "$worker_root"
   {
     printf '#!/usr/bin/env bash\n'
     printf 'set -euo pipefail\n'

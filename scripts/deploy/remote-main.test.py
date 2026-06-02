@@ -42,6 +42,15 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn("TIER_LIST_SNAPSHOT_FILE", worker_install)
         self.assertIn("TIER_LIST_CONFIGS_FILE", worker_install)
 
+    def test_upload_worker_systemd_execstart_uses_absolute_script(self) -> None:
+        worker_install = self.function_body("install_upload_refresh_worker")
+        self.assertIn('local worker_root="$DEPLOY_PATH/$DATA_ROOT"', worker_install)
+        self.assertIn('local worker_script="$worker_root/run-upload-refresh-worker.sh"', worker_install)
+        self.assertIn('ensure_writable_dir "$worker_root"', worker_install)
+        self.assertIn("ExecStart=$worker_script", worker_install)
+        self.assertNotIn('local worker_script="$DATA_ROOT/run-upload-refresh-worker.sh"', worker_install)
+        self.assertNotIn('ensure_writable_dir "$DATA_ROOT"', worker_install)
+
     def test_route_reload_keeps_installed_container_patch(self) -> None:
         route_reload = self.function_body("reload_fastapi_routes")
         self.assertIn("require_fastapi_container", route_reload)
