@@ -400,17 +400,19 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
             </div>
             <div class="MatchSearch_ResultSides">
               <section v-for="sideKey in sideKeys" :key="`${item.matchId}-${sideKey}`">
-                <div class="MatchSearch_ResultSideTitle">
-                  <strong>{{ sideLabels[sideKey].title }} {{ resultLabel(item[sideKey].result) }}</strong>
-                  <span>{{ item[sideKey].playerName || "-" }}</span>
+                <div class="MatchSearch_ResultSideMeta">
+                  <div class="MatchSearch_ResultSideTitle">
+                    <strong>{{ sideLabels[sideKey].title }} {{ resultLabel(item[sideKey].result) }}</strong>
+                    <span>{{ item[sideKey].playerName || "-" }}</span>
+                  </div>
+                  <p>{{ sideHitNote(item, sideKey) }}</p>
+                  <div class="MatchSearch_ResultSideInline">
+                    <span>{{ item[sideKey].weaponName || "无战器" }}</span>
+                    <span>{{ activationLabel(item[sideKey].weaponActivated) }}</span>
+                    <span v-if="item[sideKey].schoolName">{{ item[sideKey].schoolName }}</span>
+                  </div>
                 </div>
-                <p>{{ sideHitNote(item, sideKey) }}</p>
                 <CommonDeckRail :cards="deckSlots(item[sideKey].cards)" rail-class="Common_DeckRail_Mini" :show-card-details="true" card-density="compact" />
-                <div class="MatchSearch_ResultTags">
-                  <span>{{ item[sideKey].weaponName || "无战器" }}</span>
-                  <span>{{ activationLabel(item[sideKey].weaponActivated) }}</span>
-                  <span v-if="item[sideKey].schoolName">{{ item[sideKey].schoolName }}</span>
-                </div>
               </section>
             </div>
           </article>
@@ -865,8 +867,8 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 }
 
 .MatchSearch_CardPicker {
-  width: min(1080px, calc(100vw - 48px));
-  max-height: min(760px, calc(100vh - 48px));
+  width: min(1120px, calc(100vw - 40px));
+  max-height: min(700px, calc(100vh - 40px));
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   border: 1px solid rgba(185, 133, 36, 0.56);
@@ -875,11 +877,11 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 }
 
 .MatchSearch_CardPickerHead {
-  padding: 12px 16px 8px;
+  padding: 8px 12px 6px;
   display: flex;
   align-items: start;
   justify-content: space-between;
-  gap: 14px;
+  gap: 10px;
   border-bottom: 1px solid rgba(216, 192, 151, 0.78);
 }
 
@@ -887,7 +889,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   margin: 0;
   color: var(--color-brown);
   font-family: var(--font-serif);
-  font-size: 24px;
+  font-size: 22px;
   line-height: 1.2;
 }
 
@@ -903,51 +905,51 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 }
 
 .MatchSearch_CardPickerHead button {
-  width: 34px;
-  height: 34px;
-  font-size: 20px;
+  width: 30px;
+  height: 30px;
+  font-size: 18px;
   line-height: 1;
 }
 
 .MatchSearch_CardPickerControls {
-  padding: 9px 16px 8px;
+  padding: 7px 12px 6px;
   display: grid;
   grid-template-columns: minmax(240px, 1fr) repeat(3, minmax(108px, 0.38fr));
-  gap: 8px;
+  gap: 6px;
   border-bottom: 1px solid rgba(216, 192, 151, 0.52);
 }
 
 .MatchSearch_CardPickerControls label {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   color: var(--color-muted);
   font-family: var(--font-control);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
 }
 
 .MatchSearch_CardPickerControls input,
 .MatchSearch_CardPickerControls select {
   width: 100%;
-  min-height: 34px;
+  min-height: 32px;
   border: 1px solid var(--color-border);
   color: var(--color-brown);
   background: #fffaf0;
   font-family: var(--font-control);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
 }
 
 .MatchSearch_CardPickerControls input {
-  padding: 0 11px;
+  padding: 0 9px;
 }
 
 .MatchSearch_CardPickerSelected {
-  min-height: 36px;
-  padding: 5px 16px;
+  min-height: 32px;
+  padding: 4px 12px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   overflow-x: auto;
   border-bottom: 1px solid rgba(216, 192, 151, 0.52);
 }
@@ -956,64 +958,66 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   flex: 0 0 auto;
   color: var(--color-muted);
   font-family: var(--font-control);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 900;
 }
 
 .MatchSearch_CardPickerSelected button {
   flex: 0 0 auto;
-  min-height: 26px;
-  padding: 0 8px;
+  min-height: 24px;
+  padding: 0 7px;
   font-size: 12px;
 }
 
 .MatchSearch_CardPickerGrid {
   min-height: 0;
-  padding: 8px 16px 12px;
+  padding: 6px 12px 10px;
   overflow-y: auto;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
 }
 
 .MatchSearch_CardPickerGrid .MatchSearch_CardPick {
-  min-height: 62px;
-  padding: 4px 6px;
-  grid-template-columns: 34px minmax(0, 1fr) 40px;
-  gap: 7px;
+  min-height: 56px;
+  padding: 3px 5px;
+  grid-template-columns: 32px minmax(0, 1fr) 34px;
+  gap: 6px;
   background: rgba(255, 250, 240, 0.86);
 }
 
 .MatchSearch_CardPickerGrid .MatchSearch_CardPick :deep(.Common_ImageFrame) {
-  width: 34px;
-  height: 54px;
+  width: 32px;
+  height: 51px;
 }
 
 .MatchSearch_CardPickerGrid .MatchSearch_CardPick strong {
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1.15;
 }
 
 .MatchSearch_CardPickerGrid .MatchSearch_CardPick small {
-  margin-top: 2px;
-  font-size: 11px;
+  margin-top: 1px;
+  font-size: 10px;
+  line-height: 1.15;
 }
 
 .MatchSearch_CardPickerGrid .MatchSearch_CardPick em {
   min-width: 0;
-  font-size: 16px;
+  font-size: 15px;
   text-align: right;
 }
 
 .MatchSearch_CardPickerFoot {
-  padding: 8px 16px 12px;
+  padding: 6px 12px 10px;
   display: flex;
   justify-content: end;
   border-top: 1px solid rgba(216, 192, 151, 0.68);
 }
 
 .MatchSearch_CardPickerFoot button {
-  min-width: 112px;
-  min-height: 36px;
+  min-width: 104px;
+  min-height: 34px;
   color: #fffaf0;
   background: var(--color-primary);
 }
@@ -1024,87 +1028,124 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 
 .MatchSearch_ResultList {
   display: grid;
-  gap: 10px;
+  align-items: start;
+  gap: 8px;
 }
 
 .MatchSearch_ResultItem {
-  padding: 10px 12px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 8px 10px;
   border: 1px solid rgba(216, 192, 151, 0.82);
   background: rgba(255, 250, 240, 0.76);
 }
 
 .MatchSearch_ResultHead {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.MatchSearch_ResultHead > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
 }
 
 .MatchSearch_ResultHead strong,
 .MatchSearch_ResultHead span {
   display: block;
+  min-width: 0;
 }
 
 .MatchSearch_ResultHead strong {
   color: var(--color-gold);
   font-family: var(--font-number);
-  font-size: 20px;
+  font-size: 18px;
 }
 
 .MatchSearch_ResultHead span {
+  overflow: hidden;
   color: var(--color-muted);
   font-family: var(--font-control);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .MatchSearch_ResultHead a {
-  min-height: 32px;
-  padding: 0 12px;
+  min-height: 28px;
+  padding: 0 10px;
   display: inline-flex;
   align-items: center;
   color: #fffaf0;
   background: var(--color-primary);
   font-family: var(--font-control);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 900;
 }
 
 .MatchSearch_ResultSides {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 420px));
+  grid-template-columns: repeat(2, max-content);
   justify-content: start;
-  gap: 10px 24px;
+  gap: 8px 18px;
+  max-width: 100%;
 }
 
 .MatchSearch_ResultSides section {
   min-width: 0;
-  width: min(100%, 420px);
+  width: max-content;
+  max-width: 100%;
   display: grid;
-  gap: 5px;
+  gap: 4px;
+}
+
+.MatchSearch_ResultSideMeta {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
 }
 
 .MatchSearch_ResultSideTitle {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
   color: var(--color-brown);
   font-family: var(--font-control);
+  font-size: 13px;
   font-weight: 900;
 }
 
+.MatchSearch_ResultSideTitle strong,
 .MatchSearch_ResultSideTitle span,
 .MatchSearch_ResultSides p {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.MatchSearch_ResultSideTitle span,
+.MatchSearch_ResultSides p,
+.MatchSearch_ResultSideInline {
   color: var(--color-muted);
-  font-size: 13px;
+  font-family: var(--font-control);
   font-weight: 800;
 }
 
 .MatchSearch_ResultSides p {
   margin: 0;
   min-height: 0;
-  line-height: 1.2;
+  font-size: 12px;
+  line-height: 1.15;
 }
 
 .MatchSearch_ResultSides :deep(.Common_DeckRail_Mini) {
@@ -1112,20 +1153,26 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   overflow-x: auto;
 }
 
-.MatchSearch_ResultTags {
+.MatchSearch_ResultSideInline {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 2px 8px;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.15;
 }
 
-.MatchSearch_ResultTags span {
-  padding: 3px 7px;
-  color: #76521c;
-  background: rgba(255, 244, 217, 0.72);
-  border: 1px solid rgba(216, 192, 151, 0.72);
-  font-family: var(--font-control);
-  font-size: 12px;
-  font-weight: 900;
+.MatchSearch_ResultSideInline span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.MatchSearch_ResultSideInline span + span::before {
+  content: "/";
+  margin-right: 8px;
+  opacity: 0.5;
 }
 
 .MatchSearch_Pager {
@@ -1149,6 +1196,12 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   .MatchSearch_FormGrid,
   .MatchSearch_ResultSides {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1180px) {
+  .MatchSearch_CardPickerGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -1219,29 +1272,29 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   }
 
   .MatchSearch_CardPickerHead {
-    padding: 12px var(--space-md) 8px;
+    padding: 10px var(--space-md) 6px;
   }
 
   .MatchSearch_CardPickerHead h2 {
-    font-size: 22px;
+    font-size: 21px;
   }
 
   .MatchSearch_CardPickerControls {
-    padding: 10px var(--space-md) 8px;
+    padding: 8px var(--space-md) 6px;
     grid-template-columns: 1fr;
   }
 
   .MatchSearch_CardPickerSelected {
-    padding: 6px var(--space-md);
+    padding: 5px var(--space-md);
   }
 
   .MatchSearch_CardPickerGrid {
-    padding: 8px var(--space-md) 10px;
+    padding: 6px var(--space-md) 8px;
     grid-template-columns: 1fr;
   }
 
   .MatchSearch_CardPickerFoot {
-    padding: 8px var(--space-md) max(12px, env(safe-area-inset-bottom));
+    padding: 7px var(--space-md) max(10px, env(safe-area-inset-bottom));
   }
 
   .MatchSearch_CardPickerFoot button {
@@ -1256,13 +1309,22 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
     grid-column: 1 / -1;
   }
 
+  .MatchSearch_ResultItem {
+    width: 100%;
+  }
+
   .MatchSearch_ResultHead {
     align-items: stretch;
-    flex-direction: column;
+    grid-template-columns: 1fr;
+    gap: 6px;
   }
 
   .MatchSearch_ResultHead a {
     justify-content: center;
+  }
+
+  .MatchSearch_ResultSides section {
+    width: 100%;
   }
 }
 </style>
