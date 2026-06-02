@@ -10,6 +10,10 @@ fail() {
   exit 1
 }
 
+shell_quote() {
+  printf '%q' "$1"
+}
+
 ensure_writable_dir() {
   local path="$1"
   mkdir -p "$path" 2>/dev/null || sudo -n mkdir -p "$path"
@@ -177,6 +181,71 @@ start_leaderboard_node_api() {
     -e LEADERBOARD_REFRESH_STATUS_FILE=/work/apps/api/data/leaderboard-refresh-status.json \
     -e LEADERBOARD_MATCH_SEARCH_INDEX_FILE=/work/apps/api/data/match-search-index.json \
     node:22-alpine node apps/api/leaderboard-snapshot/server.mjs >/dev/null
+}
+
+install_upload_refresh_worker() {
+  command -v systemctl >/dev/null 2>&1 || fail 'systemd runtime is missing'
+  local worker_script="$DATA_ROOT/run-upload-refresh-worker.sh"
+  ensure_writable_dir "$DATA_ROOT"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'set -euo pipefail\n'
+    printf 'cd %s\n' "$(shell_quote "$DEPLOY_PATH")"
+    printf 'args=(\n'
+    printf '  --repo-root %s\n' "$(shell_quote "$DEPLOY_PATH")"
+    printf '  --legacy-root %s\n' "$(shell_quote "$LEGACY_ROOT")"
+    printf '  --snapshot-file %s\n' "$(shell_quote "$DATA_ROOT/leaderboard-snapshot.json")"
+    printf '  --match-search-index-file %s\n' "$(shell_quote "$MATCH_SEARCH_INDEX_FILE")"
+    printf '  --status-file %s\n' "$(shell_quote "$STATUS_FILE")"
+    printf '  --node-bin node\n'
+    printf '  --postgres-container %s\n' "$(shell_quote "$DEPLOY_EXPORT_CONTAINER")"
+    printf '  --export-container %s\n' "$(shell_quote "$DEPLOY_EXPORT_CONTAINER")"
+    printf '  --refresh-reason %s\n' "$(shell_quote 'upload refresh completed')"
+    printf ')\n'
+    if [ -n "$DEPLOY_EXPORT_ASSET_ROOT" ]; then
+      printf 'args+=(--export-asset-root %s)\n' "$(shell_quote "$DEPLOY_EXPORT_ASSET_ROOT")"
+    fi
+    if [ -n "$DEPLOY_LIVE_SNAPSHOT_FILE" ]; then
+      printf 'args+=(--live-snapshot-file %s)\n' "$(shell_quote "$DEPLOY_LIVE_SNAPSHOT_FILE")"
+    fi
+    if [ -n "$DEPLOY_LIVE_STATUS_FILE" ]; then
+      printf 'args+=(--live-status-file %s)\n' "$(shell_quote "$DEPLOY_LIVE_STATUS_FILE")"
+    fi
+    printf 'python3 apps/api/data-migration/upload_refresh_worker.py "${args[@]}"\n'
+  } > "$worker_script"
+  chmod +x "$worker_script"
+  ensure_deploy_owner "$worker_script"
+
+  sudo -n tee /etc/systemd/system/eiketsu-upload-refresh.service >/dev/null <<EOF
+[Unit]
+Description=Eiketsu leaderboard upload refresh
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=$DEPLOY_PATH
+ExecStart=$worker_script
+EOF
+
+  sudo -n tee /etc/systemd/system/eiketsu-upload-refresh.timer >/dev/null <<EOF
+[Unit]
+Description=Eiketsu leaderboard upload refresh timer
+
+[Timer]
+OnBootSec=2min
+OnActiveSec=30s
+OnUnitActiveSec=60s
+AccuracySec=10s
+Persistent=true
+Unit=eiketsu-upload-refresh.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  sudo -n systemctl daemon-reload
+  sudo -n systemctl enable --now eiketsu-upload-refresh.timer >/dev/null
+  sudo -n systemctl start eiketsu-upload-refresh.service
 }
 
 restart_service() {
@@ -367,6 +436,8 @@ log 'publish live status'
 publish_live_status
 log 'publish frontend status asset'
 publish_frontend_status_asset
+log 'install upload refresh worker'
+install_upload_refresh_worker
 log 'install fastapi routes'
 install_fastapi_routes
 log 'start leaderboard node api'

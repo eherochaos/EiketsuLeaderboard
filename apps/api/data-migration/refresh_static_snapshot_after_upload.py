@@ -37,6 +37,7 @@ def refresh_static_snapshot_after_upload(
     live_status_file: Path | None = None,
     node_bin: str = "node",
     refresh_run: bool = True,
+    refresh_reason: str = "",
     exporter: Exporter | None = None,
     run_refresher: RunRefresher | None = None,
     runner: CommandRunner | None = None,
@@ -79,6 +80,7 @@ def refresh_static_snapshot_after_upload(
         live_result = _publish_live_snapshot(snapshot, live_snapshot) if live_snapshot else None
         result = {
             "status": "completed",
+            "reason": _sanitize_text(refresh_reason),
             "durationMs": _duration_ms(started_clock),
             "run": run_result,
             "export": export_manifest,
@@ -552,6 +554,7 @@ def main() -> int:
         live_status_file=args.live_status_file,
         node_bin=args.node_bin,
         refresh_run=not args.skip_run_refresh,
+        refresh_reason=args.refresh_reason,
     )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0
