@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { writeLeaderboardSnapshot } from "./snapshot-builder.mjs";
+import { writeTierListSnapshotFiles } from "./tier-list-snapshot.mjs";
 
 const DEFAULT_SNAPSHOT_FILE = resolve("apps/api/data/leaderboard-snapshot.json");
 
@@ -13,6 +14,16 @@ function snapshotFileFromOptions(options = {}) {
 function legacyRootFromOptions(options = {}) {
   const env = typeof process !== "undefined" ? process.env : {};
   return options.legacyRoot || env.LEADERBOARD_LEGACY_ROOT;
+}
+
+function tierListSnapshotFileFromOptions(outputPath, options = {}) {
+  const env = typeof process !== "undefined" ? process.env : {};
+  return resolve(options.tierListSnapshotFile || env.LEADERBOARD_TIER_LIST_SNAPSHOT_FILE || resolve(dirname(outputPath), "tier-list-snapshot.json"));
+}
+
+function tierListConfigsFileFromOptions(outputPath, options = {}) {
+  const env = typeof process !== "undefined" ? process.env : {};
+  return resolve(options.tierListConfigsFile || env.LEADERBOARD_TIER_LIST_CONFIGS_FILE || resolve(dirname(outputPath), "tier-list-configs.json"));
 }
 
 function tempSnapshotPath(outputPath) {
@@ -48,7 +59,12 @@ export async function refreshLeaderboardSnapshot(options = {}) {
     const snapshot = JSON.parse(await readFile(temporaryPath, "utf8"));
     assertSnapshotShape(snapshot);
     await rename(temporaryPath, outputPath);
-    return { outputPath, snapshot };
+    const tierList = await writeTierListSnapshotFiles({
+      snapshot,
+      tierListSnapshotFile: tierListSnapshotFileFromOptions(outputPath, options),
+      tierListConfigsFile: tierListConfigsFileFromOptions(outputPath, options)
+    });
+    return { outputPath, snapshot, tierList };
   } catch (error) {
     await rm(temporaryPath, { force: true }).catch(() => {});
     throw error;
@@ -56,13 +72,14 @@ export async function refreshLeaderboardSnapshot(options = {}) {
 }
 
 async function main() {
-  const { outputPath, snapshot } = await refreshLeaderboardSnapshot();
+  const { outputPath, snapshot, tierList } = await refreshLeaderboardSnapshot();
   const sourceKind = snapshot.metadata.sourceKind || "analysis";
   const builtAt = new Date().toISOString();
   console.log(`snapshot=${outputPath}`);
   console.log(
     `${sourceKind}Run=${snapshot.metadata.sourceRunId} rows=${snapshot.tierRows.length} clusters=${snapshot.clusterRows.length} cards=${snapshot.home.featuredCards.length} builtAt=${builtAt}`
   );
+  console.log(`tierListRows=${tierList.tierRows} tierListClusters=${tierList.clusterRows}`);
 }
 
 if (typeof process !== "undefined" && process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

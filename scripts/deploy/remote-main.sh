@@ -49,6 +49,8 @@ run_node() {
     LEADERBOARD_SNAPSHOT_FILE="${LEADERBOARD_SNAPSHOT_FILE:-}" \
     LEADERBOARD_REFRESH_STATUS_FILE="${LEADERBOARD_REFRESH_STATUS_FILE:-}" \
     LEADERBOARD_MATCH_SEARCH_INDEX_FILE="${LEADERBOARD_MATCH_SEARCH_INDEX_FILE:-}" \
+    LEADERBOARD_TIER_LIST_SNAPSHOT_FILE="${LEADERBOARD_TIER_LIST_SNAPSHOT_FILE:-}" \
+    LEADERBOARD_TIER_LIST_CONFIGS_FILE="${LEADERBOARD_TIER_LIST_CONFIGS_FILE:-}" \
       node "$@"
     return
   fi
@@ -62,10 +64,14 @@ run_node() {
     local docker_snapshot_file
     local docker_status_file
     local docker_match_search_index_file
+    local docker_tier_list_snapshot_file
+    local docker_tier_list_configs_file
     docker_legacy_root="$(to_work_path "${LEADERBOARD_LEGACY_ROOT:-}")"
     docker_snapshot_file="$(to_work_path "${LEADERBOARD_SNAPSHOT_FILE:-}")"
     docker_status_file="$(to_work_path "${LEADERBOARD_REFRESH_STATUS_FILE:-}")"
     docker_match_search_index_file="$(to_work_path "${LEADERBOARD_MATCH_SEARCH_INDEX_FILE:-}")"
+    docker_tier_list_snapshot_file="$(to_work_path "${LEADERBOARD_TIER_LIST_SNAPSHOT_FILE:-}")"
+    docker_tier_list_configs_file="$(to_work_path "${LEADERBOARD_TIER_LIST_CONFIGS_FILE:-}")"
     docker run --rm \
       --user "$(id -u):$(id -g)" \
       -v "$DEPLOY_PATH:/work" \
@@ -74,6 +80,8 @@ run_node() {
       -e "LEADERBOARD_SNAPSHOT_FILE=$docker_snapshot_file" \
       -e "LEADERBOARD_REFRESH_STATUS_FILE=$docker_status_file" \
       -e "LEADERBOARD_MATCH_SEARCH_INDEX_FILE=$docker_match_search_index_file" \
+      -e "LEADERBOARD_TIER_LIST_SNAPSHOT_FILE=$docker_tier_list_snapshot_file" \
+      -e "LEADERBOARD_TIER_LIST_CONFIGS_FILE=$docker_tier_list_configs_file" \
       node:22-alpine node "${docker_args[@]}"
     return
   fi
@@ -180,6 +188,8 @@ start_leaderboard_node_api() {
     -e LEADERBOARD_SNAPSHOT_FILE=/work/apps/api/data/leaderboard-snapshot.json \
     -e LEADERBOARD_REFRESH_STATUS_FILE=/work/apps/api/data/leaderboard-refresh-status.json \
     -e LEADERBOARD_MATCH_SEARCH_INDEX_FILE=/work/apps/api/data/match-search-index.json \
+    -e LEADERBOARD_TIER_LIST_SNAPSHOT_FILE=/work/apps/api/data/tier-list-snapshot.json \
+    -e LEADERBOARD_TIER_LIST_CONFIGS_FILE=/work/apps/api/data/tier-list-configs.json \
     node:22-alpine node apps/api/leaderboard-snapshot/server.mjs >/dev/null
 }
 
@@ -272,6 +282,13 @@ smoke_check_live_routes() {
     sleep 2
   done
   curl -fsS "$base/leaderboard-status/" >/dev/null || fail 'leaderboard status page is not live'
+  curl -fsS "$base/tier-list/" >/dev/null || fail 'tier list page is not live'
+  curl -fsS "$base/api/tier-list-snapshot" >/dev/null || fail 'tier list snapshot api is not live'
+  local tier_deck_id
+  tier_deck_id="$(python3 -c 'import json,sys,urllib.parse; data=json.load(open(sys.argv[1], encoding="utf-8")); rows=data.get("tierRows") or []; print(urllib.parse.quote(str(rows[0].get("deckId") or ""), safe="") if rows else "")' "$TIER_LIST_SNAPSHOT_FILE")"
+  if [ -n "$tier_deck_id" ]; then
+    curl -fsS "$base/api/tier-list-deck-config?scope=deck&deckId=$tier_deck_id" >/dev/null || fail 'tier list deck config api is not live'
+  fi
   curl -fsS "$base/match-search/" >/dev/null || fail 'match search page is not live'
   curl -fsS "$base/api/leaderboard-refresh-status" >/dev/null || fail 'leaderboard refresh status api is not live'
   curl -fsS "$base/api/match-search-options" >/dev/null || fail 'match search options api is not live'
@@ -367,6 +384,8 @@ DATA_ROOT='apps/api/data'
 LEGACY_ROOT="$DATA_ROOT/legacy-service"
 STATUS_FILE="$DATA_ROOT/leaderboard-refresh-status.json"
 MATCH_SEARCH_INDEX_FILE="$DATA_ROOT/match-search-index.json"
+TIER_LIST_SNAPSHOT_FILE="$DATA_ROOT/tier-list-snapshot.json"
+TIER_LIST_CONFIGS_FILE="$DATA_ROOT/tier-list-configs.json"
 if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ]; then
   log 'refresh leaderboard run'
   refresh_public_run
@@ -411,6 +430,8 @@ ensure_deploy_owner "$DATA_ROOT"
 log 'refresh leaderboard snapshot'
 LEADERBOARD_LEGACY_ROOT="$LEGACY_ROOT" \
 LEADERBOARD_SNAPSHOT_FILE="$DATA_ROOT/leaderboard-snapshot.json" \
+LEADERBOARD_TIER_LIST_SNAPSHOT_FILE="$TIER_LIST_SNAPSHOT_FILE" \
+LEADERBOARD_TIER_LIST_CONFIGS_FILE="$TIER_LIST_CONFIGS_FILE" \
   run_node apps/api/leaderboard-snapshot/refresh-snapshot.mjs
 ensure_deploy_owner "$DATA_ROOT"
 log 'refresh match search index'
@@ -425,6 +446,8 @@ python3 apps/api/data-migration/refresh_static_snapshot_after_upload.py \
   --legacy-root "$LEGACY_ROOT" \
   --snapshot-file "$DATA_ROOT/leaderboard-snapshot.json" \
   --match-search-index-file "$MATCH_SEARCH_INDEX_FILE" \
+  --tier-list-snapshot-file "$TIER_LIST_SNAPSHOT_FILE" \
+  --tier-list-configs-file "$TIER_LIST_CONFIGS_FILE" \
   --status-file "$STATUS_FILE" \
   --status-only \
   --refresh-status completed \

@@ -17,10 +17,14 @@ class InstallFastApiLeaderboardRoutesTests(unittest.TestCase):
         self.assertIn(MODULE.MARKER, MODULE.ROUTE_BLOCK)
         self.assertIn(MODULE.END_MARKER, MODULE.ROUTE_BLOCK)
         self.assertIn("@app.post(\"/api/match-search\")", MODULE.ROUTE_BLOCK)
+        self.assertIn("@app.get(\"/api/tier-list-snapshot\")", MODULE.ROUTE_BLOCK)
+        self.assertIn("@app.get(\"/api/tier-list-deck-config\")", MODULE.ROUTE_BLOCK)
         self.assertIn("from fastapi import Request as _CodexRequest", MODULE.ROUTE_BLOCK)
         self.assertIn("globals()[\"_CodexRequest\"] = _CodexRequest", MODULE.ROUTE_BLOCK)
         self.assertIn("request: _CodexRequest", MODULE.ROUTE_BLOCK)
         self.assertIn("await request.body()", MODULE.ROUTE_BLOCK)
+        self.assertIn("content-encoding", MODULE.ROUTE_BLOCK)
+        self.assertIn("if-none-match", MODULE.ROUTE_BLOCK)
         self.assertNotIn("_CodexBody", MODULE.ROUTE_BLOCK)
 
 

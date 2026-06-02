@@ -34,3 +34,11 @@ export type {
   MatchSearchWeaponActivationFilter,
   MatchSearchWeaponOption,
 } from "../../../packages/contracts/match-search.js";
+
+export type {
+  TierListClusterVariant,
+  TierListDeckConfigResponse,
+  TierListRow,
+  TierListScope,
+  TierListSnapshot,
+} from "../../../packages/contracts/tier-list-snapshot.js";
