@@ -1,0 +1,61 @@
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+
+SCRIPT_PATH = Path(__file__).with_name("remote-main.sh")
+
+
+class RemoteMainDeployScriptTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.text = SCRIPT_PATH.read_text(encoding="utf-8")
+
+    def test_live_frontend_publish_waits_for_api_smoke(self) -> None:
+        self.assert_order(
+            "log 'publish web dist'",
+            "log 'refresh leaderboard snapshot'",
+            "log 'start leaderboard node api'",
+            "log 'restart service before route install'",
+            "log 'install fastapi routes'",
+            "log 'reload fastapi routes'",
+            "log 'smoke check api routes'",
+            "log 'publish live frontend'",
+            "log 'smoke check live routes'",
+        )
+
+    def test_api_smoke_checks_tier_list_before_page_smoke(self) -> None:
+        api_smoke = self.function_body("smoke_check_api_routes")
+        live_smoke = self.function_body("smoke_check_live_routes")
+        self.assertIn("/api/tier-list-snapshot", api_smoke)
+        self.assertIn("/api/tier-list-deck-config?scope=deck&deckId=", api_smoke)
+        self.assertIn("/api/match-search-options", api_smoke)
+        self.assertIn("-X POST \"$base/api/match-search\"", api_smoke)
+        self.assertIn("/tier-list/", live_smoke)
+        self.assertNotIn("/api/tier-list-snapshot", live_smoke)
+
+    def test_upload_worker_receives_tier_list_paths(self) -> None:
+        worker_install = self.function_body("install_upload_refresh_worker")
+        self.assertIn("--tier-list-snapshot-file", worker_install)
+        self.assertIn("--tier-list-configs-file", worker_install)
+        self.assertIn("TIER_LIST_SNAPSHOT_FILE", worker_install)
+        self.assertIn("TIER_LIST_CONFIGS_FILE", worker_install)
+
+    def test_route_reload_keeps_installed_container_patch(self) -> None:
+        route_reload = self.function_body("reload_fastapi_routes")
+        self.assertIn("require_fastapi_container", route_reload)
+        self.assertIn("docker restart \"$DEPLOY_FASTAPI_CONTAINER\"", route_reload)
+        self.assertNotIn("DEPLOY_RESTART_COMMAND", route_reload)
+
+    def assert_order(self, *needles: str) -> None:
+        positions = [self.text.index(needle) for needle in needles]
+        self.assertEqual(positions, sorted(positions))
+
+    def function_body(self, name: str) -> str:
+        start = self.text.index(f"{name}() {{")
+        end = self.text.index("\n}\n", start)
+        return self.text[start:end]
+
+
+if __name__ == "__main__":
+    unittest.main()

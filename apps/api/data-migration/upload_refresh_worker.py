@@ -68,6 +68,8 @@ class UploadRefreshConfig:
     legacy_root: Path
     snapshot_file: Path
     match_search_index_file: Path
+    tier_list_snapshot_file: Path
+    tier_list_configs_file: Path
     status_file: Path
     live_snapshot_file: Path | None = None
     live_status_file: Path | None = None
@@ -159,6 +161,8 @@ def build_snapshot_refresher(config: UploadRefreshConfig) -> SnapshotRefresher:
             legacy_root=config.legacy_root,
             snapshot_file=config.snapshot_file,
             match_search_index_file=config.match_search_index_file,
+            tier_list_snapshot_file=config.tier_list_snapshot_file,
+            tier_list_configs_file=config.tier_list_configs_file,
             status_file=config.status_file,
             live_snapshot_file=config.live_snapshot_file,
             live_status_file=config.live_status_file,
@@ -328,6 +332,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--legacy-root", type=Path, default=Path("apps/api/data/legacy-service"))
     parser.add_argument("--snapshot-file", type=Path, default=Path("apps/api/data/leaderboard-snapshot.json"))
     parser.add_argument("--match-search-index-file", type=Path, default=Path("apps/api/data/match-search-index.json"))
+    parser.add_argument("--tier-list-snapshot-file", type=Path, default=Path("apps/api/data/tier-list-snapshot.json"))
+    parser.add_argument("--tier-list-configs-file", type=Path, default=Path("apps/api/data/tier-list-configs.json"))
     parser.add_argument("--status-file", type=Path, default=Path("apps/api/data/leaderboard-refresh-status.json"))
     parser.add_argument("--live-snapshot-file", type=Path, default=None)
     parser.add_argument("--live-status-file", type=Path, default=None)
@@ -349,6 +355,8 @@ def config_from_args(args: argparse.Namespace) -> UploadRefreshConfig:
         legacy_root=_resolve(repo_root, args.legacy_root),
         snapshot_file=_resolve(repo_root, args.snapshot_file),
         match_search_index_file=_resolve(repo_root, args.match_search_index_file),
+        tier_list_snapshot_file=_resolve(repo_root, args.tier_list_snapshot_file),
+        tier_list_configs_file=_resolve(repo_root, args.tier_list_configs_file),
         status_file=_resolve(repo_root, args.status_file),
         live_snapshot_file=_resolve(repo_root, args.live_snapshot_file) if args.live_snapshot_file else None,
         live_status_file=_resolve(repo_root, args.live_status_file) if args.live_status_file else None,

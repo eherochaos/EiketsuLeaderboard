@@ -206,6 +206,8 @@ install_upload_refresh_worker() {
     printf '  --legacy-root %s\n' "$(shell_quote "$LEGACY_ROOT")"
     printf '  --snapshot-file %s\n' "$(shell_quote "$DATA_ROOT/leaderboard-snapshot.json")"
     printf '  --match-search-index-file %s\n' "$(shell_quote "$MATCH_SEARCH_INDEX_FILE")"
+    printf '  --tier-list-snapshot-file %s\n' "$(shell_quote "$TIER_LIST_SNAPSHOT_FILE")"
+    printf '  --tier-list-configs-file %s\n' "$(shell_quote "$TIER_LIST_CONFIGS_FILE")"
     printf '  --status-file %s\n' "$(shell_quote "$STATUS_FILE")"
     printf '  --node-bin node\n'
     printf '  --postgres-container %s\n' "$(shell_quote "$DEPLOY_EXPORT_CONTAINER")"
@@ -270,7 +272,12 @@ restart_service() {
   log 'skip restart'
 }
 
-smoke_check_live_routes() {
+reload_fastapi_routes() {
+  require_fastapi_container
+  docker restart "$DEPLOY_FASTAPI_CONTAINER" >/dev/null
+}
+
+wait_for_live_health() {
   [ -n "$DEPLOY_SMOKE_URL_BASE" ] || return 0
   command -v curl >/dev/null 2>&1 || return 0
   local base="${DEPLOY_SMOKE_URL_BASE%/}"
@@ -281,20 +288,38 @@ smoke_check_live_routes() {
     fi
     sleep 2
   done
-  curl -fsS "$base/leaderboard-status/" >/dev/null || fail 'leaderboard status page is not live'
-  curl -fsS "$base/tier-list/" >/dev/null || fail 'tier list page is not live'
+}
+
+tier_list_smoke_deck_id() {
+  python3 -c 'import json,sys,urllib.parse; data=json.load(open(sys.argv[1], encoding="utf-8")); rows=data.get("tierRows") or []; print(urllib.parse.quote(str(rows[0].get("deckId") or ""), safe="") if rows else "")' "$TIER_LIST_SNAPSHOT_FILE"
+}
+
+smoke_check_api_routes() {
+  [ -n "$DEPLOY_SMOKE_URL_BASE" ] || return 0
+  command -v curl >/dev/null 2>&1 || return 0
+  local base="${DEPLOY_SMOKE_URL_BASE%/}"
+  wait_for_live_health
   curl -fsS "$base/api/tier-list-snapshot" >/dev/null || fail 'tier list snapshot api is not live'
   local tier_deck_id
-  tier_deck_id="$(python3 -c 'import json,sys,urllib.parse; data=json.load(open(sys.argv[1], encoding="utf-8")); rows=data.get("tierRows") or []; print(urllib.parse.quote(str(rows[0].get("deckId") or ""), safe="") if rows else "")' "$TIER_LIST_SNAPSHOT_FILE")"
-  if [ -n "$tier_deck_id" ]; then
-    curl -fsS "$base/api/tier-list-deck-config?scope=deck&deckId=$tier_deck_id" >/dev/null || fail 'tier list deck config api is not live'
-  fi
-  curl -fsS "$base/match-search/" >/dev/null || fail 'match search page is not live'
+  tier_deck_id="$(tier_list_smoke_deck_id)"
+  [ -n "$tier_deck_id" ] || fail 'tier list smoke deck id is missing'
+  curl -fsS "$base/api/tier-list-deck-config?scope=deck&deckId=$tier_deck_id" >/dev/null || fail 'tier list deck config api is not live'
   curl -fsS "$base/api/leaderboard-refresh-status" >/dev/null || fail 'leaderboard refresh status api is not live'
   curl -fsS "$base/api/match-search-options" >/dev/null || fail 'match search options api is not live'
   curl -fsS -X POST "$base/api/match-search" \
     -H 'Content-Type: application/json' \
     -d '{"sideA":{"result":"win"},"pageSize":1}' >/dev/null || fail 'match search api is not live'
+}
+
+smoke_check_live_routes() {
+  [ -n "$DEPLOY_SMOKE_URL_BASE" ] || return 0
+  command -v curl >/dev/null 2>&1 || return 0
+  local base="${DEPLOY_SMOKE_URL_BASE%/}"
+  wait_for_live_health
+  curl -fsS "$base/leaderboard/" >/dev/null || fail 'leaderboard page is not live'
+  curl -fsS "$base/leaderboard-status/" >/dev/null || fail 'leaderboard status page is not live'
+  curl -fsS "$base/tier-list/" >/dev/null || fail 'tier list page is not live'
+  curl -fsS "$base/match-search/" >/dev/null || fail 'match search page is not live'
 }
 
 refresh_public_run() {
@@ -377,8 +402,6 @@ if [ -d apps/web/dist ]; then
   mv apps/web/dist apps/web/dist.prev
 fi
 mv apps/web/dist.next apps/web/dist
-log 'publish live frontend'
-publish_live_frontend
 
 DATA_ROOT='apps/api/data'
 LEGACY_ROOT="$DATA_ROOT/legacy-service"
@@ -457,17 +480,23 @@ log 'publish live snapshot'
 publish_live_snapshot
 log 'publish live status'
 publish_live_status
-log 'publish frontend status asset'
-publish_frontend_status_asset
 log 'install upload refresh worker'
 install_upload_refresh_worker
-log 'install fastapi routes'
-install_fastapi_routes
 log 'start leaderboard node api'
 start_leaderboard_node_api
 
-log 'restart service'
+log 'restart service before route install'
 restart_service
+log 'install fastapi routes'
+install_fastapi_routes
+log 'reload fastapi routes'
+reload_fastapi_routes
+log 'smoke check api routes'
+smoke_check_api_routes
+log 'publish live frontend'
+publish_live_frontend
+log 'publish frontend status asset'
+publish_frontend_status_asset
 log 'smoke check live routes'
 smoke_check_live_routes
 
