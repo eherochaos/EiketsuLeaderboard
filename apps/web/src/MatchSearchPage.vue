@@ -353,9 +353,9 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
           </div>
 
           <div class="MatchSearch_FieldBlock">
-            <label>
+            <label class="MatchSearch_WeaponQuery">
               战器
-              <input v-model="sideForms[sideKey].weaponQuery" type="search" autocomplete="off" placeholder="筛选战器" />
+              <input class="MatchSearch_WeaponQueryInput" v-model="sideForms[sideKey].weaponQuery" type="search" autocomplete="off" placeholder="筛选战器" />
             </label>
             <select v-model="sideForms[sideKey].weaponName">
               <option value="">全部战器</option>
@@ -1377,6 +1377,10 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   .MatchSearch_FieldLabel {
     gap: 2px;
     font-size: 10px;
+  }
+
+  .MatchSearch_FieldBlock .MatchSearch_WeaponQuery {
+    display: none;
   }
 
   .MatchSearch_ControlRow select,
