@@ -1476,6 +1476,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
     height: 100svh;
     max-height: none;
     border: 0;
+    background: #fffaf0;
   }
 
   .MatchSearch_CardPickerHead {
@@ -1532,20 +1533,22 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 
   .MatchSearch_CardPickerGrid {
     padding: 4px 8px 6px;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
     align-content: start;
-    gap: 5px;
+    gap: 4px;
+    background: #fffaf0;
   }
 
   .MatchSearch_CardPickerGrid .MatchSearch_CardPick {
     position: relative;
     min-height: 0;
     padding: 0;
-    grid-template-columns: 1fr;
-    gap: 0;
+    display: block;
     aspect-ratio: 5 / 8;
     height: auto;
     overflow: hidden;
+    line-height: 0;
+    background: #211711;
   }
 
   .MatchSearch_CardPickerGrid .MatchSearch_CardPick :deep(.Common_ImageFrame) {
@@ -1560,9 +1563,11 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
     --Common_ImageFrame_StatSize: clamp(12px, 24%, 16px);
     --Common_ImageFrame_SkillSize: 12px;
 
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
-    aspect-ratio: 5 / 8;
+    aspect-ratio: auto;
   }
 
   .MatchSearch_CardPickerGrid .MatchSearch_CardPick > * {
