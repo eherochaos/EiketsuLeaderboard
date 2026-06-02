@@ -1595,7 +1595,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 
   .MatchSearch_ResultPanel {
     margin-top: 8px;
-    padding: 8px;
+    padding: 6px;
     overflow-x: hidden;
     scroll-margin-top: 70px;
   }
@@ -1613,48 +1613,69 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   }
 
   .MatchSearch_ResultList {
-    gap: 5px;
+    gap: 7px;
   }
 
   .MatchSearch_ResultItem {
     width: 100%;
-    padding: 5px;
+    padding: 4px;
+    overflow: hidden;
+    background: color-mix(in srgb, #eef4ff 58%, var(--color-panel) 42%);
   }
 
   .MatchSearch_ResultHead {
-    margin-bottom: 4px;
+    margin-bottom: 3px;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
+    padding: 2px 3px;
+    border-bottom: 1px solid rgba(103, 82, 55, 0.22);
   }
 
   .MatchSearch_ResultHead > div {
-    grid-template-columns: 1fr;
-    gap: 1px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: baseline;
+    gap: 5px;
   }
 
   .MatchSearch_ResultHead strong {
-    font-size: 16px;
+    color: var(--color-brown);
+    font-size: 14px;
   }
 
   .MatchSearch_ResultHead span {
-    font-size: 10px;
+    font-size: 9px;
+    line-height: 1;
   }
 
   .MatchSearch_ResultHead a {
-    min-height: 28px;
-    padding: 0 8px;
+    min-height: 24px;
+    padding: 0 7px;
     justify-content: center;
-    font-size: 11px;
+    font-size: 10px;
   }
 
   .MatchSearch_ResultSides {
+    position: relative;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 4px;
   }
 
   .MatchSearch_ResultSides section {
     width: 100%;
+    padding: 3px;
     gap: 2px;
+    border: 1px solid rgba(216, 192, 151, 0.72);
+    background: rgba(255, 250, 240, 0.55);
+  }
+
+  .MatchSearch_ResultSides section:first-child {
+    border-top: 2px solid color-mix(in srgb, var(--color-primary) 86%, #fff 14%);
+  }
+
+  .MatchSearch_ResultSides section:nth-child(2) {
+    border-top: 2px solid #2f6596;
   }
 
   .MatchSearch_ResultSideMeta {
@@ -1664,18 +1685,22 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   .MatchSearch_ResultSideTitle {
     display: flex;
     align-items: baseline;
-    gap: 4px;
-    font-size: 11px;
+    gap: 3px;
+    font-size: 10px;
     line-height: 1.05;
   }
 
   .MatchSearch_ResultSideTitle strong {
     flex: 0 0 auto;
+    max-width: 46px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .MatchSearch_ResultSideTitle > span:not(.MatchSearch_ResultHitNote) {
     flex: 0 1 auto;
-    max-width: 88px;
+    max-width: 58px;
   }
 
   .MatchSearch_ResultHitNote {
@@ -1692,23 +1717,26 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   .MatchSearch_ResultSideInline {
     font-size: 9px;
     line-height: 1.05;
-    gap: 1px 6px;
+    gap: 1px 4px;
+    flex-wrap: nowrap;
   }
 
   .MatchSearch_ResultSides :deep(.Common_DeckRail_Mini) {
-    --Common_DeckRail_SlotHeight: 48px;
+    --Common_DeckRail_SlotHeight: clamp(48px, 13vw, 58px);
 
-    grid-template-columns: none;
-    grid-auto-flow: column;
-    grid-auto-columns: var(--Common_DeckRail_SlotWidth);
+    grid-template-columns: repeat(4, var(--Common_DeckRail_SlotWidth));
+    grid-auto-flow: row;
+    justify-content: center;
     gap: 2px;
     width: 100%;
     padding: 3px;
-    overflow-x: auto;
+    overflow: hidden;
   }
 
   .MatchSearch_ResultSides :deep(.Common_DeckRail_Mini .Common_DeckRail_EmptySlot) {
-    display: none;
+    display: grid;
+    border-color: rgba(47, 101, 150, 0.16);
+    background: rgba(167, 189, 216, 0.22);
   }
 
   .MatchSearch_Pager {
