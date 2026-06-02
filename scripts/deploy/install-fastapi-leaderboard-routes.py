@@ -24,11 +24,6 @@ ROUTE_BLOCK = f"""
                 return candidate
         return candidates[0]
 
-    def _codex_json_file_response(path):
-        if not path.is_file():
-            raise HTTPException(status_code=404, detail="status file not found")
-        return FileResponse(path, media_type="application/json")
-
     def _codex_leaderboard_node_api_base():
         import os as _codex_os
 
@@ -94,29 +89,8 @@ ROUTE_BLOCK = f"""
         return FileResponse(path, media_type="text/html; charset=utf-8")
 
     @app.get("/api/leaderboard-refresh-status")
-    def api_leaderboard_refresh_status():
-        import os as _codex_os
-        from pathlib import Path as _CodexPath
-
-        configured = (
-            _codex_os.environ.get("EIKETSU_LEADERBOARD_REFRESH_STATUS_FILE")
-            or _codex_os.environ.get("LEADERBOARD_REFRESH_STATUS_FILE")
-        )
-        candidates = []
-        if configured:
-            candidates.append(_CodexPath(configured))
-        env_root = _CodexPath(_codex_os.environ.get("EIKETSU_ENV_ROOT") or "/app")
-        candidates.extend(
-            [
-                env_root / "data" / "leaderboard-refresh-status.json",
-                env_root / "data" / "snapshots" / "leaderboard-refresh-status.json",
-                _codex_leaderboard_frontend_root() / "assets" / "leaderboard-refresh-status.json",
-            ]
-        )
-        for candidate in candidates:
-            if candidate.is_file():
-                return _codex_json_file_response(candidate)
-        raise HTTPException(status_code=404, detail="status file not found")
+    def api_leaderboard_refresh_status(request: _CodexRequest):
+        return _codex_proxy_leaderboard_node_api("/api/leaderboard-refresh-status", forward_headers=request.headers)
 
     @app.get("/api/leaderboard-snapshot")
     def api_leaderboard_snapshot(request: _CodexRequest):

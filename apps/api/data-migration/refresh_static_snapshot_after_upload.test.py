@@ -35,6 +35,14 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
                 if command[-1].endswith("refresh-snapshot.mjs"):
                     snapshot_file.parent.mkdir(parents=True, exist_ok=True)
                     snapshot_file.write_text(json.dumps({"metadata": {"sourceRunId": 7}}), encoding="utf-8")
+                    Path(env["LEADERBOARD_TIER_LIST_SNAPSHOT_FILE"]).write_text(
+                        json.dumps({"metadata": {"sourceRunId": 7}, "tierRows": [], "clusterRows": []}),
+                        encoding="utf-8",
+                    )
+                    Path(env["LEADERBOARD_TIER_LIST_CONFIGS_FILE"]).write_text(
+                        json.dumps({"metadata": {"sourceRunId": 7}, "deckConfigs": {}, "clusterConfigs": {}}),
+                        encoding="utf-8",
+                    )
                 if command[-1].endswith("match-search-index.mjs"):
                     Path(env["LEADERBOARD_MATCH_SEARCH_INDEX_FILE"]).write_text(
                         json.dumps({"metadata": {"sourceRunId": 7}, "matches": []}),
@@ -75,6 +83,55 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             self.assertEqual(calls[-1][1]["LEADERBOARD_LEGACY_ROOT"], str(legacy_root))
             self.assertEqual(calls[-1][1]["LEADERBOARD_SNAPSHOT_FILE"], str(snapshot_file))
             self.assertTrue(calls[-1][1]["LEADERBOARD_MATCH_SEARCH_INDEX_FILE"].endswith("match-search-index.json"))
+
+    def test_refresh_static_snapshot_fails_on_run_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            legacy_root = repo_root / "apps/api/data/legacy-service"
+            snapshot_file = repo_root / "apps/api/data/leaderboard-snapshot.json"
+            status_file = repo_root / "apps/api/data/leaderboard-refresh-status.json"
+
+            def fake_exporter(output_dir: Path) -> dict:
+                (output_dir / "cards").mkdir(parents=True)
+                (output_dir / "tables").mkdir(parents=True)
+                (output_dir / "cards" / "datalist_api_base.json").write_text("{}\n", encoding="utf-8")
+                return {"tables": {}}
+
+            def fake_runner(command: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+                if command[-1].endswith("refresh-snapshot.mjs"):
+                    snapshot_file.parent.mkdir(parents=True, exist_ok=True)
+                    snapshot_file.write_text(json.dumps({"metadata": {"sourceRunId": 7}}), encoding="utf-8")
+                    Path(env["LEADERBOARD_TIER_LIST_SNAPSHOT_FILE"]).write_text(
+                        json.dumps({"metadata": {"sourceRunId": 8}, "tierRows": [], "clusterRows": []}),
+                        encoding="utf-8",
+                    )
+                    Path(env["LEADERBOARD_TIER_LIST_CONFIGS_FILE"]).write_text(
+                        json.dumps({"metadata": {"sourceRunId": 8}, "deckConfigs": {}, "clusterConfigs": {}}),
+                        encoding="utf-8",
+                    )
+                if command[-1].endswith("match-search-index.mjs"):
+                    Path(env["LEADERBOARD_MATCH_SEARCH_INDEX_FILE"]).write_text(
+                        json.dumps({"metadata": {"sourceRunId": 7}, "matches": []}),
+                        encoding="utf-8",
+                    )
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            with self.assertRaisesRegex(RuntimeError, "tier list snapshot sourceRunId 8"):
+                refresh_static_snapshot_after_upload(
+                    repo_root=repo_root,
+                    legacy_root=legacy_root,
+                    snapshot_file=snapshot_file,
+                    status_file=status_file,
+                    exporter=fake_exporter,
+                    run_refresher=lambda: {"status": "completed", "run_id": 7},
+                    runner=fake_runner,
+                )
+
+            status_text = status_file.read_text(encoding="utf-8")
+            status = json.loads(status_text)
+            self.assertEqual(status["refresh"]["status"], "failed")
+            self.assertIn("refresh run mismatch", status["refresh"]["error"])
+            self.assertNotIn(str(repo_root), status_text)
 
     def test_refresh_static_snapshot_skips_when_lock_exists(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

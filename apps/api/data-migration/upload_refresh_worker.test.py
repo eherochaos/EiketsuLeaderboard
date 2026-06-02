@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 import upload_refresh_worker
@@ -87,13 +88,15 @@ class UploadRefreshWorkerTests(unittest.TestCase):
 
     def test_snapshot_refresher_passes_tier_list_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            config = self._config(Path(temp_dir))
+            root = Path(temp_dir)
+            config = replace(self._config(root), live_status_file=root / "live/leaderboard-refresh-status.json")
             captured: dict[str, Path] = {}
             original_refresh = upload_refresh_worker.refresh_static_snapshot_after_upload
 
             def fake_refresh_static_snapshot_after_upload(**kwargs):
                 captured["tier_list_snapshot_file"] = kwargs["tier_list_snapshot_file"]
                 captured["tier_list_configs_file"] = kwargs["tier_list_configs_file"]
+                captured["live_status_file"] = kwargs["live_status_file"]
                 return {"status": "completed"}
 
             upload_refresh_worker.refresh_static_snapshot_after_upload = fake_refresh_static_snapshot_after_upload
@@ -105,6 +108,7 @@ class UploadRefreshWorkerTests(unittest.TestCase):
             self.assertEqual(result["status"], "completed")
             self.assertEqual(captured["tier_list_snapshot_file"], config.tier_list_snapshot_file)
             self.assertEqual(captured["tier_list_configs_file"], config.tier_list_configs_file)
+            self.assertEqual(captured["live_status_file"], config.live_status_file)
 
     def _config(self, root: Path) -> UploadRefreshConfig:
         return UploadRefreshConfig(

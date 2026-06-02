@@ -83,6 +83,7 @@ def refresh_static_snapshot_after_upload(
         official_card_result = _refresh_official_card_data(root, legacy, node_bin, runner or _default_runner)
         snapshot_result = _refresh_snapshot(root, legacy, snapshot, tier_list_snapshot, tier_list_configs, node_bin, runner or _default_runner)
         match_search_result = _refresh_match_search_index(root, legacy, snapshot, match_search_index, node_bin, runner or _default_runner)
+        consistency_result = _validate_refresh_run_consistency(snapshot, tier_list_snapshot, match_search_index)
         live_result = _publish_live_snapshot(snapshot, live_snapshot) if live_snapshot else None
         result = {
             "status": "completed",
@@ -93,6 +94,7 @@ def refresh_static_snapshot_after_upload(
             "official_card_data": official_card_result,
             "snapshot": snapshot_result,
             "match_search_index": match_search_result,
+            "consistency": consistency_result,
             "live_snapshot": live_result,
         }
         _write_refresh_status(
@@ -106,6 +108,9 @@ def refresh_static_snapshot_after_upload(
             export_manifest=export_manifest,
             run_result=run_result,
         )
+        _validate_refresh_run_consistency(snapshot, tier_list_snapshot, match_search_index, status_path)
+        if live_status:
+            _validate_refresh_run_consistency(snapshot, tier_list_snapshot, match_search_index, live_status)
         return result
     except Exception as exc:
         result = {
@@ -211,6 +216,41 @@ def _refresh_match_search_index(
     command = [node_bin, str(repo_root / "apps/api/leaderboard-snapshot/match-search-index.mjs")]
     runner(command, _snapshot_env(legacy_root, snapshot_file, match_search_index_file))
     return {"status": "completed"}
+
+
+def _validate_refresh_run_consistency(
+    snapshot_file: Path,
+    tier_list_snapshot_file: Path,
+    match_search_index_file: Path,
+    status_file: Path | None = None,
+) -> dict[str, Any]:
+    source_run_id = _read_source_run_id(snapshot_file, "leaderboard snapshot", "metadata")
+    checks = {
+        "tier list snapshot": _read_source_run_id(tier_list_snapshot_file, "tier list snapshot", "metadata"),
+        "match search index": _read_source_run_id(match_search_index_file, "match search index", "metadata"),
+    }
+    if status_file is not None:
+        checks["refresh status"] = _read_source_run_id(status_file, "refresh status", "snapshot")
+    for label, value in checks.items():
+        if value != source_run_id:
+            raise RuntimeError(
+                f"refresh run mismatch: {label} sourceRunId {value or 'missing'} "
+                f"!= leaderboard snapshot sourceRunId {source_run_id}"
+            )
+    return {"status": "completed", "sourceRunId": source_run_id}
+
+
+def _read_source_run_id(path: Path, label: str, section: str) -> str:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        raise RuntimeError(f"refresh run mismatch: {label} sourceRunId missing")
+    container = payload.get(section) if isinstance(payload, dict) else {}
+    container = container if isinstance(container, dict) else {}
+    value = container.get("sourceRunId")
+    if value is None or value == "":
+        raise RuntimeError(f"refresh run mismatch: {label} sourceRunId missing")
+    return str(value)
 
 
 def _publish_live_snapshot(snapshot_file: Path, live_snapshot_file: Path) -> dict[str, Any]:
