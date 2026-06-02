@@ -81,11 +81,7 @@ const canSearch = computed(() => hasAnyFilter(sideForms.sideA) || hasAnyFilter(s
 const pickerForm = computed(() => sideForms[pickerSide.value ?? "sideA"]);
 const pickerTitle = computed(() => pickerSide.value ? sideLabels[pickerSide.value].title : "");
 const pickerSelectedCards = computed(() => selectedCards(pickerForm.value));
-const pickerCardOptions = computed(() => {
-  const selected = pickerSelectedCards.value;
-  const candidates = filteredCardOptions(pickerForm.value, Math.max(0, 96 - selected.length));
-  return [...selected, ...candidates];
-});
+const pickerCardOptions = computed(() => filteredCardOptions(pickerForm.value, 96, { excludeSelected: false }));
 
 function createSideForm(): SideForm {
   return {
@@ -131,11 +127,12 @@ function cardScore(card: MatchSearchCardOption, query: string): number {
   return cardSearchText(card).includes(query) ? 50000 + card.usageCount : 0;
 }
 
-function filteredCardOptions(side: SideForm, limit = 24): MatchSearchCardOption[] {
+function filteredCardOptions(side: SideForm, limit = 24, options: { excludeSelected?: boolean } = {}): MatchSearchCardOption[] {
   const query = normalizedText(side.cardQuery);
   const selected = new Set(side.cardIds);
+  const excludeSelected = options.excludeSelected ?? true;
   return cards.value
-    .filter((card) => !selected.has(card.cardId))
+    .filter((card) => !excludeSelected || !selected.has(card.cardId))
     .filter((card) => side.faction === "all" || card.faction === side.faction)
     .filter((card) => side.unitType === "all" || card.unitType === side.unitType)
     .filter((card) => side.cost === "all" || card.cost === side.cost)
@@ -169,7 +166,6 @@ function addCard(side: SideForm, card: MatchSearchCardOption): void {
   if (side.cardIds.includes(card.cardId) || side.cardIds.length >= 8) return;
   side.cardIds.push(card.cardId);
   side.strategyByCard[card.cardId] = "any";
-  side.cardQuery = "";
 }
 
 function isCardSelected(side: SideForm, cardId: string): boolean {
@@ -1495,7 +1491,9 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   }
 
   .MatchSearch_CardPickerSelected {
-    min-height: 28px;
+    height: 32px;
+    min-height: 32px;
+    box-sizing: border-box;
     padding: 3px 8px;
   }
 
