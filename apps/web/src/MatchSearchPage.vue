@@ -1476,6 +1476,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
     height: 100svh;
     max-height: none;
     border: 0;
+    background: #fffaf0;
   }
 
   .MatchSearch_CardPickerHead {
@@ -1535,6 +1536,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     align-content: start;
     gap: 5px;
+    background: #fffaf0;
   }
 
   .MatchSearch_CardPickerGrid .MatchSearch_CardPick {
@@ -1561,7 +1563,6 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 
     width: 100%;
     height: 100%;
-    aspect-ratio: auto;
   }
 
   .MatchSearch_CardPickerGrid .MatchSearch_CardPick > * {

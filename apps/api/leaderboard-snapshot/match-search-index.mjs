@@ -120,6 +120,8 @@ function cardHashIds(card) {
   return [
     card.hash_id,
     card.hashId,
+    card.card_id,
+    card.cardId,
     card.card_hash,
     card.cardHash,
     card.canonical_hash,
@@ -175,7 +177,35 @@ function mergeNonEmptyCardData(baseCard, overrideCard) {
   return merged;
 }
 
-async function loadCardCatalog(legacyRoot) {
+function cardCatalogKeys(card) {
+  const keys = cardHashIds(card);
+  const cardCode = firstText(card?.card_code, card?.cardCode);
+  const name = firstText(card?.name, card?.imageAlt);
+  if (cardCode) keys.push(`card_code:${cardCode}`);
+  if (cardCode && name) keys.push(`card_code_name:${cardCode}:${name}`);
+  return Array.from(new Set(keys));
+}
+
+function snapshotCards(snapshot) {
+  const rows = [
+    ...(Array.isArray(snapshot?.tierRows) ? snapshot.tierRows : []),
+    ...(Array.isArray(snapshot?.clusterRows) ? snapshot.clusterRows : []),
+    ...(Array.isArray(snapshot?.home?.tierRows) ? snapshot.home.tierRows : []),
+    ...(Array.isArray(snapshot?.home?.representativeDecks) ? snapshot.home.representativeDecks : [])
+  ];
+  const cards = Array.isArray(snapshot?.home?.featuredCards) ? [...snapshot.home.featuredCards] : [];
+  for (const row of rows) {
+    if (Array.isArray(row?.deckCards)) cards.push(...row.deckCards);
+    if (Array.isArray(row?.clusterVariants)) {
+      for (const variant of row.clusterVariants) {
+        if (Array.isArray(variant?.deckCards)) cards.push(...variant.deckCards);
+      }
+    }
+  }
+  return cards;
+}
+
+async function loadCardCatalog(legacyRoot, snapshot = null) {
   const base = await readJson(resolve(legacyRoot, "cards/card_catalog.json"));
   const overlay = await readOptionalJson(resolve(legacyRoot, "cards/card_catalog_overlay.json"), { cards: [] });
   const officialDatalist = await readOptionalJson(resolve(legacyRoot, "cards/datalist_api_base.json"), null);
@@ -183,18 +213,24 @@ async function loadCardCatalog(legacyRoot) {
   const officialAssetTemplates = officialDatalist ? officialDatalistAssetTemplates(officialDatalist) : {};
   const byHash = new Map();
 
-  for (const card of [...(base.cards || []), ...(overlay.cards || []), ...officialCards]) {
-    for (const hashId of cardHashIds(card)) {
-      const merged = mergeNonEmptyCardData(byHash.get(hashId) || {}, card);
+  for (const card of [...(base.cards || []), ...(overlay.cards || []), ...officialCards, ...snapshotCards(snapshot)]) {
+    for (const key of cardCatalogKeys(card)) {
+      const merged = mergeNonEmptyCardData(byHash.get(key) || {}, card);
       if (!firstImageUrl(merged)) {
         const imageUrl = officialDatalistAssetUrl(officialAssetTemplates, "card_small", cardSmallAssetCode(merged));
         if (imageUrl) merged.image_url = imageUrl;
       }
-      byHash.set(hashId, merged);
+      byHash.set(key, merged);
     }
   }
 
   return Object.fromEntries(byHash);
+}
+
+function fallbackCardSmallUrl(cardId) {
+  const value = String(cardId || "").trim();
+  if (!/^[a-f0-9]{32}$/i.test(value)) return "";
+  return `${OFFICIAL_ASSET_BASE_URL}general/card_small/${encodeURIComponent(value)}.jpg`;
 }
 
 function normalizeFaction(raw) {
@@ -287,7 +323,7 @@ function cardView(cardId, cardCatalog, usageCount = 0) {
     intelligence: firstText(card?.intelligence, card?.intellect, card?.wisdom, card?.["知力"]),
     era: firstText(card?.era, card?.period, card?.timePeriod, card?.eraName, card?.periodName),
     skills: cardSkillList(card),
-    imageUrl: firstImageUrl(card),
+    imageUrl: firstImageUrl(card) || fallbackCardSmallUrl(cardId),
     imageAlt: name,
     usageCount
   };
@@ -515,7 +551,7 @@ export async function buildMatchSearchIndex(options = {}) {
     });
   }
 
-  const cardCatalog = await loadCardCatalog(legacyRoot);
+  const cardCatalog = await loadCardCatalog(legacyRoot, snapshot);
   const cards = Array.from(cardUsage.entries())
     .map(([cardId, usageCount]) => cardView(cardId, cardCatalog, usageCount))
     .sort((left, right) => right.usageCount - left.usageCount || left.name.localeCompare(right.name, "ja"));

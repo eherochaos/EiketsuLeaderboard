@@ -155,6 +155,8 @@ function cardHashIds(card) {
   return [
     card.hash_id,
     card.hashId,
+    card.card_id,
+    card.cardId,
     card.card_hash,
     card.cardHash,
     card.canonical_hash,
@@ -166,6 +168,15 @@ function cardHashIds(card) {
   ].map((value) => String(value || "").trim()).filter(Boolean);
 }
 
+function cardCatalogKeys(card) {
+  const keys = cardHashIds(card);
+  const cardCode = firstText(card?.card_code, card?.cardCode);
+  const name = labelName(firstText(card?.name, card?.label));
+  if (cardCode) keys.push(`card_code:${cardCode}`);
+  if (cardCode && name) keys.push(`card_code_name:${cardCode}:${name}`);
+  return Array.from(new Set(keys));
+}
+
 async function loadCardCatalog() {
   const base = await readJson(resolve(legacyRoot, "cards/card_catalog.json"));
   const overlay = await readJson(resolve(legacyRoot, "cards/card_catalog_overlay.json"));
@@ -174,12 +185,19 @@ async function loadCardCatalog() {
   const byHash = new Map();
 
   for (const card of [...(base.cards || []), ...(overlay.cards || []), ...officialCards]) {
-    for (const hashId of cardHashIds(card)) {
-      byHash.set(hashId, { ...(byHash.get(hashId) || {}), ...card });
+    for (const key of cardCatalogKeys(card)) {
+      byHash.set(key, mergeNonEmptyCardData(byHash.get(key) || {}, card));
     }
   }
 
   return Object.fromEntries(byHash);
+}
+
+function catalogCardFor(cardCatalog, cardId, card = {}) {
+  for (const key of [String(cardId || "").trim(), ...cardCatalogKeys(card)]) {
+    if (key && cardCatalog[key]) return cardCatalog[key];
+  }
+  return {};
 }
 
 function normalizeFaction(raw) {
@@ -268,7 +286,7 @@ function mergeNonEmptyCardData(baseCard, overrideCard) {
 }
 
 function cardView(cardId, cardCatalog) {
-  const card = cardCatalog[cardId] || {};
+  const card = catalogCardFor(cardCatalog, cardId);
   const name = cardName(cardId, cardCatalog);
   return {
     cardId,
@@ -319,7 +337,7 @@ function latestFormalRun(runs, targetVersion) {
 
 function formalCardView(card, cardCatalog = {}) {
   const cardId = String(card?.card_hash || "");
-  const catalogCard = cardCatalog[cardId] || {};
+  const catalogCard = catalogCardFor(cardCatalog, cardId, card);
   const mergedCard = mergeNonEmptyCardData(catalogCard, card);
   const name = labelName(card?.label) || String(card?.card_hash || "").slice(0, 8);
   return {
