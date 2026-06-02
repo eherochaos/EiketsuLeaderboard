@@ -77,7 +77,7 @@ const props = withDefaults(defineProps<{
   card?: ImageFrameCard | null;
   showDetails?: boolean;
   showOverlays?: boolean;
-  density?: "compact" | "full";
+  density?: "mini" | "compact" | "full";
 }>(), {
   src: "",
   ratio: "square",
@@ -128,11 +128,12 @@ const unitTypeIconUrl = computed(() => UNIT_TYPE_ICON_URLS[unitType.value] ?? ""
 const costIconUrl = computed(() => COST_ICON_URLS[cost.value] ?? "");
 const skillLabels = computed(() => (detailCard.value?.skills ?? []).map(text).filter(Boolean).slice(0, 3));
 const hasOverlays = computed(() => Boolean((props.showDetails || props.showOverlays) && detailCard.value));
+const hasBottomOverlays = computed(() => props.density !== "mini");
 const skillBadges = computed(() => skillLabels.value.map((label) => ({
   label,
   abbreviation: skillAbbreviation(label)
-})).filter((skill) => hasOverlays.value && skill.abbreviation));
-const hasPowerStats = computed(() => hasOverlays.value);
+})).filter((skill) => hasOverlays.value && hasBottomOverlays.value && skill.abbreviation));
+const hasPowerStats = computed(() => hasOverlays.value && hasBottomOverlays.value);
 const detailRows = computed(() => [
   { label: "勢力", value: text(detailCard.value?.faction) },
   { label: "兵種", value: unitType.value },
@@ -241,6 +242,16 @@ const detailTitle = computed(() => {
   --Common_ImageFrame_CostWidth: clamp(23px, 90%, 50px);
   --Common_ImageFrame_StatSize: clamp(13px, 29%, 17px);
   --Common_ImageFrame_SkillSize: 14px;
+}
+
+.Common_ImageFrame.Common_ImageFrame_mini {
+  --Common_ImageFrame_UnitOffsetX: -2px;
+  --Common_ImageFrame_UnitOffsetY: -1px;
+  --Common_ImageFrame_CostOffsetX: 6px;
+  --Common_ImageFrame_CostOffsetY: -1px;
+  --Common_ImageFrame_OverlayMask: color-mix(in srgb, var(--color-panel-strong) 28%, transparent);
+  --Common_ImageFrame_UnitSize: clamp(12px, 34%, 18px);
+  --Common_ImageFrame_CostWidth: clamp(18px, 82%, 34px);
 }
 
 .Common_ImageFrame.Common_ImageFrame_full {

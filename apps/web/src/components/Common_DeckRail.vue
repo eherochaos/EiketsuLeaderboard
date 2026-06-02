@@ -7,10 +7,12 @@ withDefaults(defineProps<{
   cards: (CardView | null)[];
   railClass?: string;
   showCardDetails?: boolean;
-  cardDensity?: "compact" | "full";
+  showCardOverlays?: boolean;
+  cardDensity?: "mini" | "compact" | "full";
 }>(), {
   railClass: "Common_DeckRail",
   showCardDetails: true,
+  showCardOverlays: false,
   cardDensity: "compact"
 });
 </script>
@@ -24,6 +26,7 @@ withDefaults(defineProps<{
         :alt="card.imageAlt"
         :card="card"
         :show-details="showCardDetails"
+        :show-overlays="showCardOverlays"
         :density="cardDensity"
         ratio="portrait"
       />

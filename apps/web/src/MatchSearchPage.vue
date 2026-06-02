@@ -428,7 +428,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
                     <span v-if="item[sideKey].schoolName">{{ item[sideKey].schoolName }}</span>
                   </div>
                 </div>
-                <CommonDeckRail :cards="deckSlots(item[sideKey].cards)" rail-class="Common_DeckRail_Mini" :show-card-details="true" card-density="compact" />
+                <CommonDeckRail :cards="deckSlots(item[sideKey].cards)" rail-class="Common_DeckRail_Mini" :show-card-details="false" :show-card-overlays="true" card-density="mini" />
               </section>
             </div>
           </article>
