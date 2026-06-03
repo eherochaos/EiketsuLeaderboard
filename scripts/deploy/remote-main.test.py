@@ -46,6 +46,9 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn("SITE_ANALYTICS_FILE=/work/apps/api/data/site-analytics-events.jsonl", start_node)
         self.assertIn('SITE_ANALYTICS_ADMIN_TOKEN=${SITE_ANALYTICS_ADMIN_TOKEN:-}', start_node)
 
+    def test_site_analytics_token_is_decoded_from_deploy_workflow(self) -> None:
+        self.assertIn('SITE_ANALYTICS_ADMIN_TOKEN="$(decode_env "${SITE_ANALYTICS_ADMIN_TOKEN_B64:-}")"', self.text)
+
     def test_api_smoke_checks_public_run_consistency(self) -> None:
         consistency = self.function_body("smoke_check_run_consistency")
         self.assertIn("$base/api/leaderboard-snapshot", consistency)
