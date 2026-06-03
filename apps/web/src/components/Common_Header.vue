@@ -74,6 +74,10 @@ function trackNavClick(key: string, href: string): void {
   letter-spacing: 0;
 }
 
+.Common_Header_Brand span:last-child {
+  white-space: nowrap;
+}
+
 .Common_Header_BrandSymbol {
   width: 16px;
   height: 16px;
@@ -109,6 +113,7 @@ function trackNavClick(key: string, href: string): void {
 
   .Common_Header_Links {
     flex: 1 1 auto;
+    justify-content: flex-start;
     overflow-x: auto;
     scrollbar-width: none;
     gap: 6px;
@@ -122,6 +127,34 @@ function trackNavClick(key: string, href: string): void {
     min-height: 38px;
     padding: 0 10px;
     font-size: 13px;
+  }
+}
+
+@media (max-width: 430px) {
+  .Common_Header,
+  .Common_Header_Nav {
+    height: 52px;
+  }
+
+  .Common_Header_Nav {
+    gap: 8px;
+  }
+
+  .Common_Header_Brand {
+    flex: 0 1 auto;
+    gap: 8px;
+    font-size: 15px;
+  }
+
+  .Common_Header_BrandSymbol {
+    width: 14px;
+    height: 14px;
+  }
+
+  .Common_NavPrimary {
+    min-height: 32px;
+    padding: 0 8px;
+    font-size: 12px;
   }
 }
 </style>
