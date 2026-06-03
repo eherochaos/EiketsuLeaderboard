@@ -26,10 +26,13 @@ const clusterVariantIndexes = ref<Record<string, number>>({});
 const expandedDeckIds = ref(new Set<string>());
 const visibleRowLimit = ref(INITIAL_VISIBLE_ROWS);
 const mobileViewport = ref(false);
+const compactMobileViewport = ref(false);
+const mobileFiltersOpen = ref(false);
 const deckConfigs = ref<Record<string, DeckConfigStats>>({});
 const deckConfigLoadingIds = ref(new Set<string>());
 const deckConfigErrors = ref<Record<string, string>>({});
 let mobileMediaQuery: MediaQueryList | null = null;
+let compactMobileMediaQuery: MediaQueryList | null = null;
 const emptyDeckConfig: DeckConfigStats = {
   weapons: [],
   styles: [],
@@ -50,13 +53,16 @@ const sortOptions: { value: SortKey; label: string }[] = [
 
 function updateViewportMode(): void {
   mobileViewport.value = Boolean(mobileMediaQuery?.matches);
+  compactMobileViewport.value = Boolean(compactMobileMediaQuery?.matches);
 }
 
 onMounted(async () => {
   trackPageView("tier-list");
   mobileMediaQuery = window.matchMedia("(max-width: 760px)");
+  compactMobileMediaQuery = window.matchMedia("(max-width: 430px)");
   updateViewportMode();
   mobileMediaQuery.addEventListener("change", updateViewportMode);
+  compactMobileMediaQuery.addEventListener("change", updateViewportMode);
   try {
     snapshot.value = await loadTierListSnapshot();
   } catch (caught) {
@@ -68,7 +74,9 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   mobileMediaQuery?.removeEventListener("change", updateViewportMode);
+  compactMobileMediaQuery?.removeEventListener("change", updateViewportMode);
   mobileMediaQuery = null;
+  compactMobileMediaQuery = null;
 });
 
 const rows = computed(() => snapshot.value?.tierRows ?? []);
@@ -317,38 +325,50 @@ function switchClusterVariant(deck: TierListRow): void {
         </div>
       </section>
 
-      <section class="TierPage_FilterBar" aria-label="榜单筛选">
-        <label>
-          势力
-          <select v-model="factionFilter">
-            <option value="all">全部势力</option>
-            <option v-for="faction in factions" :key="faction" :value="faction">{{ factionLabel(faction) }}</option>
-          </select>
-        </label>
-        <label>
-          命名来源
-          <select v-model="sourceFilter">
-            <option value="all">全部来源</option>
-            <option value="single">{{ sourceLabels.single }}</option>
-            <option value="combo">{{ sourceLabels.combo }}</option>
-            <option value="type">{{ sourceLabels.type }}</option>
-          </select>
-        </label>
-        <label>
-          排序
-          <select v-model="sortKey">
-            <option v-for="option in sortOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-          </select>
-        </label>
+      <section class="TierPage_FilterBar" :class="{ TierPage_FilterBar_Open: mobileFiltersOpen }" aria-label="榜单筛选">
         <button
-          class="TierPage_ClusterToggle"
+          class="TierPage_FilterSummary"
           type="button"
-          :aria-pressed="clusterSameName"
-          @click="clusterSameName = !clusterSameName"
+          aria-controls="TierPage_FilterControls"
+          :aria-expanded="mobileFiltersOpen"
+          @click="mobileFiltersOpen = !mobileFiltersOpen"
         >
-          同名聚类
+          <span>筛选 / 排序</span>
+          <strong>{{ filterCountLabel }}</strong>
         </button>
-        <span class="TierPage_FilterCount">{{ filterCountLabel }}</span>
+        <div id="TierPage_FilterControls" class="TierPage_FilterControls">
+          <label>
+            势力
+            <select v-model="factionFilter">
+              <option value="all">全部势力</option>
+              <option v-for="faction in factions" :key="faction" :value="faction">{{ factionLabel(faction) }}</option>
+            </select>
+          </label>
+          <label>
+            命名来源
+            <select v-model="sourceFilter">
+              <option value="all">全部来源</option>
+              <option value="single">{{ sourceLabels.single }}</option>
+              <option value="combo">{{ sourceLabels.combo }}</option>
+              <option value="type">{{ sourceLabels.type }}</option>
+            </select>
+          </label>
+          <label>
+            排序
+            <select v-model="sortKey">
+              <option v-for="option in sortOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+          </label>
+          <button
+            class="TierPage_ClusterToggle"
+            type="button"
+            :aria-pressed="clusterSameName"
+            @click="clusterSameName = !clusterSameName"
+          >
+            同名聚类
+          </button>
+          <span class="TierPage_FilterCount">{{ filterCountLabel }}</span>
+        </div>
       </section>
 
       <section class="Common_TableCard TierPage_TableCard" aria-labelledby="TierPage_Table_Title">
@@ -439,7 +459,15 @@ function switchClusterVariant(deck: TierListRow): void {
           <article v-for="(deck, index) in renderedRows" :key="`${displayRowKey(deck)}-mobile`" class="TierPage_MobileRow">
             <div class="TierPage_MobileHead">
               <span class="Common_RankCell">#{{ index + 1 }}</span>
-              <CommonImageFrame :src="deckImageUrl(deck)" :alt="deckImageAlt(deck)" :card="deckImageCard(deck)" show-details density="full" ratio="portrait" />
+              <CommonImageFrame
+                v-if="!compactMobileViewport"
+                :src="deckImageUrl(deck)"
+                :alt="deckImageAlt(deck)"
+                :card="deckImageCard(deck)"
+                show-details
+                density="full"
+                ratio="portrait"
+              />
               <div>
                 <div class="TierPage_MobileTitleLine">
                   <h3>{{ deck.deckName }}</h3>
@@ -465,15 +493,28 @@ function switchClusterVariant(deck: TierListRow): void {
               <span><b>{{ percent(deck.usageRate) }}</b>使用率</span>
               <span><b>{{ integer(deck.sampleSize) }}</b>样本</span>
             </div>
-            <button
-              class="TierPage_ConfigToggle"
-              type="button"
-              :aria-expanded="isDeckExpanded(deck)"
-              :aria-controls="deckConfigPanelId(deck)"
-              @click="toggleDeckConfig(deck)"
-            >
-              {{ isDeckExpanded(deck) ? "收起配置" : "配置详情" }}
-            </button>
+            <div class="TierPage_MobileDeckSection">
+              <span>核心构成</span>
+              <CommonDeckRail
+                :cards="deckSlots(deck)"
+                :rail-class="compactMobileViewport ? 'Common_DeckRail Common_DeckRail_Mobile Common_DeckRail_TierCompact' : 'Common_DeckRail Common_DeckRail_Mobile'"
+                :show-card-details="!compactMobileViewport"
+                :show-card-overlays="compactMobileViewport"
+                :card-density="compactMobileViewport ? 'mini' : 'compact'"
+              />
+            </div>
+            <div class="TierPage_MobileActions">
+              <button
+                class="TierPage_ConfigToggle"
+                type="button"
+                :aria-expanded="isDeckExpanded(deck)"
+                :aria-controls="deckConfigPanelId(deck)"
+                @click="toggleDeckConfig(deck)"
+              >
+                {{ isDeckExpanded(deck) ? "收起配置" : "配置详情" }}
+              </button>
+              <CommonMetricTags :tags="deck.evidenceTags" />
+            </div>
             <TierPageDeckConfigPanel
               v-if="isDeckExpanded(deck) && deckConfigFor(deck)"
               :id="deckConfigPanelId(deck)"
@@ -483,11 +524,6 @@ function switchClusterVariant(deck: TierListRow): void {
             <section v-else-if="isDeckExpanded(deck)" class="Common_StatusPanel TierPage_ConfigStatus">
               {{ deckConfigError(deck) || (isDeckConfigLoading(deck) ? "正在读取配置情报..." : "配置情报读取失败") }}
             </section>
-            <div class="TierPage_MobileDeckSection">
-              <span>核心构成</span>
-              <CommonDeckRail :cards="deckSlots(deck)" rail-class="Common_DeckRail Common_DeckRail_Mobile" />
-            </div>
-            <CommonMetricTags :tags="deck.evidenceTags" />
           </article>
         </div>
         <div v-if="hasMoreRows" class="TierPage_LoadMore">
@@ -599,6 +635,14 @@ function switchClusterVariant(deck: TierListRow): void {
   align-items: center;
   justify-content: flex-start;
   gap: 14px;
+}
+
+.TierPage_FilterSummary {
+  display: none;
+}
+
+.TierPage_FilterControls {
+  display: contents;
 }
 
 /* 单个筛选控件标签。 */
@@ -844,6 +888,11 @@ function switchClusterVariant(deck: TierListRow): void {
   background: #fff4d9;
 }
 
+.TierPage_MobileActions {
+  display: grid;
+  gap: 8px;
+}
+
 /* 配置详情展开行：不新增表格列，只承载附属统计。 */
 .TierPage_ConfigRow td {
   padding-top: 0;
@@ -992,6 +1041,12 @@ function switchClusterVariant(deck: TierListRow): void {
     padding: 14px var(--space-md);
   }
 
+  .TierPage_FilterControls {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
   /* 手机筛选标签间距。 */
   .TierPage_FilterBar label {
     gap: 4px;
@@ -1035,6 +1090,199 @@ function switchClusterVariant(deck: TierListRow): void {
 
   .TierPage_ConfigToggle {
     margin-top: 0;
+  }
+}
+
+@media (max-width: 430px) {
+  .TierPage {
+    padding-top: 8px;
+  }
+
+  .TierPage_Hero {
+    padding: 12px;
+    gap: 8px;
+  }
+
+  .TierPage_Hero h1 {
+    font-size: 28px;
+  }
+
+  .TierPage_MetaLine {
+    gap: 4px 10px;
+  }
+
+  .TierPage_MetaLine span {
+    font-size: 12px;
+  }
+
+  .TierPage_Leader {
+    padding: 8px;
+  }
+
+  .TierPage_Leader strong {
+    font-size: 16px;
+  }
+
+  .TierPage_Leader em {
+    font-size: 18px;
+  }
+
+  .TierPage_FilterBar {
+    min-height: 0;
+    margin-top: 12px;
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .TierPage_FilterSummary {
+    min-height: 36px;
+    padding: 0 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border: 1px solid rgba(185, 133, 36, 0.58);
+    color: #76521c;
+    background: #fff4d9;
+    font-family: var(--font-control);
+    font-size: 13px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .TierPage_FilterSummary strong {
+    color: var(--color-primary);
+    font-family: var(--font-number);
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
+  .TierPage_FilterControls {
+    display: none;
+  }
+
+  .TierPage_FilterBar_Open .TierPage_FilterControls {
+    display: flex;
+  }
+
+  .TierPage_FilterBar select {
+    height: 32px;
+  }
+
+  .TierPage_ClusterToggle {
+    height: 32px;
+  }
+
+  .TierPage_TableCard {
+    margin-top: 12px;
+    padding: 12px 10px;
+  }
+
+  .TierPage_TableCard .Common_SectionHeading.Common_SectionHeading_Compact {
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+  }
+
+  .TierPage_MobileList {
+    gap: 6px;
+  }
+
+  .TierPage_MobileRow {
+    gap: 6px;
+    padding: 7px;
+  }
+
+  .TierPage_MobileHead {
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+  }
+
+  .TierPage_MobileHead .Common_RankCell {
+    font-size: 20px;
+  }
+
+  .TierPage_MobileHead :deep(.Common_ImageFrame) {
+    width: 38px;
+  }
+
+  .TierPage_MobileTitleLine {
+    gap: 6px;
+  }
+
+  .TierPage_MobileRow h3 {
+    margin-bottom: 2px;
+    font-size: 16px;
+    line-height: 1.18;
+  }
+
+  .TierPage_MobileRow p {
+    margin-bottom: 0;
+    font-size: 12px;
+    line-height: 1.2;
+  }
+
+  .TierPage_MobileHead small {
+    margin-top: 2px;
+    font-size: 11px;
+    line-height: 1.15;
+  }
+
+  .TierPage_MobileMetricGrid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  .TierPage_MobileMetricGrid span {
+    padding: 5px 4px;
+    font-size: 10px;
+    line-height: 1.05;
+    text-align: center;
+  }
+
+  .TierPage_MobileMetricGrid b {
+    margin-bottom: 1px;
+    font-size: 14px;
+  }
+
+  .TierPage_MobileDeckSection > span {
+    margin-bottom: 2px;
+    font-size: 11px;
+  }
+
+  .TierPage_MobileActions {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .TierPage_ConfigToggle {
+    width: auto;
+    min-height: 28px;
+    margin-top: 0;
+    padding: 0 8px;
+    flex: 0 0 auto;
+    font-size: 11px;
+  }
+
+  .TierPage_MobileActions :deep(.Common_MetricTags) {
+    min-width: 0;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
+
+  .TierPage_MobileActions :deep(.Common_MetricTags_Item) {
+    min-width: 0;
+    min-height: 26px;
+    justify-content: center;
+    padding: 0 3px;
+    overflow: hidden;
+    font-size: 10px;
+    text-overflow: ellipsis;
   }
 }
 </style>

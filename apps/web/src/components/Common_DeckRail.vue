@@ -107,4 +107,17 @@ withDefaults(defineProps<{
     grid-template-columns: repeat(4, var(--Common_DeckRail_SlotWidth));
   }
 }
+
+@media (max-width: 430px) {
+  .Common_DeckRail_TierCompact {
+    --Common_DeckRail_SlotHeight: 51px;
+
+    width: 100%;
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    grid-auto-rows: var(--Common_DeckRail_SlotHeight);
+    gap: 3px;
+    padding: 4px;
+    overflow: hidden;
+  }
+}
 </style>
