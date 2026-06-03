@@ -8,6 +8,7 @@ import MainRepresentativeDecksSection from "./components/Main_RepresentativeDeck
 import MainFeaturedCardsSection from "./components/Main_FeaturedCards_Section.vue";
 import { dateOnly, integer } from "./lib/format";
 import { loadSnapshot } from "./lib/snapshot";
+import { trackPageView } from "./lib/siteAnalytics";
 import type { LeaderboardSnapshot } from "./types";
 
 const snapshot = ref<LeaderboardSnapshot | null>(null);
@@ -15,6 +16,7 @@ const loading = ref(true);
 const error = ref("");
 
 onMounted(async () => {
+  trackPageView("leaderboard");
   try {
     snapshot.value = await loadSnapshot();
   } catch (caught) {

@@ -182,6 +182,7 @@ start_leaderboard_node_api() {
     --name "$DEPLOY_NODE_API_CONTAINER" \
     --network "$network_name" \
     -v "$DEPLOY_PATH:/work:ro" \
+    -v "$DEPLOY_PATH/$DATA_ROOT:/work/$DATA_ROOT:rw" \
     -w /work \
     -e HOST=0.0.0.0 \
     -e "PORT=$DEPLOY_NODE_API_PORT" \
@@ -190,6 +191,8 @@ start_leaderboard_node_api() {
     -e LEADERBOARD_MATCH_SEARCH_INDEX_FILE=/work/apps/api/data/match-search-index.json \
     -e LEADERBOARD_TIER_LIST_SNAPSHOT_FILE=/work/apps/api/data/tier-list-snapshot.json \
     -e LEADERBOARD_TIER_LIST_CONFIGS_FILE=/work/apps/api/data/tier-list-configs.json \
+    -e SITE_ANALYTICS_FILE=/work/apps/api/data/site-analytics-events.jsonl \
+    -e "SITE_ANALYTICS_ADMIN_TOKEN=${SITE_ANALYTICS_ADMIN_TOKEN:-}" \
     node:22-alpine node apps/api/leaderboard-snapshot/server.mjs >/dev/null
 }
 
@@ -349,6 +352,28 @@ smoke_check_api_routes() {
   curl -fsS -X POST "$base/api/match-search" \
     -H 'Content-Type: application/json' \
     -d '{"sideA":{"result":"win"},"pageSize":1}' >/dev/null || fail 'match search api is not live'
+  curl -fsS -X POST "$base/api/site-analytics-event" \
+    -H 'Content-Type: application/json' \
+    -d '{"visitorId":"visitor_deploy_smoke","sessionId":"session_deploy_smoke","eventType":"page_view","page":"/deploy-smoke","target":"deploy","deviceType":"unknown","viewport":{"width":0,"height":0},"occurredAt":"2026-06-03T00:00:00.000Z"}' >/dev/null || fail 'site analytics event api is not live'
+  local analytics_status
+  analytics_status="$(curl -sS -o /dev/null -w '%{http_code}' "$base/api/site-analytics-summary")"
+  case "$analytics_status" in
+    401|503) ;;
+    *) fail 'site analytics summary auth check failed' ;;
+  esac
+  if [ -n "${SITE_ANALYTICS_ADMIN_TOKEN:-}" ]; then
+    SITE_ANALYTICS_SUMMARY_URL="$base/api/site-analytics-summary" python3 - <<'PY' || fail 'site analytics summary api is not live'
+import os
+import urllib.request
+
+request = urllib.request.Request(
+    os.environ["SITE_ANALYTICS_SUMMARY_URL"],
+    headers={"Authorization": "Bearer " + os.environ.get("SITE_ANALYTICS_ADMIN_TOKEN", "")},
+)
+with urllib.request.urlopen(request, timeout=30) as response:
+    response.read()
+PY
+  fi
   smoke_check_run_consistency
 }
 
@@ -361,6 +386,7 @@ smoke_check_live_routes() {
   curl -fsS "$base/leaderboard-status/" >/dev/null || fail 'leaderboard status page is not live'
   curl -fsS "$base/tier-list/" >/dev/null || fail 'tier list page is not live'
   curl -fsS "$base/match-search/" >/dev/null || fail 'match search page is not live'
+  curl -fsS "$base/admin-stats/" >/dev/null || fail 'admin stats page is not live'
 }
 
 refresh_public_run() {

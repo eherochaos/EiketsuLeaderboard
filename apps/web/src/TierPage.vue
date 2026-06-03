@@ -6,6 +6,7 @@ import CommonImageFrame from "./components/Common_ImageFrame.vue";
 import CommonMetricTags from "./components/Common_MetricTags.vue";
 import TierPageDeckConfigPanel from "./components/TierPage_DeckConfigPanel.vue";
 import { dateOnly, integer, percent, sourceLabels } from "./lib/format";
+import { trackPageView, trackSiteEvent } from "./lib/siteAnalytics";
 import { loadTierListDeckConfig, loadTierListSnapshot } from "./lib/tierList";
 import type { CardView, DeckConfigStats, TierListClusterVariant, TierListRow, TierListScope, TierListSnapshot } from "./types";
 
@@ -52,6 +53,7 @@ function updateViewportMode(): void {
 }
 
 onMounted(async () => {
+  trackPageView("tier-list");
   mobileMediaQuery = window.matchMedia("(max-width: 760px)");
   updateViewportMode();
   mobileMediaQuery.addEventListener("change", updateViewportMode);
@@ -118,6 +120,12 @@ const topDeck = computed(() => visibleRows.value[0] ?? null);
 
 watch([factionFilter, sourceFilter, sortKey, clusterSameName], () => {
   visibleRowLimit.value = INITIAL_VISIBLE_ROWS;
+  trackSiteEvent("filter_change", "tier-list", {
+    faction: factionFilter.value,
+    source: sourceFilter.value,
+    sortKey: sortKey.value,
+    clusterSameName: clusterSameName.value,
+  });
 });
 
 function deckStateKey(deck: TierListRow): string {
@@ -189,6 +197,11 @@ async function toggleDeckConfig(deck: TierListRow): Promise<void> {
     next.delete(key);
   } else {
     next.add(key);
+    trackSiteEvent("deck_config_open", "tier-list", {
+      scope: deckConfigScope(),
+      deckId: deck.deckId,
+      deckName: deck.deckName,
+    });
     void ensureDeckConfig(deck);
   }
   expandedDeckIds.value = next;

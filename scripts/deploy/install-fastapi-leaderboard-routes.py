@@ -54,6 +54,7 @@ ROUTE_BLOCK = f"""
                 ("accept-encoding", "Accept-Encoding"),
                 ("if-none-match", "If-None-Match"),
                 ("if-modified-since", "If-Modified-Since"),
+                ("authorization", "Authorization"),
             ):
                 value = forward_headers.get(source_name)
                 if value:
@@ -88,6 +89,14 @@ ROUTE_BLOCK = f"""
             raise HTTPException(status_code=404, detail="static file not found")
         return FileResponse(path, media_type="text/html; charset=utf-8")
 
+    @app.get("/admin-stats")
+    @app.get("/admin-stats/")
+    def admin_stats_page():
+        path = _codex_leaderboard_frontend_root() / "admin-stats" / "index.html"
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="static file not found")
+        return FileResponse(path, media_type="text/html; charset=utf-8")
+
     @app.get("/api/leaderboard-refresh-status")
     def api_leaderboard_refresh_status(request: _CodexRequest):
         return _codex_proxy_leaderboard_node_api("/api/leaderboard-refresh-status", forward_headers=request.headers)
@@ -117,6 +126,20 @@ ROUTE_BLOCK = f"""
         body = await request.body()
         content_type = request.headers.get("content-type") or "application/json"
         return _codex_proxy_leaderboard_node_api("/api/match-search", method="POST", body=body, content_type=content_type)
+
+    @app.post("/api/site-analytics-event")
+    async def api_site_analytics_event(request: _CodexRequest):
+        body = await request.body()
+        content_type = request.headers.get("content-type") or "application/json"
+        return _codex_proxy_leaderboard_node_api("/api/site-analytics-event", method="POST", body=body, content_type=content_type)
+
+    @app.get("/api/site-analytics-summary")
+    def api_site_analytics_summary(request: _CodexRequest):
+        query = request.url.query
+        path = "/api/site-analytics-summary"
+        if query:
+            path = f"{{path}}?{{query}}"
+        return _codex_proxy_leaderboard_node_api(path, forward_headers=request.headers)
     {END_MARKER}
 """
 

@@ -32,9 +32,19 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn("/api/tier-list-deck-config?scope=deck&deckId=", api_smoke)
         self.assertIn("/api/match-search-options", api_smoke)
         self.assertIn("-X POST \"$base/api/match-search\"", api_smoke)
+        self.assertIn("-X POST \"$base/api/site-analytics-event\"", api_smoke)
+        self.assertIn("$base/api/site-analytics-summary", api_smoke)
         self.assertIn("smoke_check_run_consistency", api_smoke)
         self.assertIn("/tier-list/", live_smoke)
+        self.assertIn("/admin-stats/", live_smoke)
         self.assertNotIn("/api/tier-list-snapshot", live_smoke)
+
+    def test_node_api_has_writable_analytics_data_mount(self) -> None:
+        start_node = self.function_body("start_leaderboard_node_api")
+        self.assertIn('-v "$DEPLOY_PATH:/work:ro"', start_node)
+        self.assertIn('-v "$DEPLOY_PATH/$DATA_ROOT:/work/$DATA_ROOT:rw"', start_node)
+        self.assertIn("SITE_ANALYTICS_FILE=/work/apps/api/data/site-analytics-events.jsonl", start_node)
+        self.assertIn('SITE_ANALYTICS_ADMIN_TOKEN=${SITE_ANALYTICS_ADMIN_TOKEN:-}', start_node)
 
     def test_api_smoke_checks_public_run_consistency(self) -> None:
         consistency = self.function_body("smoke_check_run_consistency")

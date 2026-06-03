@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { trackSiteEvent } from "../lib/siteAnalytics";
+
 const props = defineProps<{
-  current: "home" | "tier" | "status" | "matchSearch";
+  current: "home" | "tier" | "status" | "matchSearch" | "adminStats";
 }>();
 
 const navItems = [
@@ -9,12 +11,16 @@ const navItems = [
   { key: "matchSearch", label: "对局搜索", href: "/match-search/" },
   { key: "status", label: "数据状态", href: "/leaderboard-status/" }
 ] as const;
+
+function trackNavClick(key: string, href: string): void {
+  trackSiteEvent("nav_click", key, { href });
+}
 </script>
 
 <template>
   <header class="Common_Header">
     <nav class="Common_Header_Nav" aria-label="主要导航">
-      <a class="Common_Header_Brand" href="/leaderboard/">
+      <a class="Common_Header_Brand" href="/leaderboard/" @click="trackNavClick('brand', '/leaderboard/')">
         <span class="Common_Header_BrandSymbol" aria-hidden="true"></span>
         <span>Eiketsu Leaderboard</span>
       </a>
@@ -25,6 +31,7 @@ const navItems = [
           :key="item.key"
           class="Common_NavPrimary"
           :href="item.href"
+          @click="trackNavClick(item.key, item.href)"
         >
           {{ item.label }}
         </a>

@@ -4,6 +4,11 @@ import { readFile, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { MatchSearchRequestError, matchSearchOptions, searchMatchIndex } from "./match-search-index.mjs";
+import {
+  SiteAnalyticsRequestError,
+  appendSiteAnalyticsEvent,
+  readSiteAnalyticsSummary
+} from "./site-analytics.mjs";
 
 const DEFAULT_PORT = 8001;
 const DEFAULT_SNAPSHOT_FILE = resolve("apps/api/data/leaderboard-snapshot.json");
@@ -11,6 +16,7 @@ const DEFAULT_STATUS_FILE = resolve("apps/api/data/leaderboard-refresh-status.js
 const DEFAULT_MATCH_SEARCH_INDEX_FILE = resolve("apps/api/data/match-search-index.json");
 const DEFAULT_TIER_LIST_SNAPSHOT_FILE = resolve("apps/api/data/tier-list-snapshot.json");
 const DEFAULT_TIER_LIST_CONFIGS_FILE = resolve("apps/api/data/tier-list-configs.json");
+const DEFAULT_SITE_ANALYTICS_FILE = resolve("apps/api/data/site-analytics-events.jsonl");
 
 function jsonHeaders(extra = {}) {
   return {
@@ -123,13 +129,13 @@ function createParsedJsonFileCache(filePath) {
   return { clear, load };
 }
 
-async function readJsonBody(request) {
+async function readJsonBody(request, maxBytes = 64 * 1024, RequestError = MatchSearchRequestError) {
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > 64 * 1024) {
-      throw new MatchSearchRequestError("request body is too large");
+    if (size > maxBytes) {
+      throw new RequestError("request body is too large");
     }
     chunks.push(chunk);
   }
@@ -139,8 +145,14 @@ async function readJsonBody(request) {
   try {
     return JSON.parse(text);
   } catch {
-    throw new MatchSearchRequestError("request body must be valid JSON");
+    throw new RequestError("request body must be valid JSON");
   }
+}
+
+function bearerToken(request) {
+  const header = String(request.headers.authorization || "");
+  const match = /^Bearer\s+(.+)$/i.exec(header);
+  return match ? match[1].trim() : "";
 }
 
 export function createLeaderboardSnapshotServer(options = {}) {
@@ -149,6 +161,8 @@ export function createLeaderboardSnapshotServer(options = {}) {
   const matchSearchIndexFile = resolve(options.matchSearchIndexFile || DEFAULT_MATCH_SEARCH_INDEX_FILE);
   const tierListSnapshotFile = resolve(options.tierListSnapshotFile || DEFAULT_TIER_LIST_SNAPSHOT_FILE);
   const tierListConfigsFile = resolve(options.tierListConfigsFile || DEFAULT_TIER_LIST_CONFIGS_FILE);
+  const siteAnalyticsFile = resolve(options.siteAnalyticsFile || DEFAULT_SITE_ANALYTICS_FILE);
+  const siteAnalyticsAdminToken = String(options.siteAnalyticsAdminToken || "");
   const snapshotCache = createStaticJsonFileCache(snapshotFile);
   const statusCache = createJsonFileCache(statusFile);
   const matchSearchIndexCache = createParsedJsonFileCache(matchSearchIndexFile);
@@ -292,6 +306,43 @@ export function createLeaderboardSnapshotServer(options = {}) {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/api/site-analytics-event") {
+      try {
+        const payload = await readJsonBody(request, 16 * 1024, SiteAnalyticsRequestError);
+        await appendSiteAnalyticsEvent(siteAnalyticsFile, payload);
+        response.writeHead(204);
+        response.end();
+      } catch (error) {
+        const isBadRequest = error instanceof SiteAnalyticsRequestError;
+        writeJson(response, isBadRequest ? 400 : 500, {
+          error: isBadRequest ? error.message : "site analytics failed"
+        });
+      }
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/site-analytics-summary") {
+      if (!siteAnalyticsAdminToken) {
+        writeJson(response, 503, { error: "site analytics admin token is not configured" });
+        return;
+      }
+      if (bearerToken(request) !== siteAnalyticsAdminToken) {
+        writeJson(response, 401, { error: "site analytics authorization is required" });
+        return;
+      }
+
+      try {
+        writeJson(response, 200, await readSiteAnalyticsSummary(siteAnalyticsFile, {
+          from: url.searchParams.get("from") || "",
+          to: url.searchParams.get("to") || ""
+        }));
+      } catch (error) {
+        console.error(publicError(error, "site analytics failed"));
+        writeJson(response, 500, { error: "site analytics failed" });
+      }
+      return;
+    }
+
     writeJson(response, 404, { error: "not found" });
   });
 
@@ -315,12 +366,18 @@ export function startLeaderboardSnapshotServer(options = {}) {
   const tierListConfigsFile = options.tierListConfigsFile || env.LEADERBOARD_TIER_LIST_CONFIGS_FILE || (
     snapshotFile ? resolve(dirname(resolve(snapshotFile)), "tier-list-configs.json") : undefined
   );
+  const siteAnalyticsFile = options.siteAnalyticsFile || env.SITE_ANALYTICS_FILE || (
+    snapshotFile ? resolve(dirname(resolve(snapshotFile)), "site-analytics-events.jsonl") : undefined
+  );
+  const siteAnalyticsAdminToken = options.siteAnalyticsAdminToken || env.SITE_ANALYTICS_ADMIN_TOKEN || "";
   const server = createLeaderboardSnapshotServer({
     snapshotFile,
     statusFile,
     matchSearchIndexFile,
     tierListSnapshotFile,
-    tierListConfigsFile
+    tierListConfigsFile,
+    siteAnalyticsFile,
+    siteAnalyticsAdminToken
   });
 
   server.listen(port, host, () => {
