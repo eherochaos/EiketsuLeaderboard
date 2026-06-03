@@ -15,6 +15,12 @@ concurrency:
 
 jobs:
   production:
+    if: >-
+      github.repository == 'eherochaos/EiketsuLeaderboard' &&
+      (
+        (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+        github.event_name == 'workflow_dispatch'
+      )
     runs-on: [self-hosted, linux, eiketsu-prod]
     environment: production
     env:
