@@ -362,7 +362,7 @@ smoke_check_api_routes() {
     *) fail 'site analytics summary auth check failed' ;;
   esac
   if [ -n "${SITE_ANALYTICS_ADMIN_TOKEN:-}" ]; then
-    SITE_ANALYTICS_SUMMARY_URL="$base/api/site-analytics-summary" python3 - <<'PY' || fail 'site analytics summary api is not live'
+    SITE_ANALYTICS_SUMMARY_URL="$base/api/site-analytics-summary" SITE_ANALYTICS_ADMIN_TOKEN="$SITE_ANALYTICS_ADMIN_TOKEN" python3 - <<'PY' || fail 'site analytics summary api is not live'
 import os
 import urllib.request
 

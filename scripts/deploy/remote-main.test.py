@@ -45,6 +45,8 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn('-v "$DEPLOY_PATH/$DATA_ROOT:/work/$DATA_ROOT:rw"', start_node)
         self.assertIn("SITE_ANALYTICS_FILE=/work/apps/api/data/site-analytics-events.jsonl", start_node)
         self.assertIn('SITE_ANALYTICS_ADMIN_TOKEN=${SITE_ANALYTICS_ADMIN_TOKEN:-}', start_node)
+        api_smoke = self.function_body("smoke_check_api_routes")
+        self.assertIn('SITE_ANALYTICS_ADMIN_TOKEN="$SITE_ANALYTICS_ADMIN_TOKEN" python3', api_smoke)
 
     def test_site_analytics_token_is_decoded_from_deploy_workflow(self) -> None:
         self.assertIn('SITE_ANALYTICS_ADMIN_TOKEN="$(decode_env "${SITE_ANALYTICS_ADMIN_TOKEN_B64:-}")"', self.text)

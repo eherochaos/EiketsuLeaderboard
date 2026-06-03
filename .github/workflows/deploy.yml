@@ -15,15 +15,10 @@ concurrency:
 
 jobs:
   production:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, eiketsu-prod]
     environment: production
     env:
-      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
-      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-      DEPLOY_SSH_KEY_B64: ${{ secrets.DEPLOY_SSH_KEY_B64 }}
-      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/home/ubuntu/EiketsuLeaderboard' }}
       DEPLOY_EXPORT_POSTGRES: ${{ secrets.DEPLOY_EXPORT_POSTGRES || '1' }}
       DEPLOY_EXPORT_CONTAINER: ${{ secrets.DEPLOY_EXPORT_CONTAINER || 'eiketsu-env-db-api-1' }}
       DEPLOY_EXPORT_ASSET_ROOT: ${{ secrets.DEPLOY_EXPORT_ASSET_ROOT || '/home/ubuntu/eiketsu-env-db/assets' }}
@@ -31,8 +26,9 @@ jobs:
       DEPLOY_FASTAPI_FRONTEND_ROOT: ${{ secrets.DEPLOY_FASTAPI_FRONTEND_ROOT || '/app/frontend/eiketsu-leaderboard' }}
       DEPLOY_LIVE_FRONTEND_ROOT: ${{ secrets.DEPLOY_LIVE_FRONTEND_ROOT || '/home/ubuntu/eiketsu-env-db/frontend/eiketsu-leaderboard' }}
       DEPLOY_LIVE_SNAPSHOT_FILE: ${{ secrets.DEPLOY_LIVE_SNAPSHOT_FILE || '/home/ubuntu/eiketsu-leaderboard-data/snapshots/leaderboard-snapshot.json' }}
+      DEPLOY_LIVE_STATUS_FILE: ${{ secrets.DEPLOY_LIVE_STATUS_FILE }}
       DEPLOY_RESTART_COMMAND: ${{ secrets.DEPLOY_RESTART_COMMAND }}
-      DEPLOY_PUBLIC_URL_BASE: ${{ secrets.DEPLOY_PUBLIC_URL_BASE }}
+      DEPLOY_PUBLIC_URL_BASE: ${{ secrets.DEPLOY_PUBLIC_URL_BASE || 'http://127.0.0.1:8000' }}
       SITE_ANALYTICS_ADMIN_TOKEN: ${{ secrets.SITE_ANALYTICS_ADMIN_TOKEN }}
 
     steps:
@@ -46,30 +42,15 @@ jobs:
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
 
-      - name: Pack deploy source
-        run: |
-          tar \
-            --exclude='.git' \
-            --exclude='apps/api/data' \
-            --exclude='apps/web/dist' \
-            --exclude='apps/web/node_modules' \
-            --exclude='apps/web/npm-cache' \
-            --exclude='node_modules' \
-            -czf "$RUNNER_TEMP/eiketsu-deploy-source.tgz" .
-
-      - name: Check deploy secrets
+      - name: Check deploy config
         run: |
           missing=0
-          for name in DEPLOY_HOST DEPLOY_PORT DEPLOY_USER DEPLOY_PATH; do
+          for name in DEPLOY_PATH; do
             if [ -z "${!name}" ]; then
               echo "$name is missing"
               missing=1
             fi
           done
-          if [ -z "$DEPLOY_SSH_KEY" ] && [ -z "$DEPLOY_SSH_KEY_B64" ]; then
-            echo "DEPLOY_SSH_KEY or DEPLOY_SSH_KEY_B64 is missing"
-            missing=1
-          fi
           case "$DEPLOY_EXPORT_POSTGRES" in
             0|1) ;;
             *)
@@ -77,6 +58,9 @@ jobs:
               missing=1
               ;;
           esac
+          if [ -z "$SITE_ANALYTICS_ADMIN_TOKEN" ]; then
+            echo "SITE_ANALYTICS_ADMIN_TOKEN is not set; /admin-stats/ summary will return 503"
+          fi
           exit "$missing"
 
       - name: Install web dependencies
@@ -91,46 +75,15 @@ jobs:
         working-directory: apps/web
         run: npm run build
 
-      - name: Pack web dist
-        run: tar -C apps/web/dist -czf "$RUNNER_TEMP/eiketsu-web-dist.tgz" .
-
-      - name: Prepare SSH
-        run: |
-          install -m 700 -d ~/.ssh
-          if [ -n "$DEPLOY_SSH_KEY_B64" ]; then
-            printf '%s' "$DEPLOY_SSH_KEY_B64" | base64 --decode > ~/.ssh/deploy_key
-          else
-            printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
-          fi
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keygen -y -f ~/.ssh/deploy_key > /dev/null
-          ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
-
-      - name: Upload deploy archives
-        run: |
-          scp -P "$DEPLOY_PORT" -i ~/.ssh/deploy_key "$RUNNER_TEMP/eiketsu-deploy-source.tgz" "$RUNNER_TEMP/eiketsu-web-dist.tgz" "$DEPLOY_USER@$DEPLOY_HOST:/tmp/"
-
-      - name: Deploy on server
-        run: |
-          DEPLOY_PATH_B64="$(printf '%s' "$DEPLOY_PATH" | base64 -w 0)"
-          DEPLOY_EXPORT_CONTAINER_B64="$(printf '%s' "$DEPLOY_EXPORT_CONTAINER" | base64 -w 0)"
-          DEPLOY_EXPORT_ASSET_ROOT_B64="$(printf '%s' "$DEPLOY_EXPORT_ASSET_ROOT" | base64 -w 0)"
-          DEPLOY_FASTAPI_CONTAINER_B64="$(printf '%s' "$DEPLOY_FASTAPI_CONTAINER" | base64 -w 0)"
-          DEPLOY_FASTAPI_FRONTEND_ROOT_B64="$(printf '%s' "$DEPLOY_FASTAPI_FRONTEND_ROOT" | base64 -w 0)"
-          DEPLOY_LIVE_FRONTEND_ROOT_B64="$(printf '%s' "$DEPLOY_LIVE_FRONTEND_ROOT" | base64 -w 0)"
-          DEPLOY_LIVE_SNAPSHOT_FILE_B64="$(printf '%s' "$DEPLOY_LIVE_SNAPSHOT_FILE" | base64 -w 0)"
-          DEPLOY_RESTART_COMMAND_B64="$(printf '%s' "$DEPLOY_RESTART_COMMAND" | base64 -w 0)"
-          SITE_ANALYTICS_ADMIN_TOKEN_B64="$(printf '%s' "$SITE_ANALYTICS_ADMIN_TOKEN" | base64 -w 0)"
-          ssh -p "$DEPLOY_PORT" -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
-            "DEPLOY_PATH_B64=$DEPLOY_PATH_B64 DEPLOY_EXPORT_POSTGRES=$DEPLOY_EXPORT_POSTGRES DEPLOY_EXPORT_CONTAINER_B64=$DEPLOY_EXPORT_CONTAINER_B64 DEPLOY_EXPORT_ASSET_ROOT_B64=$DEPLOY_EXPORT_ASSET_ROOT_B64 DEPLOY_FASTAPI_CONTAINER_B64=$DEPLOY_FASTAPI_CONTAINER_B64 DEPLOY_FASTAPI_FRONTEND_ROOT_B64=$DEPLOY_FASTAPI_FRONTEND_ROOT_B64 DEPLOY_LIVE_FRONTEND_ROOT_B64=$DEPLOY_LIVE_FRONTEND_ROOT_B64 DEPLOY_LIVE_SNAPSHOT_FILE_B64=$DEPLOY_LIVE_SNAPSHOT_FILE_B64 DEPLOY_RESTART_COMMAND_B64=$DEPLOY_RESTART_COMMAND_B64 SITE_ANALYTICS_ADMIN_TOKEN_B64=$SITE_ANALYTICS_ADMIN_TOKEN_B64 bash -s" \
-            < scripts/deploy/remote-main.sh
+      - name: Deploy on self-hosted server
+        run: bash scripts/deploy/self-hosted-main.sh
 
       - name: Smoke public deployment
         run: |
-          public_base="${DEPLOY_PUBLIC_URL_BASE:-http://$DEPLOY_HOST:8000}"
-          public_base="${public_base%/}"
+          public_base="${DEPLOY_PUBLIC_URL_BASE%/}"
           snapshot_file="$RUNNER_TEMP/tier-list-snapshot.json"
           curl -fsS "$public_base/api/tier-list-snapshot" -o "$snapshot_file"
           deck_id="$(node -e 'const fs = require("fs"); const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); const row = (data.tierRows || [])[0]; if (!row || !row.deckId) process.exit(1); console.log(encodeURIComponent(String(row.deckId)));' "$snapshot_file")"
           curl -fsS "$public_base/api/tier-list-deck-config?scope=deck&deckId=$deck_id" >/dev/null
           curl -fsS "$public_base/tier-list/" >/dev/null
+          curl -fsS "$public_base/admin-stats/" >/dev/null
