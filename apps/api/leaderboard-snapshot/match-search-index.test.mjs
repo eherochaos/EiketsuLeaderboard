@@ -94,6 +94,14 @@ async function createFixture(root) {
             skills: ["気合"],
             imageUrl: "https://cards.example.test/snapshot-only.jpg",
             imageAlt: "SnapshotOnly"
+          },
+          {
+            cardId: "card-pl",
+            name: "JeanneAlter",
+            faction: "unknown",
+            cardCode: "PL116",
+            cost: "2.5",
+            unitType: "\u9a0e\u5175"
           }
         ]
       }
@@ -146,6 +154,7 @@ async function createFixture(root) {
   await writeJsonl(join(tableRoot, "match_deck_units.jsonl"), [
     { id: 1, deck_id: 11, slot: 1, card_hash: "card-a" },
     { id: 2, deck_id: 11, slot: 2, card_hash: "card-b" },
+    { id: 9, deck_id: 11, slot: 3, card_hash: "card-pl" },
     { id: 3, deck_id: 12, slot: 1, card_hash: "card-c" },
     { id: 4, deck_id: 12, slot: 2, card_hash: "card-d" },
     { id: 5, deck_id: 21, slot: 1, card_hash: "card-a" },
@@ -171,11 +180,14 @@ async function createFixture(root) {
   });
   await writeJson(join(cardRoot, "datalist_api_base.json"), {
     path: ["card_small,general/card_small/,.jpg?260520a"],
-    general: [officialGeneralRow()],
-    color: ["0,Blue"],
+    general: [
+      officialGeneralRow(),
+      officialGeneralRow({ 0: "card-pl", 1: "card-pl-ds", 2: "card-pl-face", 3: "JeanneAlter", 5: "0", 8: "PL", 12: "116", 13: "2", 15: "1" }),
+    ],
+    color: ["0,\u7384"],
     period: ["0,Edo"],
-    cost: ["0,1.0"],
-    unitType: ["0,Spear"],
+    cost: ["0,1.0", "2,2.5"],
+    unitType: ["0,Spear", "1,\u9a0e\u5175"],
     skill: [],
   });
   return { legacyRoot, snapshotFile };
@@ -194,6 +206,7 @@ async function testBuildIndexAndSearchFilters() {
     assert.equal(index.cards.find((card) => card.cardId === "card-c").imageUrl, "https://image.eiketsu-taisen.net/general/card_small/catalog-card-c.jpg?260520a");
     assert.equal(index.cards.find((card) => card.cardId === "card-b").force, "6");
     assert.equal(index.cards.find((card) => card.cardId === "card-b").intelligence, "3");
+    assert.equal(index.cards.find((card) => card.cardId === "card-pl").faction, "\u7384");
     assert.equal(index.cards.find((card) => card.cardId === "card-g").imageUrl, "https://cards.example.test/snapshot-only.jpg");
     assert.equal(index.cards.find((card) => card.cardId === "card-g").force, "9");
     assert.deepEqual(index.cards.find((card) => card.cardId === "card-g").skills, ["気合"]);

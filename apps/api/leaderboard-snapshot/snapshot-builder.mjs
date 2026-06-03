@@ -280,6 +280,7 @@ function mergeNonEmptyCardData(baseCard, overrideCard) {
   for (const [key, value] of Object.entries(overrideCard || {})) {
     if (value === "" || value === null || value === undefined) continue;
     if (Array.isArray(value) && value.length === 0) continue;
+    if (key === "faction" && String(value).trim() === "unknown") continue;
     merged[key] = value;
   }
   return merged;

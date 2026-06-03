@@ -15,8 +15,10 @@ async function writeJsonl(path, rows) {
   await writeFile(path, rows.map((row) => JSON.stringify(row)).join("\n") + "\n", "utf8");
 }
 
-function card(cardId, cardCode, name) {
+function card(cardId, cardCode, name, extra = {}) {
   return {
+    ...(cardId === "card-b2" ? { faction: "unknown" } : {}),
+    ...extra,
     card_hash: cardId,
     card_code: cardCode,
     force: "",
@@ -26,9 +28,9 @@ function card(cardId, cardCode, name) {
   };
 }
 
-function officialGeneralRow(cardId, name, serial, skillIndexes = []) {
+function officialGeneralRow(cardId, name, serial, skillIndexes = [], overrides = {}) {
   const skills = Array.isArray(skillIndexes) ? skillIndexes : String(skillIndexes || "").split(":").filter(Boolean);
-  return [
+  const fields = [
     cardId,
     `ds-${cardId}`,
     `face-${cardId}`,
@@ -55,7 +57,14 @@ function officialGeneralRow(cardId, name, serial, skillIndexes = []) {
     "0",
     "0",
     "0:4"
-  ].join(",");
+  ];
+  if (cardId === "card-b2") Object.assign(fields, { 8: "PL", 12: "116" });
+  Object.assign(fields, overrides);
+  return fields.join(",");
+}
+
+function unknownFactionCount(payload) {
+  return (JSON.stringify(payload).match(/"faction":"unknown"/g) || []).length;
 }
 
 function deckRow(id, deckId, cards, rank, winCount, lossCount) {
@@ -285,6 +294,11 @@ async function testRefreshWritesAtomicSnapshot() {
     const noSkillCard = output.tierRows.flatMap((row) => row.deckCards).find((card) => card.cardId === "card-a2");
     assert.ok(noSkillCard);
     assert.deepEqual(noSkillCard.skills, []);
+    const plCard = output.tierRows.flatMap((row) => row.deckCards).find((card) => card.cardId === "card-b2");
+    assert.ok(plCard);
+    assert.equal(plCard.faction, "\u84bc");
+    assert.equal(unknownFactionCount(output), 0);
+    assert.equal(unknownFactionCount(tierList), 0);
     assert.ok(output.tierRows.some((row) => row.deckConfig.strategies.length > 0));
     assert.ok(output.tierRows.some((row) => row.deckConfig.schoolStages.length > 0));
     assert.ok(output.tierRows.some((row) => row.deckConfig.unfavorableMatchups.length > 0));
