@@ -42,3 +42,10 @@ export type {
   TierListScope,
   TierListSnapshot,
 } from "../../../packages/contracts/tier-list-snapshot.js";
+
+export type {
+  SiteAnalyticsDeviceType,
+  SiteAnalyticsEventPayload,
+  SiteAnalyticsEventType,
+  SiteAnalyticsSummary,
+} from "../../../packages/contracts/site-analytics.js";

@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import CommonHeader from "./components/Common_Header.vue";
 import { dateOnly, dateTime, integer } from "./lib/format";
 import { loadRefreshStatus } from "./lib/refreshStatus";
+import { trackPageView } from "./lib/siteAnalytics";
 import type { LeaderboardRefreshRun, LeaderboardRefreshStatus, LeaderboardRefreshUpload } from "./types";
 
 const status = ref<LeaderboardRefreshStatus | null>(null);
@@ -10,6 +11,7 @@ const loading = ref(true);
 const error = ref("");
 
 onMounted(async () => {
+  trackPageView("leaderboard-status");
   try {
     status.value = await loadRefreshStatus();
   } catch (caught) {

@@ -5,6 +5,7 @@ import CommonHeader from "./components/Common_Header.vue";
 import CommonImageFrame from "./components/Common_ImageFrame.vue";
 import { dateOnly, integer } from "./lib/format";
 import { loadMatchSearchOptions, searchMatches } from "./lib/matchSearch";
+import { trackPageView, trackSiteEvent } from "./lib/siteAnalytics";
 import type {
   CardView,
   MatchSearchCardMatchMode,
@@ -56,6 +57,7 @@ const sideLabels: Record<SideKey, { title: string; subtitle: string }> = {
 const sideKeys: SideKey[] = ["sideA", "sideB"];
 
 onMounted(async () => {
+  trackPageView("match-search");
   try {
     options.value = await loadMatchSearchOptions();
   } catch (caught) {
@@ -156,6 +158,10 @@ function selectedCards(side: SideForm): MatchSearchCardOption[] {
 
 function openCardPicker(sideKey: SideKey): void {
   pickerSide.value = sideKey;
+  trackSiteEvent("card_picker_open", "match-search", {
+    side: sideKey,
+    selectedCards: sideForms[sideKey].cardIds.length,
+  });
 }
 
 function closeCardPicker(): void {
@@ -166,6 +172,10 @@ function addCard(side: SideForm, card: MatchSearchCardOption): void {
   if (side.cardIds.includes(card.cardId) || side.cardIds.length >= 8) return;
   side.cardIds.push(card.cardId);
   side.strategyByCard[card.cardId] = "any";
+  trackSiteEvent("card_select", "match-search", {
+    cardId: card.cardId,
+    cardName: card.name,
+  });
 }
 
 function isCardSelected(side: SideForm, cardId: string): boolean {
@@ -181,8 +191,13 @@ function toggleCard(side: SideForm, card: MatchSearchCardOption): void {
 }
 
 function removeCard(side: SideForm, cardId: string): void {
+  const card = cardsById.value.get(cardId);
   side.cardIds = side.cardIds.filter((value) => value !== cardId);
   delete side.strategyByCard[cardId];
+  trackSiteEvent("card_remove", "match-search", {
+    cardId,
+    cardName: card?.name || "",
+  });
 }
 
 function clearSide(side: SideForm): void {
@@ -219,6 +234,17 @@ async function runSearch(nextPage = 1): Promise<void> {
       cardMatchMode: cardMatchMode.value,
       sideA: requestSide(sideForms.sideA),
       sideB: requestSide(sideForms.sideB),
+    });
+    trackSiteEvent("search", "match-search", {
+      page: nextPage,
+      total: response.value.total,
+      cardMatchMode: cardMatchMode.value,
+      sideACards: sideForms.sideA.cardIds.length,
+      sideBCards: sideForms.sideB.cardIds.length,
+      sideAResult: sideForms.sideA.result,
+      sideBResult: sideForms.sideB.result,
+      sideAWeaponActivated: sideForms.sideA.weaponActivated,
+      sideBWeaponActivated: sideForms.sideB.weaponActivated,
     });
     await nextTick();
     resultPanelRef.value?.scrollIntoView({ block: "start", behavior: "smooth" });
@@ -411,7 +437,13 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
                 <strong>#{{ item.matchId }}</strong>
                 <span>{{ dateOnly(item.playedAt) }} / {{ item.version || "-" }} / {{ item.mode || "-" }}</span>
               </div>
-              <a v-if="item.videoUrl" :href="item.videoUrl" target="_blank" rel="noopener noreferrer">打开视频</a>
+              <a
+                v-if="item.videoUrl"
+                :href="item.videoUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                @click="trackSiteEvent('video_open', 'match-search', { matchId: String(item.matchId) })"
+              >打开视频</a>
             </div>
             <div class="MatchSearch_ResultSides">
               <section v-for="sideKey in sideKeys" :key="`${item.matchId}-${sideKey}`">

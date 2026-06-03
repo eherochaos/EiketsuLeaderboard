@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -419,6 +419,134 @@ async function testMatchSearchIndexReplacementIsReloaded() {
   }
 }
 
+function testAnalyticsEventPayload(overrides = {}) {
+  return {
+    visitorId: "visitor_123456",
+    sessionId: "session_123456",
+    eventType: "page_view",
+    page: "/leaderboard/",
+    target: "leaderboard",
+    metadata: { label: "home", token: "secret", path: "E:\\secret\\data.json" },
+    deviceType: "desktop",
+    viewport: { width: 1440, height: 900 },
+    language: "zh-CN",
+    referrerOrigin: "http://example.test/path?token=secret",
+    occurredAt: "2026-06-03T00:00:00.000Z",
+    ...overrides
+  };
+}
+
+async function testSiteAnalyticsEventAndSummary() {
+  const root = await mkdtemp(join(tmpdir(), "site-analytics-"));
+  const siteAnalyticsFile = join(root, "site-analytics-events.jsonl");
+  const server = createLeaderboardSnapshotServer({
+    siteAnalyticsFile,
+    siteAnalyticsAdminToken: "admin-token"
+  });
+
+  try {
+    const address = await listen(server);
+    const event = await fetch(`http://127.0.0.1:${address.port}/api/site-analytics-event`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(testAnalyticsEventPayload())
+    });
+    assert.equal(event.status, 204);
+
+    const fileText = await readFile(siteAnalyticsFile, "utf8");
+    assert.equal(/secret|E:\\|token=|cookie/i.test(fileText), false);
+    assert.equal(fileText.includes("\"eventType\":\"page_view\""), true);
+
+    const unauthorized = await fetch(`http://127.0.0.1:${address.port}/api/site-analytics-summary`);
+    assert.equal(unauthorized.status, 401);
+
+    const summary = await fetch(`http://127.0.0.1:${address.port}/api/site-analytics-summary?from=2026-06-01&to=2026-06-03`, {
+      headers: { Authorization: "Bearer admin-token" }
+    });
+    const body = await summary.json();
+    assert.equal(summary.status, 200);
+    assert.equal(body.totals.visitors, 1);
+    assert.equal(body.totals.pageViews, 1);
+    assert.equal(body.pages[0].page, "/leaderboard/");
+    assert.equal(/secret|E:\\|token=|cookie/i.test(JSON.stringify(body)), false);
+  } finally {
+    await close(server);
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testSiteAnalyticsRejectsInvalidEvent() {
+  const root = await mkdtemp(join(tmpdir(), "site-analytics-invalid-"));
+  const siteAnalyticsFile = join(root, "site-analytics-events.jsonl");
+  const server = createLeaderboardSnapshotServer({ siteAnalyticsFile });
+
+  try {
+    const address = await listen(server);
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/site-analytics-event`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(testAnalyticsEventPayload({ eventType: "full_click" }))
+    });
+    const text = await response.text();
+
+    assert.equal(response.status, 400);
+    assert.equal(/E:\\|token|cookie|secret/i.test(text), false);
+  } finally {
+    await close(server);
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testSiteAnalyticsSummaryRequiresConfiguredToken() {
+  const root = await mkdtemp(join(tmpdir(), "site-analytics-token-"));
+  const siteAnalyticsFile = join(root, "site-analytics-events.jsonl");
+  const server = createLeaderboardSnapshotServer({ siteAnalyticsFile });
+
+  try {
+    const address = await listen(server);
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/site-analytics-summary`, {
+      headers: { Authorization: "Bearer anything" }
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 503);
+    assert.equal(body.error, "site analytics admin token is not configured");
+  } finally {
+    await close(server);
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testSiteAnalyticsSummaryReadsFileReplacement() {
+  const root = await mkdtemp(join(tmpdir(), "site-analytics-reload-"));
+  const siteAnalyticsFile = join(root, "site-analytics-events.jsonl");
+  const server = createLeaderboardSnapshotServer({
+    siteAnalyticsFile,
+    siteAnalyticsAdminToken: "admin-token"
+  });
+
+  try {
+    await writeFile(siteAnalyticsFile, `${JSON.stringify(testAnalyticsEventPayload({ eventType: "page_view", page: "/leaderboard/" }))}\n`, "utf8");
+    const address = await listen(server);
+    const first = await fetch(`http://127.0.0.1:${address.port}/api/site-analytics-summary?from=2026-06-01&to=2026-06-03`, {
+      headers: { Authorization: "Bearer admin-token" }
+    });
+    assert.equal((await first.json()).pages[0].page, "/leaderboard/");
+
+    await writeFile(siteAnalyticsFile, `${JSON.stringify(testAnalyticsEventPayload({ eventType: "page_view", page: "/match-search/" }))}\n`, "utf8");
+    const second = await fetch(`http://127.0.0.1:${address.port}/api/site-analytics-summary?from=2026-06-01&to=2026-06-03`, {
+      headers: { Authorization: "Bearer admin-token" }
+    });
+    const body = await second.json();
+
+    assert.equal(second.status, 200);
+    assert.equal(body.pages[0].page, "/match-search/");
+  } finally {
+    await close(server);
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 async function testSmokeAcceptsSnapshotEndpoint() {
   const root = await mkdtemp(join(tmpdir(), "leaderboard-snapshot-smoke-"));
   const snapshotFile = join(root, "leaderboard-snapshot.json");
@@ -466,6 +594,10 @@ await testTierListDeckConfigEndpointUsesStaticConfigFile();
 await testRefreshStatusFileReplacementIsReloaded();
 await testMatchSearchEndpointsUseStaticIndex();
 await testMatchSearchIndexReplacementIsReloaded();
+await testSiteAnalyticsEventAndSummary();
+await testSiteAnalyticsRejectsInvalidEvent();
+await testSiteAnalyticsSummaryRequiresConfiguredToken();
+await testSiteAnalyticsSummaryReadsFileReplacement();
 await testSmokeAcceptsSnapshotEndpoint();
 await testSmokeRejectsHtmlFallback();
 
