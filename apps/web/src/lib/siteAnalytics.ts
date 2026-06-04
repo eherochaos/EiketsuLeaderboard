@@ -7,6 +7,7 @@ import type {
 
 const eventUrl = import.meta.env.VITE_SITE_ANALYTICS_EVENT_URL || "/api/site-analytics-event";
 const summaryUrl = import.meta.env.VITE_SITE_ANALYTICS_SUMMARY_URL || "/api/site-analytics-summary";
+const analyticsDisabled = import.meta.env.VITE_SITE_ANALYTICS_DISABLED === "1";
 const visitorKey = "eiketsu.analytics.visitorId";
 const sessionKey = "eiketsu.analytics.sessionId";
 
@@ -82,7 +83,7 @@ export function trackSiteEvent(
   target = "",
   metadata: SiteAnalyticsMetadata = {}
 ): void {
-  if (!browserReady()) return;
+  if (analyticsDisabled || !browserReady()) return;
 
   const payload: SiteAnalyticsEventPayload = {
     visitorId: visitorId(),

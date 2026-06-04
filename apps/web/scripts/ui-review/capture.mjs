@@ -1,6 +1,8 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { createServer as createNetServer } from "node:net";
+import { dirname, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import {
   DEFAULT_API_PORT,
@@ -20,10 +22,10 @@ const args = parseArgs(process.argv.slice(2));
 const runId = args.runId || createRunId();
 const outputDir = resolve(paths.outputRoot, runId);
 const screenshotDir = resolve(outputDir, "screenshots");
-const apiPort = Number(args.apiPort || process.env.UI_REVIEW_API_PORT || DEFAULT_API_PORT);
-const webPort = Number(args.webPort || process.env.UI_REVIEW_WEB_PORT || DEFAULT_WEB_PORT);
-const apiOrigin = args.apiOrigin || `http://127.0.0.1:${apiPort}`;
-const webOrigin = args.webOrigin || `http://127.0.0.1:${webPort}`;
+let apiPort = Number(args.apiPort || process.env.UI_REVIEW_API_PORT || DEFAULT_API_PORT);
+let webPort = Number(args.webPort || process.env.UI_REVIEW_WEB_PORT || DEFAULT_WEB_PORT);
+let apiOrigin = args.apiOrigin || `http://127.0.0.1:${apiPort}`;
+let webOrigin = args.webOrigin || `http://127.0.0.1:${webPort}`;
 const selectedPages = filterByIds(REVIEW_PAGES, parseList(args.pages));
 const selectedViewports = filterByIds(VIEWPORTS, parseList(args.viewports));
 const selectedScenarios = parseList(args.scenarios);
@@ -41,6 +43,19 @@ async function isHttpReady(url) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 1500);
   try {
+    const response = await fetch(url, { signal: controller.signal });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function isHttpReachable(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1500);
+  try {
     await fetch(url, { signal: controller.signal });
     return true;
   } catch {
@@ -50,35 +65,128 @@ async function isHttpReady(url) {
   }
 }
 
-async function waitForHttp(url, label, timeoutMs = 45000) {
+async function areHttpReady(urls) {
+  const results = await Promise.all(urls.map((url) => isHttpReady(url)));
+  return results.every(Boolean);
+}
+
+async function waitForHttp(urls, label, timeoutMs = 45000) {
+  const readyUrls = Array.isArray(urls) ? urls : [urls];
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    if (await isHttpReady(url)) return;
+    if (await areHttpReady(readyUrls)) return;
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 500));
   }
-  throw new Error(`${label} is not ready: ${url}`);
+  throw new Error(`${label} is not ready: ${readyUrls.join(", ")}`);
+}
+
+async function findAvailablePort(startPort) {
+  for (let port = startPort; port < startPort + 80; port += 1) {
+    if (await canListen(port)) return port;
+  }
+  throw new Error(`no available local port from ${startPort}`);
+}
+
+function canListen(port) {
+  return new Promise((resolveListen) => {
+    const server = createNetServer();
+    server.once("error", () => resolveListen(false));
+    server.once("listening", () => {
+      server.close(() => resolveListen(true));
+    });
+    server.listen(port, "127.0.0.1");
+  });
 }
 
 function npmCommand() {
-  return process.platform === "win32" ? "npm.cmd" : "npm";
+  return process.platform === "win32" ? "cmd.exe" : "npm";
 }
 
-async function startProcessIfNeeded(label, readyUrl, command, commandArgs, cwd, env = {}) {
-  if (await isHttpReady(readyUrl)) {
-    console.log(`[ui-review] reuse ${label}: ${readyUrl}`);
+function npmArgs(values) {
+  return process.platform === "win32" ? ["/d", "/s", "/c", "npm.cmd", ...values] : values;
+}
+
+function childEnv(extra = {}) {
+  const result = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!key || key.startsWith("=") || value === undefined) continue;
+    result[key] = String(value);
+  }
+  for (const [key, value] of Object.entries(extra)) {
+    if (!key || key.startsWith("=") || value === undefined || value === null) continue;
+    result[key] = String(value);
+  }
+  return result;
+}
+
+async function startProcessIfNeeded(label, readyUrls, command, commandArgs, cwd, env = {}) {
+  const urls = Array.isArray(readyUrls) ? readyUrls : [readyUrls];
+  if (await areHttpReady(urls)) {
+    console.log(`[ui-review] reuse ${label}: ${urls.join(", ")}`);
     return null;
   }
 
   console.log(`[ui-review] start ${label}`);
   const child = spawn(command, commandArgs, {
     cwd,
-    env: { ...process.env, ...env },
+    env: childEnv(env),
     stdio: ["ignore", "pipe", "pipe"]
   });
   child.stdout.on("data", (chunk) => process.stdout.write(`[${label}] ${chunk}`));
   child.stderr.on("data", (chunk) => process.stderr.write(`[${label}] ${chunk}`));
-  await waitForHttp(readyUrl, label);
+  await waitForHttp(urls, label);
   return child;
+}
+
+export function buildLocalRefreshStatus(snapshotPayload, generatedAt = new Date().toISOString()) {
+  const metadata = snapshotPayload?.metadata && typeof snapshotPayload.metadata === "object" ? snapshotPayload.metadata : {};
+  const home = snapshotPayload?.home && typeof snapshotPayload.home === "object" ? snapshotPayload.home : {};
+  const tierRows = Array.isArray(snapshotPayload?.tierRows) ? snapshotPayload.tierRows : [];
+  const clusterRows = Array.isArray(snapshotPayload?.clusterRows) ? snapshotPayload.clusterRows : [];
+  const homeTierRows = Array.isArray(home?.tierRows) ? home.tierRows : [];
+  return {
+    schemaVersion: 1,
+    generatedAt,
+    refresh: {
+      status: "completed",
+      reason: "local ui review status",
+      error: "",
+      startedAt: generatedAt,
+      finishedAt: generatedAt,
+      durationMs: 0
+    },
+    runRefresh: { status: "skipped", reason: "local ui review" },
+    snapshot: {
+      sourceRunId: metadata.sourceRunId,
+      sourceKind: metadata.sourceKind,
+      targetVersion: metadata.targetVersion,
+      dateFrom: metadata.dateFrom,
+      dateTo: metadata.dateTo,
+      updatedAt: metadata.updatedAt,
+      sampleSize: metadata.sampleSize,
+      clusterRows: clusterRows.length,
+      tierRows: tierRows.length,
+      homeTierRows: homeTierRows.length
+    },
+    export: { tables: {}, cards: {} },
+    latestRun: null,
+    recentRuns: [],
+    latestUpload: null,
+    recentUploads: []
+  };
+}
+
+async function writeLocalRefreshStatus(statusFile, snapshotFile) {
+  const snapshotPayload = JSON.parse(await readFile(snapshotFile, "utf8"));
+  await mkdir(dirname(statusFile), { recursive: true });
+  await writeFile(statusFile, `${JSON.stringify(buildLocalRefreshStatus(snapshotPayload), null, 2)}\n`, "utf8");
+}
+
+function apiReadyUrls(origin) {
+  return [
+    `${origin}/api/leaderboard-snapshot`,
+    `${origin}/api/leaderboard-refresh-status`
+  ];
 }
 
 async function stopProcess(child) {
@@ -89,9 +197,26 @@ async function stopProcess(child) {
       killer.on("close", resolveStop);
       killer.on("error", resolveStop);
     });
+    await waitForProcessClose(child, 1500);
+    child.stdout?.destroy();
+    child.stderr?.destroy();
     return;
   }
   child.kill("SIGTERM");
+  await waitForProcessClose(child, 1500);
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+}
+
+function waitForProcessClose(child, timeoutMs) {
+  if (child.exitCode !== null || child.signalCode) return Promise.resolve();
+  return new Promise((resolveClose) => {
+    const timer = setTimeout(resolveClose, timeoutMs);
+    child.once("close", () => {
+      clearTimeout(timer);
+      resolveClose();
+    });
+  });
 }
 
 async function applyScenario(page, scenario) {
@@ -373,6 +498,7 @@ async function captureOne(browser, pageConfig, scenario, viewport) {
   const page = await browser.newPage({ viewport: { width: viewport.width, height: viewport.height } });
   const consoleErrors = [];
   const networkFailures = [];
+  const responseFailures = [];
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   });
@@ -381,6 +507,15 @@ async function captureOne(browser, pageConfig, scenario, viewport) {
       url: request.url(),
       failure: request.failure()?.errorText || ""
     });
+  });
+  page.on("response", (response) => {
+    if (response.status() >= 400) {
+      responseFailures.push({
+        url: response.url(),
+        status: response.status(),
+        statusText: response.statusText()
+      });
+    }
   });
 
   const url = new URL(pageConfig.path, webOrigin).toString();
@@ -408,6 +543,7 @@ async function captureOne(browser, pageConfig, scenario, viewport) {
     screenshotPath,
     consoleErrors,
     networkFailures,
+    responseFailures,
     checks,
     domSummary,
     visualSignals
@@ -416,26 +552,52 @@ async function captureOne(browser, pageConfig, scenario, viewport) {
 
 async function main() {
   await mkdir(screenshotDir, { recursive: true });
-  const apiProcess = await startProcessIfNeeded(
-    "leaderboard-api",
-    `${apiOrigin}/api/leaderboard-snapshot`,
-    "node",
-    [resolve(paths.repoRoot, "apps/api/leaderboard-snapshot/server.mjs")],
-    paths.repoRoot,
-    { PORT: String(apiPort), HOST: "127.0.0.1" }
-  );
-  const webProcess = await startProcessIfNeeded(
-    "vite",
-    `${webOrigin}/leaderboard/`,
-    npmCommand(),
-    ["run", "dev", "--", "--port", String(webPort), "--strictPort"],
-    paths.webRoot,
-    { VITE_LEADERBOARD_API_ORIGIN: apiOrigin }
-  );
+  const snapshotFile = resolve(paths.repoRoot, "apps/api/data/leaderboard-snapshot.json");
+  const statusFile = resolve(outputDir, "api/leaderboard-refresh-status.json");
+  await writeLocalRefreshStatus(statusFile, snapshotFile);
+
+  if (!args.apiOrigin && !await areHttpReady(apiReadyUrls(apiOrigin)) && await isHttpReachable(`${apiOrigin}/api/leaderboard-snapshot`)) {
+    apiPort = await findAvailablePort(apiPort + 1);
+    webPort = args.webOrigin ? webPort : await findAvailablePort(webPort + 1);
+    apiOrigin = `http://127.0.0.1:${apiPort}`;
+    webOrigin = args.webOrigin || `http://127.0.0.1:${webPort}`;
+    console.log(`[ui-review] default api is unhealthy; use ${apiOrigin}`);
+  }
 
   const screenshots = [];
-  const browser = await chromium.launch();
+  let apiProcess = null;
+  let webProcess = null;
+  let browser = null;
   try {
+    apiProcess = await startProcessIfNeeded(
+      "leaderboard-api",
+      apiReadyUrls(apiOrigin),
+      "node",
+      [resolve(paths.repoRoot, "apps/api/leaderboard-snapshot/server.mjs")],
+      paths.repoRoot,
+      {
+        PORT: String(apiPort),
+        HOST: "127.0.0.1",
+        LEADERBOARD_SNAPSHOT_FILE: snapshotFile,
+        LEADERBOARD_REFRESH_STATUS_FILE: statusFile,
+        LEADERBOARD_MATCH_SEARCH_INDEX_FILE: resolve(paths.repoRoot, "apps/api/data/match-search-index.json"),
+        LEADERBOARD_TIER_LIST_SNAPSHOT_FILE: resolve(paths.repoRoot, "apps/api/data/tier-list-snapshot.json"),
+        LEADERBOARD_TIER_LIST_CONFIGS_FILE: resolve(paths.repoRoot, "apps/api/data/tier-list-configs.json")
+      }
+    );
+    webProcess = await startProcessIfNeeded(
+      "vite",
+      `${webOrigin}/leaderboard/`,
+      npmCommand(),
+      npmArgs(["run", "dev", "--", "--port", String(webPort), "--strictPort"]),
+      paths.webRoot,
+      {
+        VITE_LEADERBOARD_API_ORIGIN: apiOrigin,
+        VITE_SITE_ANALYTICS_DISABLED: "1"
+      }
+    );
+
+    browser = await chromium.launch();
     for (const pageConfig of selectedPages) {
       const scenarios = pageConfig.scenarios.filter((scenario) => !selectedScenarios.length || selectedScenarios.includes(scenario.id));
       for (const scenario of scenarios) {
@@ -446,7 +608,7 @@ async function main() {
       }
     }
   } finally {
-    await browser.close();
+    if (browser) await browser.close();
     await stopProcess(webProcess);
     await stopProcess(apiProcess);
   }
@@ -475,7 +637,11 @@ async function main() {
   console.log(`[ui-review] next: npm run ui:review:serve -- --run-id=${runId}`);
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
+  main()
+    .then(() => process.exit(0))
+    .catch((error) => {
+      console.error(error);
+      process.exit(1);
+    });
+}

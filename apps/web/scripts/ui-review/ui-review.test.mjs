@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { buildFindings, normalizeFindings } from "./audit.mjs";
+import { buildLocalRefreshStatus } from "./capture.mjs";
 import { buildReviewInput, normalizeAnnotations, validateManifest } from "./packet.mjs";
 
 const manifest = {
@@ -79,6 +80,28 @@ const annotations = normalizeAnnotations({
     }
   ]
 }, manifest.runId);
+
+const localStatus = buildLocalRefreshStatus({
+  metadata: {
+    sourceRunId: 11,
+    sourceKind: "server",
+    targetVersion: "Ver.test",
+    dateFrom: "2026-06-01",
+    dateTo: "2026-06-02",
+    updatedAt: "2026-06-02T00:00:00Z",
+    sampleSize: 12
+  },
+  home: { tierRows: [{ deckId: "home-a" }] },
+  tierRows: [{ deckId: "deck-a" }, { deckId: "deck-b" }],
+  clusterRows: [{ deckId: "cluster-a" }]
+}, "2026-06-04T00:00:00.000Z");
+
+assert.equal(localStatus.refresh.status, "completed");
+assert.equal(localStatus.snapshot.sourceRunId, 11);
+assert.equal(localStatus.snapshot.tierRows, 2);
+assert.equal(localStatus.snapshot.clusterRows, 1);
+assert.equal(localStatus.snapshot.homeTierRows, 1);
+assert.deepEqual(localStatus.recentUploads, []);
 
 assert.equal(validateManifest(manifest), true);
 assert.equal(annotations.schemaVersion, 1);

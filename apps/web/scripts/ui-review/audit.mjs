@@ -166,6 +166,16 @@ function findingsFromChecks(shot) {
       detail: safeText(`${request.failure || "request failed"} ${request.url || ""}`, 280)
     }));
   }
+  const responseFailures = uniqueBy(shot.responseFailures || [], (response) => `${response.status}:${urlWithoutQuery(response.url)}`, 5);
+  for (const [index, response] of responseFailures.entries()) {
+    findings.push(createFinding(shot, "http-error", {
+      findingKey: index,
+      severity: response.status >= 500 ? "P1" : "P2",
+      component: "page-request",
+      title: "页面请求返回错误状态",
+      detail: `${response.status} ${response.statusText || ""} ${safeText(response.url, 220)}`
+    }));
+  }
   const imageFailures = uniqueBy(shot.checks?.imageFailures || [], (image) => urlWithoutQuery(image.src) || image.className || image.alt, 40);
   if (imageFailures.length) {
     const image = imageFailures[0];
