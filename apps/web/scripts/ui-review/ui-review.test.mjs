@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { buildFindings, normalizeFindings } from "./audit.mjs";
 import { buildReviewInput, normalizeAnnotations, validateManifest } from "./packet.mjs";
 
 const manifest = {
@@ -26,7 +27,34 @@ const manifest = {
           navigationVisible: true
         }
       },
-      domSummary: []
+      domSummary: [],
+      visualSignals: {
+        controls: [
+          {
+            kind: "control",
+            tag: "button",
+            className: "Common_Button",
+            label: "搜索",
+            disabled: false,
+            rect: { x: 8, y: 8, width: 28, height: 28 }
+          }
+        ],
+        textOverflow: [
+          {
+            kind: "text",
+            tag: "span",
+            className: "MatchSearch_ResultHitNote",
+            label: "很长的命中条件",
+            rect: { x: 20, y: 30, width: 80, height: 18 },
+            clientWidth: 80,
+            scrollWidth: 140,
+            clientHeight: 18,
+            scrollHeight: 18
+          }
+        ],
+        largeEmptyContainers: [],
+        overlaps: []
+      }
     }
   ]
 };
@@ -60,9 +88,16 @@ assert.equal(annotations.annotations[0].rect.y, 21);
 assert.equal(annotations.annotations[1].severity, "P2");
 assert.equal(annotations.annotations[1].rect.x, 0);
 
+const findings = buildFindings(manifest);
+assert.equal(findings.schemaVersion, 1);
+assert.equal(findings.findings.length, 2);
+assert.match(findings.findings[0].findingId, /small-target/);
+assert.equal(normalizeFindings({ findings: [{ severity: "bad", status: "bad" }] }, manifest.runId).findings[0].severity, "P2");
+
 const reviewInput = await buildReviewInput({
   manifest,
   annotations,
+  findings,
   docs: [{ path: "docs/003-web-pages/ui-contract.md", content: "必须使用 spacing scale。" }],
   gitStatus: " M apps/web/src/Foo.vue",
   gitDiffStat: " apps/web/src/Foo.vue | 2 +-",
@@ -71,6 +106,8 @@ const reviewInput = await buildReviewInput({
 
 assert.match(reviewInput, /Codex UI一致性审查输入/);
 assert.match(reviewInput, /UI一致性审查报告/);
+assert.match(reviewInput, /自动候选问题/);
+assert.match(reviewInput, /可点击区域偏小/);
 assert.match(reviewInput, /缺少焦点态/);
 assert.match(reviewInput, /leaderboard__top__desktop-1440x900/);
 

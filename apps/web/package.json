@@ -10,6 +10,7 @@
     "typecheck": "vue-tsc --noEmit",
     "build:data": "node scripts/build-leaderboard-snapshot.mjs",
     "ui:review:capture": "node scripts/ui-review/capture.mjs",
+    "ui:review:audit": "node scripts/ui-review/audit.mjs",
     "ui:review:serve": "node scripts/ui-review/serve.mjs",
     "ui:review:packet": "node scripts/ui-review/packet.mjs",
     "ui:review:test": "node scripts/ui-review/ui-review.test.mjs"

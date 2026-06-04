@@ -9,6 +9,7 @@ import {
   pathsFromMetaUrl
 } from "./config.mjs";
 import { normalizeAnnotations } from "./packet.mjs";
+import { normalizeFindings } from "./audit.mjs";
 
 const paths = pathsFromMetaUrl(import.meta.url);
 const args = parseArgs(process.argv.slice(2));
@@ -110,6 +111,8 @@ function html() {
     .ImageWrap img { display: block; max-width: none; user-select: none; }
     .Box { position: absolute; border: 2px solid #b43731; background: rgba(180, 55, 49, 0.16); box-sizing: border-box; }
     .Box.Active { border-color: #1f5f8f; background: rgba(31, 95, 143, 0.16); }
+    .Box.Finding { border-color: #c78817; background: rgba(199, 136, 23, 0.18); }
+    .Box.FalsePositive { border-color: #777; background: rgba(120, 120, 120, 0.10); }
     aside { display: grid; gap: 10px; align-content: start; }
     .Panel { border: 1px solid #d5bf92; background: #fffaf0; padding: 10px; }
     .Panel h2 { margin: 0 0 8px; font-size: 15px; }
@@ -123,6 +126,10 @@ function html() {
     .Item { text-align: left; padding: 8px; background: #fff; border: 1px solid #e0c99d; }
     .Item strong { display: block; }
     .Item small { color: #665342; }
+    .Item.Active { border-color: #1f5f8f; outline: 2px solid rgba(31, 95, 143, 0.18); }
+    .Item.Confirmed { border-color: #b43731; }
+    .Item.FalsePositive { opacity: 0.62; }
+    .Item select { margin-top: 6px; min-height: 30px; }
     @media (max-width: 900px) {
       main { grid-template-columns: 1fr; }
       aside { order: -1; }
@@ -145,7 +152,11 @@ function html() {
     </section>
     <aside>
       <section class="Panel">
-        <h2>当前标注</h2>
+        <h2>自动候选问题</h2>
+        <div id="findingList" class="List"></div>
+      </section>
+      <section class="Panel">
+        <h2>当前问题</h2>
         <div class="Row">
           <label>严重度
             <select id="severity">
@@ -163,12 +174,22 @@ function html() {
         <label>说明 <textarea id="note" placeholder="描述标注区域的问题"></textarea></label>
         <label>决策
           <select id="decision">
-            <option>需要修复</option><option>需要设计师确认</option><option>保持现状</option><option>沉淀新规范</option>
+            <option>需要判断</option><option>需要修复</option><option>误报</option><option>合法变体</option><option>疑似新规范</option><option>需要设计师确认</option><option>保持现状</option>
+          </select>
+        </label>
+        <label>状态
+          <select id="statusField">
+            <option value="needs-decision">需要判断</option>
+            <option value="confirmed">确认修复</option>
+            <option value="false-positive">误报</option>
+            <option value="variant">合法变体</option>
+            <option value="new-standard">疑似新规范</option>
+            <option value="open">待处理</option>
           </select>
         </label>
         <div class="Actions">
-          <button id="newButton" type="button">新建</button>
-          <button id="deleteButton" type="button">删除</button>
+          <button id="newButton" type="button">人工补充</button>
+          <button id="deleteButton" type="button">删除人工标注</button>
         </div>
       </section>
       <section class="Panel">
@@ -180,7 +201,7 @@ function html() {
   <script>
     const params = new URLSearchParams(location.search);
     const runId = params.get("runId") || "";
-    const state = { manifest: null, annotations: [], activeId: "", drag: null };
+    const state = { manifest: null, annotations: [], findings: [], activeId: "", activeType: "", drag: null };
     const els = {
       shotSelect: document.querySelector("#shotSelect"),
       reloadButton: document.querySelector("#reloadButton"),
@@ -194,8 +215,10 @@ function html() {
       rule: document.querySelector("#rule"),
       note: document.querySelector("#note"),
       decision: document.querySelector("#decision"),
+      statusField: document.querySelector("#statusField"),
       newButton: document.querySelector("#newButton"),
       deleteButton: document.querySelector("#deleteButton"),
+      findingList: document.querySelector("#findingList"),
       annotationList: document.querySelector("#annotationList")
     };
 
@@ -207,6 +230,12 @@ function html() {
     }
     function activeAnnotation() {
       return state.annotations.find((item) => item.annotationId === state.activeId) || null;
+    }
+    function activeFinding() {
+      return state.findings.find((item) => item.findingId === state.activeId) || null;
+    }
+    function activeIssue() {
+      return state.activeType === "finding" ? activeFinding() : activeAnnotation();
     }
     function updateStatus(text) {
       els.status.textContent = text;
@@ -221,14 +250,17 @@ function html() {
       return els.shotImage.getBoundingClientRect();
     }
     function readForm() {
-      const item = activeAnnotation();
+      const item = activeIssue();
       if (!item) return;
       item.severity = els.severity.value;
       item.category = els.category.value;
       item.component = els.component.value.trim();
       item.rule = els.rule.value.trim();
       item.note = els.note.value.trim();
+      item.detail = state.activeType === "finding" ? els.note.value.trim() : item.detail;
       item.decision = els.decision.value;
+      item.status = els.statusField.value;
+      item.updatedAt = new Date().toISOString();
       render();
     }
     function writeForm(item) {
@@ -236,8 +268,9 @@ function html() {
       els.category.value = item?.category || "违规实现";
       els.component.value = item?.component || "";
       els.rule.value = item?.rule || "";
-      els.note.value = item?.note || "";
-      els.decision.value = item?.decision || "需要修复";
+      els.note.value = item?.note || item?.detail || "";
+      els.decision.value = item?.decision || "需要判断";
+      els.statusField.value = item?.status || "needs-decision";
     }
     function createAnnotation(rect) {
       const item = {
@@ -255,10 +288,31 @@ function html() {
       };
       state.annotations.push(item);
       state.activeId = item.annotationId;
+      state.activeType = "annotation";
       render();
     }
     function renderBoxes() {
       for (const box of Array.from(els.imageWrap.querySelectorAll(".Box"))) box.remove();
+      for (const item of state.findings.filter((finding) => finding.screenshotId === activeShotId())) {
+        if (!item.rect || item.rect.width <= 0 || item.rect.height <= 0) continue;
+        const box = document.createElement("button");
+        box.type = "button";
+        box.className = "Box Finding"
+          + (item.findingId === state.activeId ? " Active" : "")
+          + (item.status === "false-positive" ? " FalsePositive" : "");
+        box.style.left = item.rect.x + "px";
+        box.style.top = item.rect.y + "px";
+        box.style.width = item.rect.width + "px";
+        box.style.height = item.rect.height + "px";
+        box.title = item.title || item.detail || item.component || item.severity;
+        box.addEventListener("click", () => {
+          state.activeId = item.findingId;
+          state.activeType = "finding";
+          writeForm(item);
+          render();
+        });
+        els.imageWrap.appendChild(box);
+      }
       for (const item of state.annotations.filter((ann) => ann.screenshotId === activeShotId())) {
         const box = document.createElement("button");
         box.type = "button";
@@ -270,10 +324,70 @@ function html() {
         box.title = item.note || item.component || item.severity;
         box.addEventListener("click", () => {
           state.activeId = item.annotationId;
+          state.activeType = "annotation";
           writeForm(item);
           render();
         });
         els.imageWrap.appendChild(box);
+      }
+    }
+    function renderFindings() {
+      els.findingList.innerHTML = "";
+      const visibleFindings = state.findings.filter((finding) => finding.screenshotId === activeShotId());
+      if (!visibleFindings.length) {
+        const empty = document.createElement("div");
+        empty.className = "Item";
+        empty.textContent = "当前截图暂无自动候选问题";
+        els.findingList.appendChild(empty);
+        return;
+      }
+      for (const item of visibleFindings) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "Item"
+          + (item.findingId === state.activeId ? " Active" : "")
+          + (item.status === "confirmed" ? " Confirmed" : "")
+          + (item.status === "false-positive" ? " FalsePositive" : "");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.style.width = "100%";
+        button.style.border = "0";
+        button.style.background = "transparent";
+        button.style.padding = "0";
+        button.style.textAlign = "left";
+        button.innerHTML = "<strong>" + item.severity + " " + (item.title || item.component || "候选问题") + "</strong><small>" + (item.component || "-") + " / " + (item.rule || "-") + "</small>";
+        button.addEventListener("click", () => {
+          state.activeId = item.findingId;
+          state.activeType = "finding";
+          writeForm(item);
+          render();
+        });
+        const select = document.createElement("select");
+        select.value = item.status || "needs-decision";
+        for (const option of [
+          ["needs-decision", "需要判断"],
+          ["confirmed", "确认修复"],
+          ["false-positive", "误报"],
+          ["variant", "合法变体"],
+          ["new-standard", "疑似新规范"],
+          ["open", "待处理"]
+        ]) {
+          const optionEl = document.createElement("option");
+          optionEl.value = option[0];
+          optionEl.textContent = option[1];
+          select.appendChild(optionEl);
+        }
+        select.addEventListener("change", () => {
+          item.status = select.value;
+          item.decision = select.options[select.selectedIndex].textContent;
+          item.updatedAt = new Date().toISOString();
+          state.activeId = item.findingId;
+          state.activeType = "finding";
+          writeForm(item);
+          render();
+        });
+        wrapper.appendChild(button);
+        wrapper.appendChild(select);
+        els.findingList.appendChild(wrapper);
       }
     }
     function renderList() {
@@ -285,6 +399,7 @@ function html() {
         button.innerHTML = "<strong>" + item.severity + " " + (item.component || "未命名组件") + "</strong><small>" + (item.note || item.category) + "</small>";
         button.addEventListener("click", () => {
           state.activeId = item.annotationId;
+          state.activeType = "annotation";
           writeForm(item);
           render();
         });
@@ -293,13 +408,16 @@ function html() {
     }
     function render() {
       renderBoxes();
+      renderFindings();
       renderList();
     }
     async function load() {
       const manifest = await fetch(api("/api/manifest")).then((res) => res.json());
       const annotations = await fetch(api("/api/annotations")).then((res) => res.json());
+      const findings = await fetch(api("/api/findings")).then((res) => res.json());
       state.manifest = manifest;
       state.annotations = annotations.annotations || [];
+      state.findings = findings.findings || [];
       els.shotSelect.innerHTML = "";
       for (const shot of manifest.screenshots) {
         const option = document.createElement("option");
@@ -315,6 +433,7 @@ function html() {
       if (!shot) return;
       els.shotImage.src = "/artifact/" + encodeURIComponent(state.manifest.runId) + "/" + shot.screenshotPath;
       state.activeId = "";
+      state.activeType = "";
       writeForm(null);
       render();
     }
@@ -331,19 +450,34 @@ function html() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
+      await fetch(api("/api/findings"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          runId: state.manifest.runId,
+          generatedAt: new Date().toISOString(),
+          findings: state.findings
+        })
+      });
       updateStatus("已保存 " + new Date().toLocaleTimeString());
     }
     els.shotSelect.addEventListener("change", () => selectShot(els.shotSelect.value));
     els.reloadButton.addEventListener("click", load);
     els.saveButton.addEventListener("click", save);
-    for (const input of [els.severity, els.category, els.component, els.rule, els.note, els.decision]) {
+    for (const input of [els.severity, els.category, els.component, els.rule, els.note, els.decision, els.statusField]) {
       input.addEventListener("input", readForm);
       input.addEventListener("change", readForm);
     }
     els.newButton.addEventListener("click", () => createAnnotation({ x: 20, y: 20, width: 160, height: 90 }));
     els.deleteButton.addEventListener("click", () => {
+      if (state.activeType !== "annotation") {
+        updateStatus("自动候选问题不能删除，请标为误报");
+        return;
+      }
       state.annotations = state.annotations.filter((item) => item.annotationId !== state.activeId);
       state.activeId = "";
+      state.activeType = "";
       writeForm(null);
       render();
     });
@@ -396,10 +530,23 @@ const server = createServer(async (request, response) => {
       sendJson(response, 200, await readJson(runPath(runId, "annotations.json"), fallback));
       return;
     }
+    if (request.method === "GET" && url.pathname === "/api/findings") {
+      const runId = await resolveRunId(url.searchParams.get("runId") || args.runId || "");
+      const fallback = { schemaVersion: UI_REVIEW_SCHEMA_VERSION, runId, generatedAt: new Date().toISOString(), findings: [] };
+      sendJson(response, 200, await readJson(runPath(runId, "findings.json"), fallback));
+      return;
+    }
     if (request.method === "POST" && url.pathname === "/api/annotations") {
       const runId = await resolveRunId(url.searchParams.get("runId") || args.runId || "");
       const payload = normalizeAnnotations(JSON.parse(await readBody(request)), runId);
       await writeFile(runPath(runId, "annotations.json"), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+      sendJson(response, 200, payload);
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/findings") {
+      const runId = await resolveRunId(url.searchParams.get("runId") || args.runId || "");
+      const payload = normalizeFindings(JSON.parse(await readBody(request, 5 * 1024 * 1024)), runId);
+      await writeFile(runPath(runId, "findings.json"), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
       sendJson(response, 200, payload);
       return;
     }

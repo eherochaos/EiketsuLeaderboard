@@ -8,6 +8,7 @@ import {
   latestRunDirName,
   pathsFromMetaUrl
 } from "./config.mjs";
+import { normalizeFindings } from "./audit.mjs";
 
 const paths = pathsFromMetaUrl(import.meta.url);
 
@@ -112,6 +113,26 @@ function annotationMarkdown(annotations) {
   ].join("\n");
 }
 
+function findingMarkdown(findings) {
+  if (!findings.findings.length) return "暂无自动候选问题。";
+  const rows = findings.findings.map((item) => [
+    item.screenshotId,
+    item.severity,
+    item.category,
+    item.component || "-",
+    item.rule || "-",
+    item.status || "-",
+    item.decision || "-",
+    item.title || "-",
+    (item.detail || "-").replace(/\|/g, "/")
+  ]);
+  return [
+    "| 截图 | 严重度 | 分类 | 组件 | 规则 | 状态 | 裁决 | 标题 | 说明 |",
+    "|---|---|---|---|---|---|---|---|---|",
+    ...rows.map((row) => `| ${row.join(" | ")} |`)
+  ].join("\n");
+}
+
 function screenshotMarkdown(manifest, runDir) {
   return manifest.screenshots.map((shot) => {
     const absolutePath = resolve(runDir, shot.screenshotPath);
@@ -201,12 +222,16 @@ function reportTemplate() {
 理由：`;
 }
 
-export async function buildReviewInput({ manifest, annotations, docs, gitStatus, gitDiffStat, runDir }) {
+export async function buildReviewInput({ manifest, annotations, findings = {}, docs, gitStatus, gitDiffStat, runDir }) {
   validateManifest(manifest);
   const normalizedAnnotations = normalizeAnnotations(annotations, manifest.runId);
+  const normalizedFindings = normalizeFindings(findings, manifest.runId);
   return `# Codex UI一致性审查输入
 
+请主动审查所有截图、DOM 摘要和自动候选问题。
 只输出 UI一致性审查报告，不直接修改代码。
+优先列出 Codex 主动发现的问题，再列人工补充。
+自动候选问题是线索，不是最终结论；如果用户已裁决为误报或合法变体，必须在报告里体现。
 
 ## Run
 
@@ -232,6 +257,10 @@ ${gitDiffStat || "-"}
 ## 自动检查
 
 ${checksMarkdown(manifest)}
+
+## 自动候选问题
+
+${findingMarkdown(normalizedFindings)}
 
 ## 人工标注
 
@@ -260,14 +289,16 @@ async function main() {
   const runDir = resolve(paths.outputRoot, runId);
   const manifest = await readJson(resolve(runDir, "manifest.json"), null);
   const annotations = normalizeAnnotations(await readJson(resolve(runDir, "annotations.json"), {}), runId);
+  const findings = normalizeFindings(await readJson(resolve(runDir, "findings.json"), {}), runId);
   const docs = await Promise.all(DESIGN_DOCS.map(async (path) => ({
     path,
     content: await readOptionalText(resolve(paths.repoRoot, path))
   })));
   const gitStatus = await runGit(["status", "--short"]);
   const gitDiffStat = await runGit(["diff", "--stat"]);
-  const reviewInput = await buildReviewInput({ manifest, annotations, docs, gitStatus, gitDiffStat, runDir });
+  const reviewInput = await buildReviewInput({ manifest, annotations, findings, docs, gitStatus, gitDiffStat, runDir });
   await writeFile(resolve(runDir, "annotations.json"), `${JSON.stringify(annotations, null, 2)}\n`, "utf8");
+  await writeFile(resolve(runDir, "findings.json"), `${JSON.stringify(findings, null, 2)}\n`, "utf8");
   await writeFile(resolve(runDir, "review-input.md"), reviewInput, "utf8");
   await writeFile(resolve(runDir, "report.md"), `${reportTemplate()}\n`, { encoding: "utf8", flag: "wx" }).catch((error) => {
     if (error?.code !== "EEXIST") throw error;

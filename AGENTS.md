@@ -72,4 +72,5 @@
 ## UI 审查
 
 - UI 审查必须按 `docs/ui-review-workflow.md` 执行。
+- UI 审查必须先跑 `ui:review:audit`。
 - UI 审查产物只能写入 `output/ui-review/`。

@@ -35,7 +35,7 @@ export const REVIEW_PAGES = [
     scenarios: [
       { id: "top", label: "首屏" },
       { id: "card-picker", label: "选卡浮层", action: "open-card-picker" },
-      { id: "results", label: "结果区", scrollSelector: ".MatchSearch_ResultPanel" }
+      { id: "results", label: "搜索结果", action: "search-results", scrollSelector: ".MatchSearch_ResultPanel" }
     ]
   },
   {

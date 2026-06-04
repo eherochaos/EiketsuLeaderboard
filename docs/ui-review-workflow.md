@@ -1,9 +1,9 @@
-# 本地 UI 审查工作流
+# 本地 UI 自动审查工作流
 
 ## 目标
 
-- 必须基于本地截图审查 UI。
-- 必须支持人工网页标注。
+- 必须先由工具主动审查截图。
+- 必须支持人工裁决候选问题。
 - 必须输出固定格式审查报告。
 - 禁止把审查产物提交到 Git。
 
@@ -12,6 +12,7 @@
 ```powershell
 cd apps/web
 npm run ui:review:capture
+npm run ui:review:audit
 npm run ui:review:serve
 npm run ui:review:packet
 ```
@@ -19,18 +20,24 @@ npm run ui:review:packet
 ## 产物
 
 - `output/ui-review/<runId>/manifest.json`
+- `output/ui-review/<runId>/findings.json`
 - `output/ui-review/<runId>/annotations.json`
 - `output/ui-review/<runId>/review-input.md`
-- `output/ui-review/<runId>/report.md`
 - `output/ui-review/<runId>/screenshots/*.png`
 
-## 人工标注
+## 自动审查
+
+- `manifest.json` 保存截图、DOM 摘要和视觉信号。
+- `findings.json` 保存自动候选问题。
+- 自动检测 console error、请求失败、图片失败、横向溢出、文字溢出、控件过小、元素重叠、首屏关键元素缺失、大块空白容器。
+
+## 人工裁决
 
 - 打开 `npm run ui:review:serve` 输出的本地地址。
-- 选择截图。
-- 拖拽框选问题区域。
-- 填写严重度、分类、组件、规则、说明、决策。
-- 保存标注。
+- 优先处理“自动候选问题”列表。
+- 候选问题可标记为确认修复、误报、合法变体、疑似新规范、需要判断。
+- 手动画框只作为补充标注。
+- 保存后写回 `findings.json` 和 `annotations.json`。
 
 ## Codex 输入
 
@@ -38,7 +45,7 @@ npm run ui:review:packet
 
 ```text
 请读取 output/ui-review/<runId>/review-input.md，
-结合截图和 annotations.json，
+主动审查所有截图、DOM 摘要和自动 findings，
 只输出 UI一致性审查报告，
 不要修改代码。
 ```
