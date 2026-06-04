@@ -68,3 +68,8 @@
 修改任何 UI 前，必须先阅读 docs/design/ui-contract.md。
 完成任何 UI 修改后，必须按照 docs/design/visual-acceptance.md 做视觉自检。
 如果自检未通过，必须先修复再提交。
+
+## UI 审查
+
+- UI 审查必须按 `docs/ui-review-workflow.md` 执行。
+- UI 审查产物只能写入 `output/ui-review/`。
