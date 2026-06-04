@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildFindings, normalizeFindings } from "./audit.mjs";
+import { buildFindings, buildThemes, normalizeFindings, normalizeThemes } from "./audit.mjs";
 import { buildLocalRefreshStatus } from "./capture.mjs";
 import { buildReviewInput, normalizeAnnotations, validateManifest } from "./packet.mjs";
 
@@ -117,10 +117,45 @@ assert.equal(findings.findings.length, 2);
 assert.match(findings.findings[0].findingId, /small-target/);
 assert.equal(normalizeFindings({ findings: [{ severity: "bad", status: "bad" }] }, manifest.runId).findings[0].severity, "P2");
 
+const imageManifest = {
+  ...manifest,
+  screenshots: [
+    {
+      ...manifest.screenshots[0],
+      id: "leaderboard__top__mobile-390x844",
+      viewport: { id: "mobile-390x844", width: 390, height: 844, label: "390x844" },
+      consoleErrors: ["Failed to load resource: net::ERR_NETWORK_ACCESS_DENIED"],
+      networkFailures: [
+        {
+          url: "https://image.eiketsu-taisen.net/general/card_small/example.jpg?260520a",
+          failure: "net::ERR_NETWORK_ACCESS_DENIED"
+        }
+      ],
+      checks: {
+        ...manifest.screenshots[0].checks,
+        imageFailures: [
+          {
+            src: "https://image.eiketsu-taisen.net/general/card_small/example.jpg?260520a",
+            className: "Common_ImageFrame_Image",
+            alt: "sample card"
+          }
+        ]
+      }
+    }
+  ]
+};
+const imageFindings = buildFindings(imageManifest);
+const themes = buildThemes(imageManifest, imageFindings);
+assert.equal(themes.schemaVersion, 1);
+assert.ok(themes.themes.length <= 10);
+assert.ok(themes.themes.some((theme) => theme.themeId.includes("external-image-assets")));
+assert.equal(normalizeThemes({ themes: [{ severity: "bad", status: "bad" }] }, manifest.runId).themes[0].severity, "P2");
+
 const reviewInput = await buildReviewInput({
   manifest,
   annotations,
   findings,
+  themes,
   docs: [{ path: "docs/003-web-pages/ui-contract.md", content: "必须使用 spacing scale。" }],
   gitStatus: " M apps/web/src/Foo.vue",
   gitDiffStat: " apps/web/src/Foo.vue | 2 +-",
@@ -129,8 +164,10 @@ const reviewInput = await buildReviewInput({
 
 assert.match(reviewInput, /Codex UI一致性审查输入/);
 assert.match(reviewInput, /UI一致性审查报告/);
-assert.match(reviewInput, /自动候选问题/);
+assert.match(reviewInput, /自动主题问题/);
+assert.match(reviewInput, /原始候选问题证据/);
 assert.match(reviewInput, /可点击区域偏小/);
+assert.match(reviewInput, /外部卡图资源在本地审查环境不可达/);
 assert.match(reviewInput, /缺少焦点态/);
 assert.match(reviewInput, /leaderboard__top__desktop-1440x900/);
 

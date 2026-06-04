@@ -20,6 +20,7 @@ npm run ui:review:packet
 ## 产物
 
 - `output/ui-review/<runId>/manifest.json`
+- `output/ui-review/<runId>/themes.json`
 - `output/ui-review/<runId>/findings.json`
 - `output/ui-review/<runId>/annotations.json`
 - `output/ui-review/<runId>/review-input.md`
@@ -28,16 +29,18 @@ npm run ui:review:packet
 ## 自动审查
 
 - `manifest.json` 保存截图、DOM 摘要和视觉信号。
-- `findings.json` 保存自动候选问题。
+- `themes.json` 保存主题候选问题。
+- `findings.json` 保存原始候选证据。
 - 自动检测 console error、请求失败、图片失败、横向溢出、文字溢出、控件过小、元素重叠、首屏关键元素缺失、大块空白容器。
 
 ## 人工裁决
 
 - 打开 `npm run ui:review:serve` 输出的本地地址。
-- 优先处理“自动候选问题”列表。
+- 优先处理“主题候选问题”列表。
 - 候选问题可标记为确认修复、误报、合法变体、疑似新规范、需要判断。
+- 原始 findings 只作为证据查看。
 - 手动画框只作为补充标注。
-- 保存后写回 `findings.json` 和 `annotations.json`。
+- 保存后写回 `themes.json`、`findings.json` 和 `annotations.json`。
 
 ## Codex 输入
 
@@ -49,6 +52,10 @@ npm run ui:review:packet
 只输出 UI一致性审查报告，
 不要修改代码。
 ```
+
+## Windows 查看
+
+- PowerShell 读取 JSON 必须加 `-Encoding utf8`。
 
 ## 报告格式
 

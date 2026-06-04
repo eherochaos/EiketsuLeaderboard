@@ -116,6 +116,40 @@ export function normalizeFindings(payload, runId) {
   };
 }
 
+function normalizeTheme(item, index, runId) {
+  const status = ["open", "confirmed", "false-positive", "variant", "new-standard", "needs-decision"].includes(item.status)
+    ? item.status
+    : "needs-decision";
+  return {
+    themeId: String(item.themeId || `theme-${index + 1}`),
+    runId,
+    source: String(item.source || "auto"),
+    severity: ["P0", "P1", "P2", "P3"].includes(item.severity) ? item.severity : "P2",
+    category: ["符合规范", "合法变体", "疑似新规范", "违规实现"].includes(item.category) ? item.category : "违规实现",
+    component: safeText(item.component || "page", 80),
+    rule: safeText(item.rule || "visual", 80),
+    title: safeText(item.title || "候选 UI 主题", 120),
+    detail: safeText(item.detail || "", 420),
+    status,
+    decision: safeText(item.decision || "需要判断", 80),
+    evidenceCount: Math.max(0, Math.round(Number(item.evidenceCount) || 0)),
+    findingIds: Array.isArray(item.findingIds) ? item.findingIds.map(String).slice(0, 200) : [],
+    screenshotIds: Array.isArray(item.screenshotIds) ? item.screenshotIds.map(String).slice(0, 80) : [],
+    createdAt: String(item.createdAt || new Date().toISOString()),
+    updatedAt: String(item.updatedAt || new Date().toISOString())
+  };
+}
+
+export function normalizeThemes(payload, runId) {
+  const themes = Array.isArray(payload?.themes) ? payload.themes : [];
+  return {
+    schemaVersion: UI_REVIEW_SCHEMA_VERSION,
+    runId,
+    generatedAt: String(payload?.generatedAt || new Date().toISOString()),
+    themes: themes.map((item, index) => normalizeTheme(item, index, runId))
+  };
+}
+
 function createFinding(shot, rule, partial) {
   const idBase = `${shot.id}__${rule}`;
   const key = partial.findingKey ?? "main";
@@ -292,6 +326,160 @@ function findingsFromVisualSignals(shot) {
   return findings;
 }
 
+function pageFamilyFromScreenshotId(screenshotId = "") {
+  return String(screenshotId).split("__")[0] || "page";
+}
+
+function uniqueStrings(values, limit = 80) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values) {
+    const text = safeText(value, 160);
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    result.push(text);
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
+function severityRank(value) {
+  return { P0: 0, P1: 1, P2: 2, P3: 3 }[value] ?? 2;
+}
+
+function highestSeverity(items) {
+  return items.reduce((result, item) => (
+    severityRank(item.severity) < severityRank(result) ? item.severity : result
+  ), "P3");
+}
+
+function themeId(runId, key) {
+  const normalizedKey = String(key || "theme")
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "theme";
+  return `${runId}__theme__${normalizedKey}`;
+}
+
+function createTheme(runId, key, partial, findings) {
+  return {
+    themeId: themeId(runId, key),
+    runId,
+    source: "auto",
+    category: "违规实现",
+    status: "needs-decision",
+    decision: "需要判断",
+    evidenceCount: findings.length,
+    findingIds: findings.map((finding) => finding.findingId),
+    screenshotIds: uniqueStrings(findings.map((finding) => finding.screenshotId)),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...partial
+  };
+}
+
+function groupBy(items, keyFn) {
+  const groups = new Map();
+  for (const item of items) {
+    const key = keyFn(item);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+  return groups;
+}
+
+function summarizePages(findings) {
+  return uniqueStrings(findings.map((finding) => pageFamilyFromScreenshotId(finding.screenshotId)), 8).join("、");
+}
+
+function screenshotIdsWithImageFailures(manifest) {
+  const result = new Set();
+  for (const shot of manifest.screenshots || []) {
+    const hasImageNetworkFailure = (shot.networkFailures || []).some((request) => isImageRequest(request.url));
+    const hasImageFailure = Boolean(shot.checks?.imageFailures?.length);
+    if (hasImageNetworkFailure || hasImageFailure) result.add(shot.id);
+  }
+  return result;
+}
+
+export function buildThemes(manifest, findingsPayload) {
+  const runId = manifest?.runId || findingsPayload?.runId || "";
+  const findings = normalizeFindings(findingsPayload, runId).findings;
+  const imageShotIds = screenshotIdsWithImageFailures(manifest || {});
+  const usedFindingIds = new Set();
+  const themes = [];
+
+  const imageFindings = findings.filter((finding) => (
+    finding.rule === "image-failure"
+    || (finding.rule === "network-failure" && finding.component === "image-assets")
+    || (finding.rule === "console-error" && imageShotIds.has(finding.screenshotId))
+  ));
+  if (imageFindings.length) {
+    for (const finding of imageFindings) usedFindingIds.add(finding.findingId);
+    themes.push(createTheme(runId, "external-image-assets", {
+      severity: "P1",
+      component: "image-assets",
+      rule: "external-image-failure",
+      title: "外部卡图资源在本地审查环境不可达",
+      detail: `影响 ${summarizePages(imageFindings)}，共 ${imageFindings.length} 条证据。该主题优先判断为审查环境前置问题；不要把同类图片失败逐条交给用户裁决。`
+    }, imageFindings));
+  }
+
+  const remaining = findings.filter((finding) => !usedFindingIds.has(finding.findingId));
+  const headerTargets = remaining.filter((finding) => (
+    finding.rule === "small-target"
+    && /Common_Header_Brand|Common_NavPrimary/.test(finding.component)
+  ));
+  if (headerTargets.length) {
+    for (const finding of headerTargets) usedFindingIds.add(finding.findingId);
+    themes.push(createTheme(runId, "mobile-header-touch-targets", {
+      severity: highestSeverity(headerTargets),
+      component: "Common_Header",
+      rule: "small-target",
+      title: "移动端 Header 点击区偏小",
+      detail: `影响 ${summarizePages(headerTargets)}，共 ${headerTargets.length} 条证据。建议作为全站 Header 单独议题处理。`
+    }, headerTargets));
+  }
+
+  const grouped = groupBy(
+    findings.filter((finding) => !usedFindingIds.has(finding.findingId)),
+    (finding) => `${pageFamilyFromScreenshotId(finding.screenshotId)}:${finding.rule}`
+  );
+  for (const [key, group] of grouped.entries()) {
+    const [pageFamily, rule] = key.split(":");
+    const titles = {
+      "console-error": `${pageFamily} 控制台错误`,
+      "network-failure": `${pageFamily} 页面请求失败`,
+      "http-error": `${pageFamily} API/资源返回错误状态`,
+      "small-target": `${pageFamily} 可点击区域偏小`,
+      "text-overflow": `${pageFamily} 文本溢出或裁切`,
+      "large-empty-container": `${pageFamily} 存在大块空白容器`,
+      "element-overlap": `${pageFamily} 元素疑似重叠`,
+      "horizontal-overflow": `${pageFamily} 横向溢出`,
+      "missing-navigation": `${pageFamily} 首屏导航缺失`,
+      "missing-heading": `${pageFamily} 首屏标题缺失`
+    };
+    themes.push(createTheme(runId, `${pageFamily}-${rule}`, {
+      severity: highestSeverity(group),
+      component: uniqueStrings(group.map((finding) => finding.component), 3).join(" / ") || "page",
+      rule,
+      title: titles[rule] || `${pageFamily} ${rule}`,
+      detail: `共 ${group.length} 条证据，涉及 ${uniqueStrings(group.map((finding) => finding.screenshotId), 4).join("、")}。`
+    }, group));
+  }
+
+  const sortedThemes = themes
+    .sort((a, b) => severityRank(a.severity) - severityRank(b.severity) || b.evidenceCount - a.evidenceCount)
+    .slice(0, 10);
+  return normalizeThemes({
+    schemaVersion: UI_REVIEW_SCHEMA_VERSION,
+    runId,
+    generatedAt: new Date().toISOString(),
+    themes: sortedThemes
+  }, runId);
+}
+
 export function buildFindings(manifest) {
   if (!manifest || !Array.isArray(manifest.screenshots)) {
     throw new Error("manifest.screenshots is required");
@@ -317,9 +505,13 @@ async function main() {
   const runDir = resolve(paths.outputRoot, runId);
   const manifest = await readJson(resolve(runDir, "manifest.json"), null);
   const output = buildFindings(manifest);
+  const themes = buildThemes(manifest, output);
   await writeFile(resolve(runDir, "findings.json"), `${JSON.stringify(output, null, 2)}\n`, "utf8");
+  await writeFile(resolve(runDir, "themes.json"), `${JSON.stringify(themes, null, 2)}\n`, "utf8");
   console.log(`[ui-review] findings=${output.findings.length}`);
+  console.log(`[ui-review] themes=${themes.themes.length}`);
   console.log(`[ui-review] wrote ${resolve(runDir, "findings.json")}`);
+  console.log(`[ui-review] wrote ${resolve(runDir, "themes.json")}`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {

@@ -8,7 +8,7 @@ import {
   latestRunDirName,
   pathsFromMetaUrl
 } from "./config.mjs";
-import { normalizeFindings } from "./audit.mjs";
+import { buildThemes, normalizeFindings, normalizeThemes } from "./audit.mjs";
 
 const paths = pathsFromMetaUrl(import.meta.url);
 
@@ -133,6 +133,27 @@ function findingMarkdown(findings) {
   ].join("\n");
 }
 
+function themeMarkdown(themes) {
+  if (!themes.themes.length) return "暂无主题候选问题。";
+  const rows = themes.themes.map((item) => [
+    item.themeId,
+    item.severity,
+    item.category,
+    item.component || "-",
+    item.rule || "-",
+    item.status || "-",
+    item.decision || "-",
+    item.evidenceCount || item.findingIds?.length || 0,
+    item.title || "-",
+    (item.detail || "-").replace(/\|/g, "/")
+  ]);
+  return [
+    "| 主题 | 严重度 | 分类 | 组件 | 规则 | 状态 | 裁决 | 证据数 | 标题 | 说明 |",
+    "|---|---|---|---|---|---|---|---:|---|---|",
+    ...rows.map((row) => `| ${row.join(" | ")} |`)
+  ].join("\n");
+}
+
 function screenshotMarkdown(manifest, runDir) {
   return manifest.screenshots.map((shot) => {
     const absolutePath = resolve(runDir, shot.screenshotPath);
@@ -222,16 +243,21 @@ function reportTemplate() {
 理由：`;
 }
 
-export async function buildReviewInput({ manifest, annotations, findings = {}, docs, gitStatus, gitDiffStat, runDir }) {
+export async function buildReviewInput({ manifest, annotations, findings = {}, themes = {}, docs, gitStatus, gitDiffStat, runDir }) {
   validateManifest(manifest);
   const normalizedAnnotations = normalizeAnnotations(annotations, manifest.runId);
   const normalizedFindings = normalizeFindings(findings, manifest.runId);
+  const normalizedThemes = normalizeThemes(
+    Array.isArray(themes?.themes) && themes.themes.length ? themes : buildThemes(manifest, normalizedFindings),
+    manifest.runId
+  );
   return `# Codex UI一致性审查输入
 
 请主动审查所有截图、DOM 摘要和自动候选问题。
 只输出 UI一致性审查报告，不直接修改代码。
-优先列出 Codex 主动发现的问题，再列人工补充。
-自动候选问题是线索，不是最终结论；如果用户已裁决为误报或合法变体，必须在报告里体现。
+优先处理“自动主题问题”，再把原始 findings 当作证据查看。
+自动主题问题和原始 findings 都是线索，不是最终结论；如果用户已裁决为误报或合法变体，必须在报告里体现。
+外部图片失败如果集中来自本地审查环境，必须归因为审查环境前置问题，不要逐条当作业务 UI 缺陷。
 
 ## Run
 
@@ -258,7 +284,11 @@ ${gitDiffStat || "-"}
 
 ${checksMarkdown(manifest)}
 
-## 自动候选问题
+## 自动主题问题
+
+${themeMarkdown(normalizedThemes)}
+
+## 原始候选问题证据
 
 ${findingMarkdown(normalizedFindings)}
 
@@ -290,15 +320,17 @@ async function main() {
   const manifest = await readJson(resolve(runDir, "manifest.json"), null);
   const annotations = normalizeAnnotations(await readJson(resolve(runDir, "annotations.json"), {}), runId);
   const findings = normalizeFindings(await readJson(resolve(runDir, "findings.json"), {}), runId);
+  const themes = normalizeThemes(await readJson(resolve(runDir, "themes.json"), buildThemes(manifest, findings)), runId);
   const docs = await Promise.all(DESIGN_DOCS.map(async (path) => ({
     path,
     content: await readOptionalText(resolve(paths.repoRoot, path))
   })));
   const gitStatus = await runGit(["status", "--short"]);
   const gitDiffStat = await runGit(["diff", "--stat"]);
-  const reviewInput = await buildReviewInput({ manifest, annotations, findings, docs, gitStatus, gitDiffStat, runDir });
+  const reviewInput = await buildReviewInput({ manifest, annotations, findings, themes, docs, gitStatus, gitDiffStat, runDir });
   await writeFile(resolve(runDir, "annotations.json"), `${JSON.stringify(annotations, null, 2)}\n`, "utf8");
   await writeFile(resolve(runDir, "findings.json"), `${JSON.stringify(findings, null, 2)}\n`, "utf8");
+  await writeFile(resolve(runDir, "themes.json"), `${JSON.stringify(themes, null, 2)}\n`, "utf8");
   await writeFile(resolve(runDir, "review-input.md"), reviewInput, "utf8");
   await writeFile(resolve(runDir, "report.md"), `${reportTemplate()}\n`, { encoding: "utf8", flag: "wx" }).catch((error) => {
     if (error?.code !== "EEXIST") throw error;

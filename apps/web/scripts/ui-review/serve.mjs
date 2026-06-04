@@ -9,7 +9,7 @@ import {
   pathsFromMetaUrl
 } from "./config.mjs";
 import { normalizeAnnotations } from "./packet.mjs";
-import { normalizeFindings } from "./audit.mjs";
+import { normalizeFindings, normalizeThemes } from "./audit.mjs";
 
 const paths = pathsFromMetaUrl(import.meta.url);
 const args = parseArgs(process.argv.slice(2));
@@ -123,6 +123,7 @@ function html() {
     .Actions { display: flex; gap: 8px; flex-wrap: wrap; }
     .Primary { background: #b43731; color: #fff; border-color: #b43731; }
     .List { display: grid; gap: 8px; max-height: 360px; overflow: auto; }
+    .EvidenceList { max-height: 220px; }
     .Item { text-align: left; padding: 8px; background: #fff; border: 1px solid #e0c99d; }
     .Item strong { display: block; }
     .Item small { color: #665342; }
@@ -152,8 +153,12 @@ function html() {
     </section>
     <aside>
       <section class="Panel">
-        <h2>自动候选问题</h2>
-        <div id="findingList" class="List"></div>
+        <h2>主题候选问题</h2>
+        <div id="themeList" class="List"></div>
+        <details>
+          <summary>原始证据</summary>
+          <div id="findingList" class="List EvidenceList"></div>
+        </details>
       </section>
       <section class="Panel">
         <h2>当前问题</h2>
@@ -201,7 +206,7 @@ function html() {
   <script>
     const params = new URLSearchParams(location.search);
     const runId = params.get("runId") || "";
-    const state = { manifest: null, annotations: [], findings: [], activeId: "", activeType: "", drag: null };
+    const state = { manifest: null, annotations: [], findings: [], themes: [], activeId: "", activeType: "", drag: null };
     const els = {
       shotSelect: document.querySelector("#shotSelect"),
       reloadButton: document.querySelector("#reloadButton"),
@@ -218,6 +223,7 @@ function html() {
       statusField: document.querySelector("#statusField"),
       newButton: document.querySelector("#newButton"),
       deleteButton: document.querySelector("#deleteButton"),
+      themeList: document.querySelector("#themeList"),
       findingList: document.querySelector("#findingList"),
       annotationList: document.querySelector("#annotationList")
     };
@@ -234,7 +240,11 @@ function html() {
     function activeFinding() {
       return state.findings.find((item) => item.findingId === state.activeId) || null;
     }
+    function activeTheme() {
+      return state.themes.find((item) => item.themeId === state.activeId) || null;
+    }
     function activeIssue() {
+      if (state.activeType === "theme") return activeTheme();
       return state.activeType === "finding" ? activeFinding() : activeAnnotation();
     }
     function updateStatus(text) {
@@ -257,7 +267,7 @@ function html() {
       item.component = els.component.value.trim();
       item.rule = els.rule.value.trim();
       item.note = els.note.value.trim();
-      item.detail = state.activeType === "finding" ? els.note.value.trim() : item.detail;
+      item.detail = state.activeType === "finding" || state.activeType === "theme" ? els.note.value.trim() : item.detail;
       item.decision = els.decision.value;
       item.status = els.statusField.value;
       item.updatedAt = new Date().toISOString();
@@ -293,7 +303,11 @@ function html() {
     }
     function renderBoxes() {
       for (const box of Array.from(els.imageWrap.querySelectorAll(".Box"))) box.remove();
-      for (const item of state.findings.filter((finding) => finding.screenshotId === activeShotId())) {
+      const activeThemeFindingIds = new Set(activeTheme()?.findingIds || []);
+      const visibleFindingBoxes = state.activeType === "theme"
+        ? state.findings.filter((finding) => activeThemeFindingIds.has(finding.findingId) && finding.screenshotId === activeShotId())
+        : state.findings.filter((finding) => finding.findingId === state.activeId && finding.screenshotId === activeShotId());
+      for (const item of visibleFindingBoxes) {
         if (!item.rect || item.rect.width <= 0 || item.rect.height <= 0) continue;
         const box = document.createElement("button");
         box.type = "button";
@@ -333,7 +347,11 @@ function html() {
     }
     function renderFindings() {
       els.findingList.innerHTML = "";
-      const visibleFindings = state.findings.filter((finding) => finding.screenshotId === activeShotId());
+      const activeThemeFindingIds = new Set(activeTheme()?.findingIds || []);
+      const visibleFindings = state.findings.filter((finding) => {
+        if (state.activeType === "theme") return activeThemeFindingIds.has(finding.findingId);
+        return finding.screenshotId === activeShotId();
+      });
       if (!visibleFindings.length) {
         const empty = document.createElement("div");
         empty.className = "Item";
@@ -390,6 +408,65 @@ function html() {
         els.findingList.appendChild(wrapper);
       }
     }
+    function renderThemes() {
+      els.themeList.innerHTML = "";
+      if (!state.themes.length) {
+        const empty = document.createElement("div");
+        empty.className = "Item";
+        empty.textContent = "暂无主题候选问题";
+        els.themeList.appendChild(empty);
+        return;
+      }
+      for (const item of state.themes) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "Item"
+          + (item.themeId === state.activeId ? " Active" : "")
+          + (item.status === "confirmed" ? " Confirmed" : "")
+          + (item.status === "false-positive" ? " FalsePositive" : "");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.style.width = "100%";
+        button.style.border = "0";
+        button.style.background = "transparent";
+        button.style.padding = "0";
+        button.style.textAlign = "left";
+        button.innerHTML = "<strong>" + item.severity + " " + (item.title || item.component || "主题问题") + "</strong><small>"
+          + (item.component || "-") + " / " + (item.rule || "-") + " / 证据 " + (item.evidenceCount || item.findingIds?.length || 0) + " 条</small>";
+        button.addEventListener("click", () => {
+          state.activeId = item.themeId;
+          state.activeType = "theme";
+          writeForm(item);
+          render();
+        });
+        const select = document.createElement("select");
+        select.value = item.status || "needs-decision";
+        for (const option of [
+          ["needs-decision", "需要判断"],
+          ["confirmed", "确认修复"],
+          ["false-positive", "误报"],
+          ["variant", "合法变体"],
+          ["new-standard", "疑似新规范"],
+          ["open", "待处理"]
+        ]) {
+          const optionEl = document.createElement("option");
+          optionEl.value = option[0];
+          optionEl.textContent = option[1];
+          select.appendChild(optionEl);
+        }
+        select.addEventListener("change", () => {
+          item.status = select.value;
+          item.decision = select.options[select.selectedIndex].textContent;
+          item.updatedAt = new Date().toISOString();
+          state.activeId = item.themeId;
+          state.activeType = "theme";
+          writeForm(item);
+          render();
+        });
+        wrapper.appendChild(button);
+        wrapper.appendChild(select);
+        els.themeList.appendChild(wrapper);
+      }
+    }
     function renderList() {
       els.annotationList.innerHTML = "";
       for (const item of state.annotations.filter((ann) => ann.screenshotId === activeShotId())) {
@@ -408,6 +485,7 @@ function html() {
     }
     function render() {
       renderBoxes();
+      renderThemes();
       renderFindings();
       renderList();
     }
@@ -415,9 +493,11 @@ function html() {
       const manifest = await fetch(api("/api/manifest")).then((res) => res.json());
       const annotations = await fetch(api("/api/annotations")).then((res) => res.json());
       const findings = await fetch(api("/api/findings")).then((res) => res.json());
+      const themes = await fetch(api("/api/themes")).then((res) => res.json());
       state.manifest = manifest;
       state.annotations = annotations.annotations || [];
       state.findings = findings.findings || [];
+      state.themes = themes.themes || [];
       els.shotSelect.innerHTML = "";
       for (const shot of manifest.screenshots) {
         const option = document.createElement("option");
@@ -458,6 +538,16 @@ function html() {
           runId: state.manifest.runId,
           generatedAt: new Date().toISOString(),
           findings: state.findings
+        })
+      });
+      await fetch(api("/api/themes"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          runId: state.manifest.runId,
+          generatedAt: new Date().toISOString(),
+          themes: state.themes
         })
       });
       updateStatus("已保存 " + new Date().toLocaleTimeString());
@@ -536,6 +626,12 @@ const server = createServer(async (request, response) => {
       sendJson(response, 200, await readJson(runPath(runId, "findings.json"), fallback));
       return;
     }
+    if (request.method === "GET" && url.pathname === "/api/themes") {
+      const runId = await resolveRunId(url.searchParams.get("runId") || args.runId || "");
+      const fallback = { schemaVersion: UI_REVIEW_SCHEMA_VERSION, runId, generatedAt: new Date().toISOString(), themes: [] };
+      sendJson(response, 200, await readJson(runPath(runId, "themes.json"), fallback));
+      return;
+    }
     if (request.method === "POST" && url.pathname === "/api/annotations") {
       const runId = await resolveRunId(url.searchParams.get("runId") || args.runId || "");
       const payload = normalizeAnnotations(JSON.parse(await readBody(request)), runId);
@@ -547,6 +643,13 @@ const server = createServer(async (request, response) => {
       const runId = await resolveRunId(url.searchParams.get("runId") || args.runId || "");
       const payload = normalizeFindings(JSON.parse(await readBody(request, 5 * 1024 * 1024)), runId);
       await writeFile(runPath(runId, "findings.json"), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+      sendJson(response, 200, payload);
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/themes") {
+      const runId = await resolveRunId(url.searchParams.get("runId") || args.runId || "");
+      const payload = normalizeThemes(JSON.parse(await readBody(request, 5 * 1024 * 1024)), runId);
+      await writeFile(runPath(runId, "themes.json"), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
       sendJson(response, 200, payload);
       return;
     }
