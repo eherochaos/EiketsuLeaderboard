@@ -8,3 +8,4 @@ apps/web/public/data/leaderboard-snapshot.json
 npm-cache/
 __pycache__/
 *.pyc
+output/ui-review/
