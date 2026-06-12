@@ -13,7 +13,7 @@ from eiketsu_env.db.base import Base
 from eiketsu_env.db.models import RawSnapshot
 from eiketsu_env.db.session import make_engine
 from eiketsu_env.services import client_upload
-from eiketsu_env.services.battle_festival import BattleFestivalPeriod
+from eiketsu_env.services.battle_festival import BattleFestivalPeriod, BattleFestivalProbeResult
 from eiketsu_env.services.client_upload import (
     apply_client_date_override,
     bind_client,
@@ -70,7 +70,11 @@ def _detail() -> dict:
 
 @pytest.fixture(autouse=True)
 def _skip_battle_festival_probe(monkeypatch):
-    monkeypatch.setattr(client_upload, "detect_battle_festival_period", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        client_upload,
+        "probe_battle_festival_period",
+        lambda *args, **kwargs: BattleFestivalProbeResult(None, "no_period", "skip battle festival"),
+    )
 
 
 def test_bind_client_saves_local_config(tmp_path, monkeypatch):
@@ -241,8 +245,12 @@ def test_sync_client_collects_and_uploads_active_battle_festival_scope(tmp_path,
     monkeypatch.setattr(client_upload, "collect_follow", fake_collect)
     monkeypatch.setattr(
         client_upload,
-        "detect_battle_festival_period",
-        lambda *args, **kwargs: BattleFestivalPeriod("2026-06-11", "2026-06-13"),
+        "probe_battle_festival_period",
+        lambda *args, **kwargs: BattleFestivalProbeResult(
+            BattleFestivalPeriod("2026-06-11", "2026-06-13"),
+            "active",
+            "active battle festival",
+        ),
     )
     monkeypatch.setattr(client_upload, "today_jst", lambda: date(2026, 6, 12))
 
@@ -251,22 +259,58 @@ def test_sync_client_collects_and_uploads_active_battle_festival_scope(tmp_path,
     assert result.battle_festival_collect_result is not None
     assert result.battle_festival_upload is not None
     assert [(date_from, date_to) for date_from, date_to, _ in seen_calls] == [
-        ("2026-06-10", "2026-06-14"),
         ("2026-06-11", "2026-06-12"),
+        ("2026-06-10", "2026-06-14"),
     ]
-    assert seen_calls[0][2]["mode_scope"] == MODE_SCOPE_TIER_LIST
-    assert seen_calls[0][2]["include_battle_festival"] is False
-    assert seen_calls[1][2]["mode_scope"] == MODE_SCOPE_BATTLE_FESTIVAL
-    assert seen_calls[1][2]["include_battle_festival"] is True
+    assert seen_calls[0][2]["mode_scope"] == MODE_SCOPE_BATTLE_FESTIVAL
+    assert seen_calls[0][2]["include_battle_festival"] is True
+    assert seen_calls[1][2]["mode_scope"] == MODE_SCOPE_TIER_LIST
+    assert seen_calls[1][2]["include_battle_festival"] is False
     assert len(transport.upload_payloads) == 2
     manifests = [
         json.loads(payload["package_text"].splitlines()[0])
         for payload in transport.upload_payloads
     ]
-    assert manifests[0]["mode_scope"] == MODE_SCOPE_TIER_LIST
-    assert manifests[1]["mode_scope"] == MODE_SCOPE_BATTLE_FESTIVAL
-    assert manifests[1]["festival_date_from"] == "2026-06-11"
-    assert manifests[1]["festival_date_to"] == "2026-06-13"
+    assert manifests[0]["mode_scope"] == MODE_SCOPE_BATTLE_FESTIVAL
+    assert manifests[0]["festival_date_from"] == "2026-06-11"
+    assert manifests[0]["festival_date_to"] == "2026-06-13"
+    assert manifests[1]["mode_scope"] == MODE_SCOPE_TIER_LIST
+
+
+def test_sync_client_reports_battle_festival_probe_failure(tmp_path, monkeypatch):
+    monkeypatch.setenv("EIKETSU_CLIENT_CONFIG_DIR", str(tmp_path / "client-config"))
+    settings = _settings(tmp_path)
+    save_client_config(
+        settings,
+        client_upload.ClientConfig(
+            server_url="http://127.0.0.1:8000",
+            api_token="token-secret",
+            contributor="alice",
+            user_public_id="u_test",
+        ),
+    )
+    transport = _FakeTransport()
+    progress = _FakeProgress()
+
+    def fake_collect(settings, date_from, date_to, **kwargs):
+        engine = make_engine(settings)
+        Base.metadata.create_all(engine)
+        return CollectResult(1, "completed", {"matches": 0}, [])
+
+    monkeypatch.setattr(client_upload, "collect_follow", fake_collect)
+    monkeypatch.setattr(
+        client_upload,
+        "probe_battle_festival_period",
+        lambda *args, **kwargs: BattleFestivalProbeResult(None, "auth_failed", "battle festival probe failed"),
+    )
+
+    result = sync_client(settings, interactive_auth=False, transport=transport, progress=progress)
+
+    assert result.battle_festival_upload is None
+    assert any("battle festival probe failed" in message for message in progress.messages)
+    assert len(transport.upload_payloads) == 1
+    manifest = json.loads(transport.upload_payloads[0]["package_text"].splitlines()[0])
+    assert manifest["mode_scope"] == MODE_SCOPE_TIER_LIST
 
 
 def test_fetch_client_share_config_can_request_target_version(tmp_path, monkeypatch):
@@ -376,6 +420,14 @@ def test_check_client_update_uses_server_update_endpoint(tmp_path, monkeypatch):
     assert result.update_available is True
     assert result.latest_version == "0.1.2"
     assert transport.calls[-1][1].endswith("/api/v1/client/update?current_version=0.1.1")
+
+
+class _FakeProgress:
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def message(self, text: str) -> None:
+        self.messages.append(text)
 
 
 class _FakeTransport:

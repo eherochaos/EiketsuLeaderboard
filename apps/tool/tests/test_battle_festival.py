@@ -9,6 +9,7 @@ from eiketsu_env.services.battle_festival import (
     detect_battle_festival_period,
     is_battle_festival_active,
     parse_battle_festival_period,
+    probe_battle_festival_period,
 )
 
 
@@ -46,6 +47,62 @@ def test_detect_battle_festival_period_skips_non_member_page(tmp_path):
             return "<html>login</html>", "https://eiketsu-taisen.net/login/"
 
     assert detect_battle_festival_period(_settings(tmp_path), member_session=FakeMember()) is None
+
+
+def test_probe_battle_festival_period_reports_redirect(tmp_path):
+    class FakeMember:
+        def fetch_text(self, url, timeout=20):
+            return "<html>login</html>", "https://eiketsu-taisen.net/"
+
+    result = probe_battle_festival_period(_settings(tmp_path), member_session=FakeMember())
+
+    assert result.period is None
+    assert result.status == "redirected"
+    assert result.message
+
+
+def test_probe_battle_festival_period_reports_active(tmp_path, monkeypatch):
+    class FakeMember:
+        def fetch_text(self, url, timeout=20):
+            return (
+                "<html><body><p>戦祭り 開催期間 2026年6月11日 ～ 6月13日</p></body></html>",
+                "https://eiketsu-taisen.net/members/festival/",
+            )
+
+    monkeypatch.setattr("eiketsu_env.services.battle_festival.today_jst", lambda: date(2026, 6, 12))
+
+    result = probe_battle_festival_period(_settings(tmp_path), member_session=FakeMember())
+
+    assert result.period == BattleFestivalPeriod("2026-06-11", "2026-06-13")
+    assert result.status == "active"
+
+
+def test_probe_battle_festival_period_reports_no_period(tmp_path):
+    class FakeMember:
+        def fetch_text(self, url, timeout=20):
+            return (
+                "<html><body><p>\u6226\u796d\u308a \u6b21\u56de\u958b\u50ac\u3092\u304a\u5f85\u3061\u304f\u3060\u3055\u3044</p></body></html>",
+                "https://eiketsu-taisen.net/members/festival/",
+            )
+
+    result = probe_battle_festival_period(_settings(tmp_path), member_session=FakeMember())
+
+    assert result.period is None
+    assert result.status == "no_period"
+
+
+def test_probe_battle_festival_period_reports_parse_failed(tmp_path):
+    class FakeMember:
+        def fetch_text(self, url, timeout=20):
+            return (
+                "<html><body><p>\u6226\u796d\u308a \u958b\u50ac\u671f\u9593 2026\u5e746\u670811\u65e5</p></body></html>",
+                "https://eiketsu-taisen.net/members/festival/",
+            )
+
+    result = probe_battle_festival_period(_settings(tmp_path), member_session=FakeMember())
+
+    assert result.period is None
+    assert result.status == "parse_failed"
 
 
 def test_parse_battle_festival_period_handles_year_rollover():

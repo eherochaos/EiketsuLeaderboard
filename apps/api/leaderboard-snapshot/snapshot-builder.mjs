@@ -495,10 +495,13 @@ function matchesBattleFestivalScope(match, shareConfig) {
 
 function mergeBattleFestivalUploadScope(upload, packageById) {
   const packageRow = packageById.get(String(upload.package_id || ""));
+  const modeScope = [packageRow?.mode_scope, upload.mode_scope]
+    .map((value) => String(value || ""))
+    .find((value) => value === "battle_festival") || upload.mode_scope || packageRow?.mode_scope || "";
   return {
     ...packageRow,
     ...upload,
-    mode_scope: upload.mode_scope || packageRow?.mode_scope || "",
+    mode_scope: modeScope,
     festival_date_from: upload.festival_date_from || packageRow?.festival_date_from || "",
     festival_date_to: upload.festival_date_to || packageRow?.festival_date_to || ""
   };

@@ -47,16 +47,20 @@ with make_session_factory(settings)() as session:
     row = session.execute(
         text(
             '''
-            SELECT id, status, imported_match_count, match_count, target_version,
-                   date_from, date_to, mode_scope, festival_date_from, festival_date_to,
-                   created_at, updated_at
-            FROM server_uploads
-            WHERE status = 'completed'
+            SELECT u.id, u.status, u.imported_match_count, u.match_count, u.target_version,
+                   u.date_from, u.date_to,
+                   COALESCE(NULLIF(p.mode_scope, ''), u.mode_scope, '') AS mode_scope,
+                   COALESCE(NULLIF(p.festival_date_from, ''), u.festival_date_from, '') AS festival_date_from,
+                   COALESCE(NULLIF(p.festival_date_to, ''), u.festival_date_to, '') AS festival_date_to,
+                   u.created_at, u.updated_at
+            FROM server_uploads u
+            LEFT JOIN shared_contribution_packages p ON p.package_id = u.package_id
+            WHERE u.status = 'completed'
               AND (
-                COALESCE(imported_match_count, 0) > 0
-                OR COALESCE(mode_scope, '') = 'battle_festival'
+                COALESCE(u.imported_match_count, 0) > 0
+                OR COALESCE(NULLIF(p.mode_scope, ''), u.mode_scope, '') = 'battle_festival'
               )
-            ORDER BY id DESC
+            ORDER BY u.id DESC
             LIMIT 1
             '''
         )

@@ -358,6 +358,7 @@ def _build_refresh_status(
     recent_uploads = _read_recent_uploads(
         legacy_root / "tables" / "server_uploads.jsonl",
         legacy_root / "tables" / "server_users.jsonl",
+        legacy_root / "tables" / "shared_contribution_packages.jsonl",
     )
     manifest = export_manifest if export_manifest is not None else _read_export_manifest(legacy_root)
     return {
@@ -426,15 +427,19 @@ def _read_recent_runs(path: Path, limit: int = RECENT_STATUS_LIMIT) -> list[dict
 def _read_recent_uploads(
     path: Path,
     users_path: Path | None = None,
+    packages_path: Path | None = None,
     limit: int = RECENT_STATUS_LIMIT,
 ) -> list[dict[str, Any]]:
     rows = _read_recent_jsonl(path, limit)
     users_by_id = _read_upload_users(users_path) if users_path else {}
+    packages_by_id = _read_upload_packages(packages_path) if packages_path else {}
     uploads = []
     for row in rows:
         user = users_by_id.get(row.get("user_id")) or {}
+        package = packages_by_id.get(row.get("package_id")) or {}
         contributor_name = row.get("contributor_name") or user.get("contributorName") or ""
         user_public_id = row.get("user_public_id") or user.get("userPublicId") or ""
+        mode_scope = _merged_upload_scope(row, package)
         uploads.append(
             {
                 "id": row.get("id"),
@@ -443,9 +448,9 @@ def _read_recent_uploads(
                 "targetVersion": row.get("target_version"),
                 "dateFrom": row.get("date_from"),
                 "dateTo": row.get("date_to"),
-                "modeScope": row.get("mode_scope") or "tier_list",
-                "festivalDateFrom": row.get("festival_date_from") or "",
-                "festivalDateTo": row.get("festival_date_to") or "",
+                "modeScope": mode_scope or "tier_list",
+                "festivalDateFrom": row.get("festival_date_from") or package.get("festival_date_from") or "",
+                "festivalDateTo": row.get("festival_date_to") or package.get("festival_date_to") or "",
                 "status": row.get("status"),
                 "matchCount": row.get("match_count"),
                 "importedMatchCount": row.get("imported_match_count"),
@@ -455,6 +460,29 @@ def _read_recent_uploads(
             }
         )
     return uploads
+
+
+def _merged_upload_scope(upload: dict[str, Any], package: dict[str, Any]) -> str:
+    for value in (package.get("mode_scope"), upload.get("mode_scope")):
+        if str(value or "") == "battle_festival":
+            return "battle_festival"
+    return str(upload.get("mode_scope") or package.get("mode_scope") or "")
+
+
+def _read_upload_packages(path: Path | None) -> dict[Any, dict[str, str]]:
+    if path is None:
+        return {}
+    packages: dict[Any, dict[str, str]] = {}
+    for row in _read_recent_jsonl(path, 100000):
+        package_id = row.get("package_id")
+        if package_id is None:
+            continue
+        packages[package_id] = {
+            "mode_scope": str(row.get("mode_scope") or ""),
+            "festival_date_from": str(row.get("festival_date_from") or ""),
+            "festival_date_to": str(row.get("festival_date_to") or ""),
+        }
+    return packages
 
 
 def _read_upload_users(path: Path | None) -> dict[Any, dict[str, str]]:

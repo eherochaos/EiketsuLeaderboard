@@ -24,6 +24,7 @@ from eiketsu_env.services.battle_festival import (
     BattleFestivalPeriod,
     detect_battle_festival_period,
     is_battle_festival_active,
+    probe_battle_festival_period,
     today_jst,
 )
 from eiketsu_env.services.collector import CollectResult, collect_follow
@@ -180,30 +181,16 @@ def sync_client(
     _ensure_client_database(settings)
     if progress:
         progress.message("快速同步模式：并发采集详情，自动跳过已完整采集的旧详情")
-    collect_result = collect_follow(
-        settings,
-        tier_config.date_from,
-        tier_config.date_to,
-        include_solo=tier_config.include_solo,
-        include_battle_festival=False,
-        mode_scope=tier_config.mode_scope,
-        auth_source=auth_source,
-        interactive_auth=interactive_auth,
-        skip_existing=True,
-        skip_inactive=True,
-        concurrency_profile="aggressive",
-        progress=progress,
-        save_raw_snapshots=False,
-    )
-    upload, package_path = _upload_contribution(settings, config, transport, tier_config, progress)
-
     battle_collect = None
     battle_upload = None
     battle_package_path = None
-    battle_config = active_battle_festival_share_config(settings, share_config, auth_source=auth_source)
+    battle_probe = probe_battle_festival_period(settings, auth_source=auth_source, interactive_auth=interactive_auth)
+    if progress and battle_probe.message:
+        progress.message(battle_probe.message)
+    battle_config = battle_festival_share_config_from_period(share_config, battle_probe.period)
     if battle_config is not None:
         if progress:
-            progress.message(f"检测到战祭周期 {battle_config.festival_date_from} - {battle_config.festival_date_to}，开始独立采集")
+            progress.message(f"战祭已开启 {battle_config.festival_date_from} - {battle_config.festival_date_to}，开始独立采集")
         battle_collect = collect_follow(
             settings,
             battle_config.date_from,
@@ -220,8 +207,23 @@ def sync_client(
             save_raw_snapshots=False,
         )
         battle_upload, battle_package_path = _upload_contribution(settings, config, transport, battle_config, progress)
-    elif progress:
-        progress.message("未检测到进行中的战祭，跳过战祭采集")
+
+    collect_result = collect_follow(
+        settings,
+        tier_config.date_from,
+        tier_config.date_to,
+        include_solo=tier_config.include_solo,
+        include_battle_festival=False,
+        mode_scope=tier_config.mode_scope,
+        auth_source=auth_source,
+        interactive_auth=interactive_auth,
+        skip_existing=True,
+        skip_inactive=True,
+        concurrency_profile="aggressive",
+        progress=progress,
+        save_raw_snapshots=False,
+    )
+    upload, package_path = _upload_contribution(settings, config, transport, tier_config, progress)
 
     return ClientSyncResult(
         collect_result=collect_result,
@@ -347,19 +349,27 @@ def active_battle_festival_share_config(
     period: BattleFestivalPeriod | None = None,
 ) -> ShareConfig | None:
     detected = period or detect_battle_festival_period(settings, auth_source=auth_source, interactive_auth=False)
-    current_day = today_jst()
-    if not is_battle_festival_active(detected, today=current_day):
+    return battle_festival_share_config_from_period(base_config, detected)
+
+
+def battle_festival_share_config_from_period(
+    base_config: ShareConfig,
+    period: BattleFestivalPeriod | None,
+    current_day: date | None = None,
+) -> ShareConfig | None:
+    current_day = current_day or today_jst()
+    if not is_battle_festival_active(period, today=current_day):
         return None
-    assert detected is not None
-    collect_to = min(detected.date_to, current_day.isoformat())
+    assert period is not None
+    collect_to = min(period.date_to, current_day.isoformat())
     battle_config = ShareConfig(
         schema_version=base_config.schema_version,
         target_version=base_config.target_version,
-        date_from=detected.date_from,
+        date_from=period.date_from,
         date_to=collect_to,
         mode_scope=MODE_SCOPE_BATTLE_FESTIVAL,
-        festival_date_from=detected.date_from,
-        festival_date_to=detected.date_to,
+        festival_date_from=period.date_from,
+        festival_date_to=period.date_to,
         include_solo=False,
         include_battle_festival=True,
         high_ranker_rank=base_config.high_ranker_rank,
