@@ -208,18 +208,32 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
                     {
                         "id": 21,
                         "user_id": 11,
+                        "package_id": "pkg-battle",
                         "target_version": "Ver.3.5.0B",
                         "date_from": "2026-06-01",
                         "date_to": "2026-06-01",
-                        "mode_scope": "battle_festival",
-                        "festival_date_from": "2026-06-11",
-                        "festival_date_to": "2026-06-13",
+                        "mode_scope": "tier_list",
+                        "festival_date_from": "",
+                        "festival_date_to": "",
                         "status": "completed",
                         "match_count": 12,
                         "imported_match_count": 10,
                         "error_summary_json": [],
                         "created_at": "2026-06-01T12:00:00",
                         "updated_at": "2026-06-01T12:01:00",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (tables_root / "shared_contribution_packages.jsonl").write_text(
+                json.dumps(
+                    {
+                        "package_id": "pkg-battle",
+                        "mode_scope": "battle_festival",
+                        "festival_date_from": "2026-06-11",
+                        "festival_date_to": "2026-06-13",
                     },
                     ensure_ascii=False,
                 )

@@ -478,7 +478,7 @@ async function testRefreshWritesManifestOnlyBattleFestivalSnapshot() {
   try {
     await createLegacyFixture(legacyRoot, {
       battleFestivalUploadScope: {
-        upload: { mode_scope: "", festival_date_from: "", festival_date_to: "" },
+        upload: { mode_scope: "tier_list", festival_date_from: "", festival_date_to: "" },
         package: {
           mode_scope: "battle_festival",
           festival_date_from: "2026-06-11",

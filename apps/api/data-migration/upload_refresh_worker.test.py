@@ -73,6 +73,10 @@ class UploadRefreshWorkerTests(unittest.TestCase):
             self.assertEqual(result["uploadId"], 13)
             self.assertEqual(calls, ["refresh"])
 
+    def test_latest_upload_query_joins_package_scope(self) -> None:
+        self.assertIn("LEFT JOIN shared_contribution_packages", upload_refresh_worker.LATEST_UPLOAD_QUERY)
+        self.assertIn("COALESCE(NULLIF(p.mode_scope, ''), u.mode_scope", upload_refresh_worker.LATEST_UPLOAD_QUERY)
+
     def test_lock_skip_result_is_returned(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config = self._config(Path(temp_dir))
