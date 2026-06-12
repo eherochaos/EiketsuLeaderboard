@@ -160,11 +160,37 @@ async function createLegacyFixture(root, options = {}) {
   const cardRoot = join(root, "cards");
   const includeBattleFestival = Boolean(options.includeBattleFestival);
   const includeBattleFestivalMatches = Boolean(options.includeBattleFestivalMatches);
+  const battleFestivalUploadScope = options.battleFestivalUploadScope || null;
   await mkdir(tableRoot, { recursive: true });
   await mkdir(cardRoot, { recursive: true });
   await writeJsonl(join(tableRoot, "server_share_config.jsonl"), [
     { id: 1, target_version: "Ver.test", updated_at: "2026-05-25T00:00:00" }
   ]);
+  if (battleFestivalUploadScope) {
+    await writeJsonl(join(tableRoot, "server_uploads.jsonl"), [
+      {
+        id: 10,
+        status: "completed",
+        package_id: "pkg-battle-festival",
+        target_version: "Ver.test",
+        date_from: "2026-06-11",
+        date_to: "2026-06-12",
+        imported_match_count: 0,
+        ...battleFestivalUploadScope.upload
+      }
+    ]);
+    await writeJsonl(join(tableRoot, "shared_contribution_packages.jsonl"), [
+      {
+        id: 20,
+        package_id: "pkg-battle-festival",
+        target_version: "Ver.test",
+        mode_scope: "battle_festival",
+        festival_date_from: "2026-06-11",
+        festival_date_to: "2026-06-13",
+        ...battleFestivalUploadScope.package
+      }
+    ]);
+  }
   const runs = [
     {
       id: 1,
@@ -444,8 +470,41 @@ async function testRefreshBuildsBattleFestivalSnapshotFromMatches() {
   }
 }
 
+async function testRefreshWritesManifestOnlyBattleFestivalSnapshot() {
+  const root = await mkdtemp(join(tmpdir(), "battle-festival-empty-refresh-"));
+  const legacyRoot = join(root, "legacy-service");
+  const outputPath = join(root, "published", "leaderboard-snapshot.json");
+
+  try {
+    await createLegacyFixture(legacyRoot, {
+      battleFestivalUploadScope: {
+        upload: { mode_scope: "", festival_date_from: "", festival_date_to: "" },
+        package: {
+          mode_scope: "battle_festival",
+          festival_date_from: "2026-06-11",
+          festival_date_to: "2026-06-13"
+        }
+      }
+    });
+    const { battleFestival } = await refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: false });
+    const battleFestivalText = await readFile(join(root, "published", "battle-festival-snapshot.json"), "utf8");
+    const battleFestivalSnapshot = JSON.parse(battleFestivalText);
+
+    assert.equal(battleFestival.status, "completed");
+    assert.equal(battleFestival.sourceRunId, 0);
+    assert.equal(battleFestivalSnapshot.metadata.sourceKind, "battle_festival");
+    assert.equal(battleFestivalSnapshot.metadata.dateFrom, "2026-06-11");
+    assert.equal(battleFestivalSnapshot.metadata.dateTo, "2026-06-13");
+    assert.equal(battleFestivalSnapshot.metadata.sampleSize, 0);
+    assert.equal(battleFestivalSnapshot.tierRows.length, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 await testRefreshWritesAtomicSnapshot();
 await testRefreshWritesBattleFestivalSnapshot();
 await testRefreshBuildsBattleFestivalSnapshotFromMatches();
+await testRefreshWritesManifestOnlyBattleFestivalSnapshot();
 
 console.log("leaderboard snapshot refresh tests passed");

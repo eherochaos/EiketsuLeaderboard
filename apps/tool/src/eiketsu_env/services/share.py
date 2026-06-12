@@ -24,7 +24,12 @@ from eiketsu_env.db.models import (
 from eiketsu_env.db.session import make_session_factory
 from eiketsu_env.services.analysis import export_analysis, refresh_analysis
 from eiketsu_env.services.collector import CollectResult, collect_follow
-from eiketsu_env.services.mode_filter import is_environment_mode
+from eiketsu_env.services.mode_filter import (
+    MODE_SCOPE_BATTLE_FESTIVAL,
+    MODE_SCOPE_TIER_LIST,
+    is_mode_in_scope,
+    normalize_mode_scope,
+)
 from eiketsu_env.services.repository import EnvRepository
 from eiketsu_env.utils import JST, sha256_text, utc_now, write_json
 
@@ -56,6 +61,9 @@ class ShareConfig:
     target_version: str = ""
     date_from: str = ""
     date_to: str = ""
+    mode_scope: str = MODE_SCOPE_TIER_LIST
+    festival_date_from: str = ""
+    festival_date_to: str = ""
     include_solo: bool = False
     include_battle_festival: bool = False
     high_ranker_rank: int = 100
@@ -69,6 +77,9 @@ class ShareConfig:
             target_version=str(payload.get("target_version") or ""),
             date_from=str(payload.get("date_from") or ""),
             date_to=str(payload.get("date_to") or ""),
+            mode_scope=normalize_mode_scope(str(payload.get("mode_scope") or MODE_SCOPE_TIER_LIST)),
+            festival_date_from=str(payload.get("festival_date_from") or ""),
+            festival_date_to=str(payload.get("festival_date_to") or ""),
             include_solo=bool(payload.get("include_solo", False)),
             include_battle_festival=bool(payload.get("include_battle_festival", False)),
             high_ranker_rank=int(payload.get("high_ranker_rank") or 100),
@@ -85,6 +96,14 @@ class ShareConfig:
         _validate_date(self.date_to, "date_to")
         if self.date_to < self.date_from:
             raise ValueError("share_config.json 的 date_to 不能早于 date_from")
+        if self.mode_scope not in {MODE_SCOPE_TIER_LIST, MODE_SCOPE_BATTLE_FESTIVAL}:
+            raise ValueError(f"不支持的 mode_scope：{self.mode_scope}")
+        if self.festival_date_from:
+            _validate_date(self.festival_date_from, "festival_date_from")
+        if self.festival_date_to:
+            _validate_date(self.festival_date_to, "festival_date_to")
+        if self.festival_date_from and self.festival_date_to and self.festival_date_to < self.festival_date_from:
+            raise ValueError("share_config.json 的 festival_date_to 不能早于 festival_date_from")
         unsupported_formats = [item for item in self.report_formats if item not in {"csv", "md"}]
         if unsupported_formats:
             raise ValueError(f"不支持的报告格式：{unsupported_formats}")
@@ -143,6 +162,9 @@ def effective_share_config(config: ShareConfig, today: date | None = None) -> Sh
         target_version=config.target_version,
         date_from=config.date_from,
         date_to=effective_date_to,
+        mode_scope=config.mode_scope,
+        festival_date_from=config.festival_date_from,
+        festival_date_to=config.festival_date_to,
         include_solo=config.include_solo,
         include_battle_festival=config.include_battle_festival,
         high_ranker_rank=config.high_ranker_rank,
@@ -198,6 +220,9 @@ def export_contribution(
         "target_version": config.target_version,
         "date_from": config.date_from,
         "date_to": config.date_to,
+        "mode_scope": config.mode_scope,
+        "festival_date_from": config.festival_date_from,
+        "festival_date_to": config.festival_date_to,
         "include_solo": config.include_solo,
         "include_battle_festival": config.include_battle_festival,
         "body_hash": body_hash,
@@ -212,6 +237,7 @@ def export_contribution(
             shared_contributions_dir(settings)
             / _safe_path_component(contributor_id)
             / _safe_path_component(config.target_version)
+            / _safe_path_component(config.mode_scope)
             / f"{config.date_from}_{config.date_to}_{body_hash[:12]}.jsonl"
         )
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -396,8 +422,9 @@ def _match_in_share_scope(match: Match, config: ShareConfig) -> bool:
         return False
     if str(match.version or "") != config.target_version:
         return False
-    return is_environment_mode(
+    return is_mode_in_scope(
         match.mode or "",
+        mode_scope=config.mode_scope,
         include_solo=config.include_solo,
         include_battle_festival=config.include_battle_festival,
     )
@@ -646,6 +673,9 @@ def _update_package_row(
     package.target_version = str(manifest.get("target_version") or "unknown")
     package.date_from = str(manifest.get("date_from") or "0000-00-00")
     package.date_to = str(manifest.get("date_to") or "0000-00-00")
+    package.mode_scope = normalize_mode_scope(str(manifest.get("mode_scope") or MODE_SCOPE_TIER_LIST))
+    package.festival_date_from = str(manifest.get("festival_date_from") or "")
+    package.festival_date_to = str(manifest.get("festival_date_to") or "")
     package.schema_version = str(manifest.get("schema_version") or SHARE_SCHEMA_VERSION)
     package.content_hash = content_hash
     package.file_path = str(path)
@@ -737,6 +767,7 @@ def _build_package_id(config: ShareConfig, contributor_id: str, body_hash: str) 
         [
             _safe_path_component(contributor_id),
             _safe_path_component(config.target_version),
+            _safe_path_component(config.mode_scope),
             config.date_from,
             config.date_to,
             body_hash[:16],

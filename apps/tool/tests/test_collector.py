@@ -9,6 +9,7 @@ from eiketsu_env.config import Settings
 from eiketsu_env.db.base import Base
 from eiketsu_env.db.models import CollectionRun, Match, RawSnapshot
 from eiketsu_env.db.session import make_engine
+from eiketsu_env.services.mode_filter import MODE_SCOPE_BATTLE_FESTIVAL
 from eiketsu_env.services import collector
 from eiketsu_env.services.collector import _existing_detail_is_complete, _filter_active_players, collect_follow
 from eiketsu_env.services.repository import EnvRepository
@@ -154,6 +155,7 @@ def test_collect_follow_can_include_battle_festival(tmp_path, monkeypatch):
         "2026-05-10",
         "2026-05-10",
         include_battle_festival=True,
+        mode_scope=MODE_SCOPE_BATTLE_FESTIVAL,
         save_raw_snapshots=False,
     )
 
@@ -163,3 +165,4 @@ def test_collect_follow_can_include_battle_festival(tmp_path, monkeypatch):
         assert session.query(Match).filter_by(mode="戦祭り").count() == 1
         run = session.get(CollectionRun, result.run_id)
         assert run.scope_json["include_battle_festival"] is True
+        assert run.scope_json["mode_scope"] == MODE_SCOPE_BATTLE_FESTIVAL

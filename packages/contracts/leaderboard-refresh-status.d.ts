@@ -8,6 +8,9 @@ export interface LeaderboardRefreshRun {
   targetVersion: string;
   dateFrom: string;
   dateTo: string;
+  modeScope?: string;
+  festivalDateFrom?: string;
+  festivalDateTo?: string;
   uploadWatermark: number;
   uploadCount: number;
   packageCount: number;
@@ -26,6 +29,9 @@ export interface LeaderboardRefreshUpload {
   targetVersion: string;
   dateFrom: string;
   dateTo: string;
+  modeScope?: string;
+  festivalDateFrom?: string;
+  festivalDateTo?: string;
   status: string;
   matchCount: number;
   importedMatchCount: number;

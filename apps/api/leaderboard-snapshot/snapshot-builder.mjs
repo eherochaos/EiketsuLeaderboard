@@ -139,6 +139,15 @@ async function readJsonl(filePath, predicate = () => true) {
   return rows;
 }
 
+async function readOptionalJsonl(filePath, predicate = () => true) {
+  try {
+    return await readJsonl(filePath, predicate);
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
 function latestCompletedRun(runs) {
   const candidates = runs
     .filter((run) => run.status === "completed")
@@ -482,6 +491,62 @@ function matchesBattleFestivalScope(match, shareConfig) {
   if (shareConfig?.date_to && playedDate && playedDate > shareConfig.date_to) return false;
 
   return true;
+}
+
+function mergeBattleFestivalUploadScope(upload, packageById) {
+  const packageRow = packageById.get(String(upload.package_id || ""));
+  return {
+    ...packageRow,
+    ...upload,
+    mode_scope: upload.mode_scope || packageRow?.mode_scope || "",
+    festival_date_from: upload.festival_date_from || packageRow?.festival_date_from || "",
+    festival_date_to: upload.festival_date_to || packageRow?.festival_date_to || ""
+  };
+}
+
+function latestBattleFestivalScope(uploadRows, packageRows, shareConfig) {
+  const packageById = new Map(packageRows.map((row) => [String(row.package_id || ""), row]));
+  return uploadRows
+    .map((row) => mergeBattleFestivalUploadScope(row, packageById))
+    .filter((row) => String(row.mode_scope || "") === "battle_festival")
+    .filter((row) => !shareConfig?.target_version || row.target_version === shareConfig.target_version)
+    .slice()
+    .sort((left, right) => toNumber(right.id) - toNumber(left.id))[0] || null;
+}
+
+function battleFestivalMetadataScope(shareConfig, uploadScope = null) {
+  const scope = uploadScope || shareConfig || {};
+  return {
+    targetVersion: scope.target_version || shareConfig?.target_version || "",
+    dateFrom: scope.festival_date_from || scope.date_from || shareConfig?.date_from || "",
+    dateTo: scope.festival_date_to || scope.date_to || shareConfig?.date_to || "",
+    filterDateFrom: scope.date_from || scope.festival_date_from || shareConfig?.date_from || "",
+    filterDateTo: scope.date_to || scope.festival_date_to || shareConfig?.date_to || ""
+  };
+}
+
+function emptyBattleFestivalSnapshot(shareConfig, uploadScope = null) {
+  const scope = battleFestivalMetadataScope(shareConfig, uploadScope);
+  return {
+    metadata: {
+      sourceRunId: 0,
+      sourceKind: "battle_festival",
+      targetVersion: scope.targetVersion,
+      dateFrom: scope.dateFrom,
+      dateTo: scope.dateTo,
+      updatedAt: new Date().toISOString(),
+      sampleSize: 0
+    },
+    home: {
+      factionShare: [],
+      representativeDecks: [],
+      featuredCards: [],
+      summary: "当前没有可展示的战祭数据。",
+      tierRows: []
+    },
+    clusterRows: [],
+    tierRows: []
+  };
 }
 
 function matchSideKey(matchId, sideIndex) {
@@ -1693,13 +1758,20 @@ function battleFestivalDeckId(deck, unitsByDeckId) {
     .join(",");
 }
 
-async function buildBattleFestivalSnapshotFromMatches(shareConfig) {
+async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope = null) {
+  const scope = battleFestivalMetadataScope(shareConfig, uploadScope);
+  const filterScope = {
+    target_version: scope.targetVersion,
+    date_from: scope.filterDateFrom,
+    date_to: scope.filterDateTo
+  };
   const matches = await readJsonl(
     resolve(legacyRoot, "tables/matches.jsonl"),
-    (match) => matchesBattleFestivalScope(match, shareConfig)
+    (match) => matchesBattleFestivalScope(match, filterScope)
   );
   const matchIds = new Set(matches.map((match) => toNumber(match.id)));
   if (!matchIds.size) {
+    if (uploadScope) return emptyBattleFestivalSnapshot(shareConfig, uploadScope);
     throw new Error("No ready battle festival leaderboard run.");
   }
 
@@ -1749,6 +1821,7 @@ async function buildBattleFestivalSnapshotFromMatches(shareConfig) {
 
   const deckStats = Array.from(statsByDeck.values());
   if (!deckStats.length) {
+    if (uploadScope) return emptyBattleFestivalSnapshot(shareConfig, uploadScope);
     throw new Error("No ready battle festival leaderboard run.");
   }
 
@@ -1781,9 +1854,9 @@ async function buildBattleFestivalSnapshotFromMatches(shareConfig) {
     metadata: {
       sourceRunId: 0,
       sourceKind: "battle_festival",
-      targetVersion: shareConfig?.target_version || "",
-      dateFrom: shareConfig?.date_from || "",
-      dateTo: shareConfig?.date_to || "",
+      targetVersion: scope.targetVersion,
+      dateFrom: scope.dateFrom,
+      dateTo: scope.dateTo,
       updatedAt: new Date().toISOString(),
       sampleSize: deckStats.reduce((sum, row) => sum + toNumber(row.sample_count), 0)
     },
@@ -1820,7 +1893,12 @@ async function buildSnapshotFromData(options = {}) {
   }
 
   if (options.includeBattleFestival) {
-    return buildBattleFestivalSnapshotFromMatches(shareConfig);
+    const uploadScope = latestBattleFestivalScope(
+      await readOptionalJsonl(resolve(legacyRoot, "tables/server_uploads.jsonl")),
+      await readOptionalJsonl(resolve(legacyRoot, "tables/shared_contribution_packages.jsonl")),
+      shareConfig
+    );
+    return buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope);
   }
 
   if (options.includeSolo) {

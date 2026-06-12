@@ -71,6 +71,14 @@ function uploadPeriod(upload: LeaderboardRefreshUpload): string {
   return periodLabel(upload.dateFrom, upload.dateTo);
 }
 
+function scopeLabel(value?: string): string {
+  const labels: Record<string, string> = {
+    tier_list: "TierList",
+    battle_festival: "战祭",
+  };
+  return labels[value || ""] || value || "-";
+}
+
 function uploadUserLabel(upload: LeaderboardRefreshUpload): string {
   return upload.contributorName || upload.userPublicId || "-";
 }
@@ -113,7 +121,7 @@ function uploadUserLabel(upload: LeaderboardRefreshUpload): string {
         <article>
           <span>最后上传</span>
           <strong>#{{ latestUpload?.id || "-" }}</strong>
-          <small>{{ latestUpload ? uploadPeriod(latestUpload) : "-" }}</small>
+          <small>{{ latestUpload ? `${scopeLabel(latestUpload.modeScope)} / ${uploadPeriod(latestUpload)}` : "-" }}</small>
         </article>
         <article>
           <span>最后 Run</span>
@@ -136,6 +144,7 @@ function uploadUserLabel(upload: LeaderboardRefreshUpload): string {
               <th>ID</th>
               <th>用户</th>
               <th>版本</th>
+              <th>Scope</th>
               <th>日期</th>
               <th>状态</th>
               <th>导入</th>
@@ -147,6 +156,7 @@ function uploadUserLabel(upload: LeaderboardRefreshUpload): string {
               <td class="Common_RankCell">#{{ upload.id }}</td>
               <td class="StatusPage_UserCell">{{ uploadUserLabel(upload) }}</td>
               <td>{{ upload.targetVersion || "-" }}</td>
+              <td>{{ scopeLabel(upload.modeScope) }}</td>
               <td>{{ uploadPeriod(upload) }}</td>
               <td>{{ statusLabel(upload.status) }}</td>
               <td>{{ sampleLabel(upload.importedMatchCount) }} / {{ sampleLabel(upload.matchCount) }}</td>
@@ -169,6 +179,7 @@ function uploadUserLabel(upload: LeaderboardRefreshUpload): string {
             <tr>
               <th>ID</th>
               <th>版本</th>
+              <th>Scope</th>
               <th>日期</th>
               <th>状态</th>
               <th>上传水位</th>
@@ -180,6 +191,7 @@ function uploadUserLabel(upload: LeaderboardRefreshUpload): string {
             <tr v-for="run in recentRuns" :key="run.id">
               <td class="Common_RankCell">#{{ run.id }}</td>
               <td>{{ run.targetVersion || "-" }}</td>
+              <td>{{ scopeLabel(run.modeScope) }}</td>
               <td>{{ runPeriod(run) }}</td>
               <td>{{ statusLabel(run.status) }}</td>
               <td>{{ sampleLabel(run.uploadWatermark) }}</td>

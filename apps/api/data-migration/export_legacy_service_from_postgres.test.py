@@ -30,9 +30,14 @@ class ExportLegacyServiceFromPostgresTests(unittest.TestCase):
         module = load_export_module()
 
         self.assertIn("server_users", module.SNAPSHOT_RUNTIME_TABLES)
+        self.assertIn("shared_contribution_packages", module.SNAPSHOT_RUNTIME_TABLES)
         self.assertLess(
             module.SNAPSHOT_RUNTIME_TABLES.index("server_users"),
             module.SNAPSHOT_RUNTIME_TABLES.index("server_uploads"),
+        )
+        self.assertLess(
+            module.SNAPSHOT_RUNTIME_TABLES.index("server_uploads"),
+            module.SNAPSHOT_RUNTIME_TABLES.index("shared_contribution_packages"),
         )
 
     def test_required_card_asset_missing_raises(self) -> None:

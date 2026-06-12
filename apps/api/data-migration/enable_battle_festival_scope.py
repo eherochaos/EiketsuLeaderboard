@@ -8,8 +8,20 @@ from pathlib import Path
 from typing import Any
 
 
-TARGET_COLUMN = "include_battle_festival"
-TARGET_TABLES = ("server_share_config", "server_leaderboard_runs")
+CONFIG_COLUMN_SPECS = {
+    "include_battle_festival": "INTEGER NOT NULL DEFAULT 0",
+}
+SCOPE_COLUMN_SPECS = {
+    "mode_scope": "VARCHAR(32) NOT NULL DEFAULT 'tier_list'",
+    "festival_date_from": "VARCHAR(10) NOT NULL DEFAULT ''",
+    "festival_date_to": "VARCHAR(10) NOT NULL DEFAULT ''",
+}
+TABLE_COLUMN_SPECS = {
+    "server_share_config": CONFIG_COLUMN_SPECS,
+    "server_leaderboard_runs": CONFIG_COLUMN_SPECS,
+    "shared_contribution_packages": SCOPE_COLUMN_SPECS,
+    "server_uploads": SCOPE_COLUMN_SPECS,
+}
 
 
 def _sqlite_columns(connection: sqlite3.Connection, table: str) -> set[str]:
@@ -24,74 +36,30 @@ def _sqlite_table_exists(connection: sqlite3.Connection, table: str) -> bool:
     return row is not None
 
 
-def _update_sql(target_version: str) -> tuple[str, dict[str, Any]]:
-    if target_version:
-        return (
-            f"UPDATE server_share_config SET {TARGET_COLUMN} = 1 WHERE target_version = :target_version",
-            {"target_version": target_version},
-        )
-    return (
-        f"""
-        UPDATE server_share_config
-        SET {TARGET_COLUMN} = 1
-        WHERE id = (
-          SELECT id
-          FROM server_share_config
-          ORDER BY updated_at DESC, id DESC
-          LIMIT 1
-        )
-        """,
-        {},
-    )
-
-
-def _sqlite_update_sql(target_version: str) -> tuple[str, tuple[str, ...]]:
-    if target_version:
-        return (
-            f"UPDATE server_share_config SET {TARGET_COLUMN} = 1 WHERE target_version = ?",
-            (target_version,),
-        )
-    return (
-        f"""
-        UPDATE server_share_config
-        SET {TARGET_COLUMN} = 1
-        WHERE id = (
-          SELECT id
-          FROM server_share_config
-          ORDER BY updated_at DESC, id DESC
-          LIMIT 1
-        )
-        """,
-        (),
-    )
-
-
 def enable_battle_festival_scope_sqlite(db_path: Path, target_version: str = "") -> dict[str, Any]:
+    _ = target_version
     added_columns: list[str] = []
     with closing(sqlite3.connect(db_path)) as connection:
         with connection:
-            for table in TARGET_TABLES:
+            for table, column_specs in TABLE_COLUMN_SPECS.items():
                 if not _sqlite_table_exists(connection, table):
                     raise RuntimeError(f"{table} table is missing")
-                if TARGET_COLUMN not in _sqlite_columns(connection, table):
-                    connection.execute(f"ALTER TABLE {table} ADD COLUMN {TARGET_COLUMN} INTEGER NOT NULL DEFAULT 0")
-                    added_columns.append(f"{table}.{TARGET_COLUMN}")
-
-            sql, params = _sqlite_update_sql(target_version)
-            cursor = connection.execute(sql, params)
-            updated_rows = cursor.rowcount
-
-    if updated_rows <= 0:
-        raise RuntimeError("server_share_config battle festival config was not updated")
+                columns = _sqlite_columns(connection, table)
+                for column, definition in column_specs.items():
+                    if column in columns:
+                        continue
+                    connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+                    added_columns.append(f"{table}.{column}")
 
     return {
         "status": "completed",
         "addedColumns": added_columns,
-        "updatedConfigRows": updated_rows,
+        "updatedConfigRows": 0,
     }
 
 
 def enable_battle_festival_scope_server(target_version: str = "") -> dict[str, Any]:
+    _ = target_version
     from sqlalchemy import inspect, text
     from eiketsu_env.config import load_settings
     from eiketsu_env.db.session import make_engine
@@ -101,30 +69,25 @@ def enable_battle_festival_scope_server(target_version: str = "") -> dict[str, A
     with engine.begin() as connection:
         inspector = inspect(connection)
         table_names = set(inspector.get_table_names())
-        for table in TARGET_TABLES:
+        for table, column_specs in TABLE_COLUMN_SPECS.items():
             if table not in table_names:
                 raise RuntimeError(f"{table} table is missing")
             columns = {column["name"] for column in inspector.get_columns(table)}
-            if TARGET_COLUMN not in columns:
-                connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {TARGET_COLUMN} INTEGER NOT NULL DEFAULT 0"))
-                added_columns.append(f"{table}.{TARGET_COLUMN}")
-
-        sql, params = _update_sql(target_version)
-        result = connection.execute(text(sql), params)
-        updated_rows = result.rowcount or 0
-
-    if updated_rows <= 0:
-        raise RuntimeError("server_share_config battle festival config was not updated")
+            for column, definition in column_specs.items():
+                if column in columns:
+                    continue
+                connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
+                added_columns.append(f"{table}.{column}")
 
     return {
         "status": "completed",
         "addedColumns": added_columns,
-        "updatedConfigRows": updated_rows,
+        "updatedConfigRows": 0,
     }
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Enable battle festival collection scope on the upload server.")
+    parser = argparse.ArgumentParser(description="Ensure battle festival scope columns on the upload server.")
     parser.add_argument("--sqlite-file", type=Path, default=None)
     parser.add_argument("--target-version", default="")
     args = parser.parse_args()

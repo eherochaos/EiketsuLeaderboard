@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from eiketsu_env.services.mode_filter import is_environment_mode
+from eiketsu_env.services.mode_filter import MODE_SCOPE_BATTLE_FESTIVAL, MODE_SCOPE_TIER_LIST, is_environment_mode, is_mode_in_scope
 from eiketsu_env.services.parsers import parse_daily_html, parse_detail_html, parse_follow_api_json, parse_follow_html, parse_replay_html
 
 
@@ -218,3 +218,10 @@ def test_environment_mode_filter_skips_solo_modes_by_default():
     assert is_environment_mode("戦祭り", include_battle_festival=True)
     assert not is_environment_mode("群雄伝", include_battle_festival=True)
     assert not is_environment_mode("鍛練場", include_battle_festival=True)
+
+
+def test_mode_scope_filter_separates_tier_list_and_battle_festival():
+    assert is_mode_in_scope("全国対戦", mode_scope=MODE_SCOPE_TIER_LIST)
+    assert not is_mode_in_scope("戦祭り", mode_scope=MODE_SCOPE_TIER_LIST, include_battle_festival=True)
+    assert is_mode_in_scope("戦祭り", mode_scope=MODE_SCOPE_BATTLE_FESTIVAL)
+    assert not is_mode_in_scope("全国対戦", mode_scope=MODE_SCOPE_BATTLE_FESTIVAL)
