@@ -111,6 +111,7 @@ def collect_follow(
     player_id: str = "",
     player_name: str = "",
     include_solo: bool = False,
+    include_battle_festival: bool = False,
     auth_source: str = "",
     interactive_auth: bool = False,
     skip_existing: bool = False,
@@ -151,6 +152,7 @@ def collect_follow(
                 "player_id": player_id,
                 "player_name": player_name,
                 "include_solo": include_solo,
+                "include_battle_festival": include_battle_festival,
                 "skip_existing": skip_existing,
                 "skip_inactive": skip_inactive,
                 "save_raw_snapshots": save_raw_snapshots,
@@ -209,7 +211,11 @@ def collect_follow(
                     counts["daily_pages"] += 1
                     counts["players_visited"] += 1
                     for seed in daily_result.seeds:
-                        if not is_environment_mode(str(seed.get("mode") or ""), include_solo=include_solo):
+                        if not is_environment_mode(
+                            str(seed.get("mode") or ""),
+                            include_solo=include_solo,
+                            include_battle_festival=include_battle_festival,
+                        ):
                             counts["skipped_by_mode"] += 1
                             continue
                         if max_matches > 0 and counts["matches"] + len(detail_jobs) >= max_matches:
@@ -229,7 +235,11 @@ def collect_follow(
                 for detail_result in detail_results:
                     counts["detail_pages"] += 1
                     detail = detail_result.detail
-                    if not is_environment_mode(str(detail.get("mode") or ""), include_solo=include_solo):
+                    if not is_environment_mode(
+                        str(detail.get("mode") or ""),
+                        include_solo=include_solo,
+                        include_battle_festival=include_battle_festival,
+                    ):
                         counts["skipped_by_mode"] += 1
                         continue
                     match = repo.upsert_match_detail(detail, run)

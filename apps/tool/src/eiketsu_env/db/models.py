@@ -368,6 +368,7 @@ class ServerShareConfig(TimestampMixin, Base):
     date_from: Mapped[str] = mapped_column(String(10), nullable=False, default="")
     date_to: Mapped[str] = mapped_column(String(10), nullable=False, default="")
     include_solo: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    include_battle_festival: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     high_ranker_rank: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     report_formats_json: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     reports_json: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
@@ -407,6 +408,7 @@ class ServerLeaderboardRun(TimestampMixin, Base):
             "date_from",
             "date_to",
             "include_solo",
+            "include_battle_festival",
             "upload_watermark",
         ),
     )
@@ -419,6 +421,7 @@ class ServerLeaderboardRun(TimestampMixin, Base):
     date_from: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
     date_to: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
     include_solo: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    include_battle_festival: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     upload_watermark: Mapped[int] = mapped_column(Integer, nullable=False, default=0, index=True)
     upload_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     package_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

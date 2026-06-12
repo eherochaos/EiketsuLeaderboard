@@ -67,6 +67,7 @@ def collect_video_search(
     max_cards: int = 20,
     max_results: int = 0,
     include_solo: bool = False,
+    include_battle_festival: bool = False,
     auth_source: str = "",
     version: str = "",
     skip_searched_cards: bool = False,
@@ -120,6 +121,7 @@ def collect_video_search(
                 "max_cards": max_cards,
                 "max_results": max_results,
                 "include_solo": include_solo,
+                "include_battle_festival": include_battle_festival,
                 "version": version,
                 "skip_searched_cards": skip_searched_cards,
                 "frontier_rounds": frontier_rounds,
@@ -185,7 +187,11 @@ def collect_video_search(
                         if not _matches_requested_version(item, version):
                             counts["skipped_by_version"] += 1
                             continue
-                        if not is_environment_mode(str(item.get("mode") or ""), include_solo=include_solo):
+                        if not is_environment_mode(
+                            str(item.get("mode") or ""),
+                            include_solo=include_solo,
+                            include_battle_festival=include_battle_festival,
+                        ):
                             counts["skipped_by_mode"] += 1
                             continue
                         played_at = _resolve_battle_datetime(str(item.get("dispBattleDate") or ""), date_from, date_to)

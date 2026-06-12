@@ -50,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     follow_parser.add_argument("--player-id", default="", help="只采集指定 follow_id 的主君")
     follow_parser.add_argument("--player-name", default="", help="按主君名包含关系过滤后采集")
     follow_parser.add_argument("--include-solo", action="store_true", help="包含群雄传/练习场/战祭等默认排除模式")
+    follow_parser.add_argument("--include-battle-festival", action="store_true", help="额外包含战祭，不包含群雄传/练习场")
     follow_parser.add_argument("--skip-existing", action="store_true", help="跳过已经有完整详情的对局，适合补采历史版本")
     follow_parser.add_argument("--skip-inactive", action="store_true", help="根据 follow API 的 lastplaytime 跳过范围开始前已不活跃的主君")
     follow_parser.add_argument("--concurrency-profile", choices=["default", "aggressive"], default="default", help="采集并发 profile；aggressive=8 daily/12 detail + 重试")
@@ -69,6 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     video_parser.add_argument("--concurrency-profile", choices=["default", "aggressive"], default="default", help="采集并发 profile；aggressive=8 API/12 play + 限速重试")
     video_parser.add_argument("--no-progress", action="store_true", help="不显示 stderr 进度条")
     video_parser.add_argument("--include-solo", action="store_true", help="包含群雄传/练习场/战祭等默认排除模式")
+    video_parser.add_argument("--include-battle-festival", action="store_true", help="额外包含战祭，不包含群雄传/练习场")
     video_parser.add_argument("--auth-source", default="", help="认证来源：auto/default-browser/chrome/edge/brave/firefox/firefox-profile")
 
     export_parser = subparsers.add_parser("export", help="导出标准化数据")
@@ -149,6 +151,7 @@ def main(argv: list[str] | None = None) -> None:
             player_id=args.player_id,
             player_name=args.player_name,
             include_solo=args.include_solo,
+            include_battle_festival=args.include_battle_festival,
             auth_source=args.auth_source,
             skip_existing=args.skip_existing,
             skip_inactive=args.skip_inactive,
@@ -169,6 +172,7 @@ def main(argv: list[str] | None = None) -> None:
             max_cards=args.max_cards,
             max_results=args.max_results,
             include_solo=args.include_solo,
+            include_battle_festival=args.include_battle_festival,
             auth_source=args.auth_source,
             version=args.version,
             skip_searched_cards=args.skip_searched_cards,

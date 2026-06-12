@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 
-EXCLUDED_DEFAULT_MODES = {"群雄伝", "鍛練場", "戦祭り"}
+BATTLE_FESTIVAL_MODES = {"戦祭り"}
+EXCLUDED_DEFAULT_MODES = {"群雄伝", "鍛練場", *BATTLE_FESTIVAL_MODES}
 
 
-def is_environment_mode(mode: str, include_solo: bool = False) -> bool:
+def is_environment_mode(mode: str, include_solo: bool = False, include_battle_festival: bool = False) -> bool:
     cleaned = str(mode or "").strip()
     if include_solo:
+        return True
+    if include_battle_festival and cleaned in BATTLE_FESTIVAL_MODES:
         return True
     # 默认环境统计只看常规规则；群雄传/练习场不是 PvP，战祭规则特殊，都会污染胜率和卡组使用率。
     return cleaned not in EXCLUDED_DEFAULT_MODES

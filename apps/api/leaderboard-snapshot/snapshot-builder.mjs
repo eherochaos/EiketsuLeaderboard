@@ -329,10 +329,21 @@ function latestShareConfig(configRows) {
     .sort((left, right) => String(right.updated_at || "").localeCompare(String(left.updated_at || "")))[0] || null;
 }
 
-function latestFormalRun(runs, targetVersion) {
+function latestFormalRun(runs, targetVersion, options = {}) {
+  const includeSolo = Boolean(options.includeSolo);
+  const includeBattleFestival = Boolean(options.includeBattleFestival);
   return runs
     .filter((run) => run.status === "ready")
     .filter((run) => !targetVersion || run.target_version === targetVersion)
+    .filter((run) => {
+      const runSolo = Boolean(toNumber(run.include_solo));
+      if (includeBattleFestival) {
+        return "include_battle_festival" in run
+          ? Boolean(toNumber(run.include_battle_festival))
+          : runSolo;
+      }
+      return Boolean(toNumber(run.include_battle_festival)) === false && runSolo === includeSolo;
+    })
     .sort((left, right) => toNumber(right.id) - toNumber(left.id))[0] || null;
 }
 
@@ -1428,7 +1439,7 @@ function buildFormalFeaturedCards(cardRows, totalSamples, cardCatalog = {}) {
     .sort((left, right) => left.sourceRank - right.sourceRank);
 }
 
-async function buildFormalSnapshot(run, rows, cardCatalog, strategyTypes) {
+async function buildFormalSnapshot(run, rows, cardCatalog, strategyTypes, options = {}) {
   const deckRows = rows
     .filter((row) => row.run_id === run.id && row.row_type === "deck" && row.rank_scope === "all" && toNumber(row.cluster_enabled) === 0)
     .sort((left, right) => toNumber(left.rank) - toNumber(right.rank));
@@ -1460,7 +1471,7 @@ async function buildFormalSnapshot(run, rows, cardCatalog, strategyTypes) {
   return {
     metadata: {
       sourceRunId: toNumber(run.id),
-      sourceKind: "server_leaderboard",
+      sourceKind: options.sourceKind || "server_leaderboard",
       targetVersion: run.target_version,
       dateFrom: run.date_from,
       dateTo: run.date_to,
@@ -1659,17 +1670,26 @@ function buildFeaturedCards(cardStats, cardCatalog) {
     .slice(0, 8);
 }
 
-async function buildSnapshotFromData() {
+async function buildSnapshotFromData(options = {}) {
   const shareConfig = latestShareConfig(await readJsonl(resolve(legacyRoot, "tables/server_share_config.jsonl")));
   const formalRuns = await readJsonl(resolve(legacyRoot, "tables/server_leaderboard_runs.jsonl"));
-  const formalRun = latestFormalRun(formalRuns, shareConfig?.target_version);
+  const formalRun = latestFormalRun(formalRuns, shareConfig?.target_version, {
+    includeSolo: Boolean(options.includeSolo),
+    includeBattleFestival: Boolean(options.includeBattleFestival)
+  });
 
   if (formalRun) {
     const formalRows = await readJsonl(resolve(legacyRoot, "tables/server_leaderboard_rows.jsonl"));
     const cardCatalog = await loadCardCatalog();
     const strategyTypes = await readOptionalJson(resolve(legacyRoot, "cards/card_strategy_types.json"), []);
-    const snapshot = await buildFormalSnapshot(formalRun, formalRows, cardCatalog, strategyTypes);
+    const snapshot = await buildFormalSnapshot(formalRun, formalRows, cardCatalog, strategyTypes, {
+      sourceKind: options.sourceKind
+    });
     return snapshot;
+  }
+
+  if (options.includeSolo || options.includeBattleFestival) {
+    throw new Error("No ready battle festival leaderboard run.");
   }
 
   const runs = await readJsonl(resolve(legacyRoot, "tables/analysis_runs.jsonl"));
@@ -1737,7 +1757,11 @@ export async function buildLeaderboardSnapshot(options = {}) {
   unitTypeRepairWarnings = new Set();
 
   try {
-    return await buildSnapshotFromData();
+    return await buildSnapshotFromData({
+      includeSolo: Boolean(options.includeSolo),
+      includeBattleFestival: Boolean(options.includeBattleFestival),
+      sourceKind: options.sourceKind
+    });
   } finally {
     legacyRoot = previousLegacyRoot;
     diagnosticsEnabled = previousDiagnosticsEnabled;

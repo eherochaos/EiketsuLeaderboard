@@ -215,3 +215,6 @@ def test_environment_mode_filter_skips_solo_modes_by_default():
     assert not is_environment_mode("群雄伝")
     assert not is_environment_mode("鍛練場")
     assert is_environment_mode("戦祭り", include_solo=True)
+    assert is_environment_mode("戦祭り", include_battle_festival=True)
+    assert not is_environment_mode("群雄伝", include_battle_festival=True)
+    assert not is_environment_mode("鍛練場", include_battle_festival=True)

@@ -8,9 +8,16 @@ import TierPageDeckConfigPanel from "./components/TierPage_DeckConfigPanel.vue";
 import { dateOnly, integer, percent, sourceLabels } from "./lib/format";
 import { trackPageView, trackSiteEvent } from "./lib/siteAnalytics";
 import { loadTierListDeckConfig, loadTierListSnapshot } from "./lib/tierList";
+import type { TierListPageKind } from "./lib/tierList";
 import type { CardView, DeckConfigStats, TierListClusterVariant, TierListRow, TierListScope, TierListSnapshot } from "./types";
 
 type SortKey = "rankScore" | "winRate" | "playerAverageWinRate" | "usageRate" | "kabukiPoints" | "sampleSize";
+
+const props = withDefaults(defineProps<{
+  pageKind?: TierListPageKind;
+}>(), {
+  pageKind: "tierList"
+});
 
 const INITIAL_VISIBLE_ROWS = 100;
 const VISIBLE_ROWS_STEP = 100;
@@ -51,20 +58,44 @@ const sortOptions: { value: SortKey; label: string }[] = [
   { value: "sampleSize", label: "样本数" }
 ];
 
+const pageCopy = computed(() => {
+  if (props.pageKind === "battleFestival") {
+    return {
+      analyticsPage: "battle-festival",
+      current: "battleFestival" as const,
+      eyebrow: "战祭",
+      title: "战祭榜单",
+      tableEyebrow: "Festival",
+      tableTitle: "战祭明细",
+      loading: "正在读取战祭快照..."
+    };
+  }
+
+  return {
+    analyticsPage: "tier-list",
+    current: "tier" as const,
+    eyebrow: "TierList",
+    title: "综合榜单",
+    tableEyebrow: "Ranking",
+    tableTitle: "榜单明细",
+    loading: "正在读取构建快照..."
+  };
+});
+
 function updateViewportMode(): void {
   mobileViewport.value = Boolean(mobileMediaQuery?.matches);
   compactMobileViewport.value = Boolean(compactMobileMediaQuery?.matches);
 }
 
 onMounted(async () => {
-  trackPageView("tier-list");
+  trackPageView(pageCopy.value.analyticsPage);
   mobileMediaQuery = window.matchMedia("(max-width: 760px)");
   compactMobileMediaQuery = window.matchMedia("(max-width: 430px)");
   updateViewportMode();
   mobileMediaQuery.addEventListener("change", updateViewportMode);
   compactMobileMediaQuery.addEventListener("change", updateViewportMode);
   try {
-    snapshot.value = await loadTierListSnapshot();
+    snapshot.value = await loadTierListSnapshot(props.pageKind);
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : "快照读取失败";
   } finally {
@@ -128,7 +159,7 @@ const topDeck = computed(() => visibleRows.value[0] ?? null);
 
 watch([factionFilter, sourceFilter, sortKey, clusterSameName], () => {
   visibleRowLimit.value = INITIAL_VISIBLE_ROWS;
-  trackSiteEvent("filter_change", "tier-list", {
+  trackSiteEvent("filter_change", pageCopy.value.analyticsPage, {
     faction: factionFilter.value,
     source: sourceFilter.value,
     sortKey: sortKey.value,
@@ -180,7 +211,7 @@ async function ensureDeckConfig(deck: TierListRow): Promise<void> {
   deckConfigErrors.value = { ...deckConfigErrors.value, [stateKey]: "" };
 
   try {
-    const response = await loadTierListDeckConfig(deckConfigScope(), deckId);
+    const response = await loadTierListDeckConfig(deckConfigScope(), deckId, props.pageKind);
     deckConfigs.value = { ...deckConfigs.value, [stateKey]: response.deckConfig };
   } catch (caught) {
     deckConfigErrors.value = {
@@ -205,7 +236,7 @@ async function toggleDeckConfig(deck: TierListRow): Promise<void> {
     next.delete(key);
   } else {
     next.add(key);
-    trackSiteEvent("deck_config_open", "tier-list", {
+    trackSiteEvent("deck_config_open", pageCopy.value.analyticsPage, {
       scope: deckConfigScope(),
       deckId: deck.deckId,
       deckName: deck.deckName,
@@ -302,15 +333,15 @@ function switchClusterVariant(deck: TierListRow): void {
 </script>
 
 <template>
-  <CommonHeader current="tier" />
+  <CommonHeader :current="pageCopy.current" />
   <main class="Common_PageShell TierPage">
-    <section v-if="loading" class="Common_StatusPanel">正在读取构建快照...</section>
+    <section v-if="loading" class="Common_StatusPanel">{{ pageCopy.loading }}</section>
     <section v-else-if="error" class="Common_StatusPanel Common_StatusPanel_Error">{{ error }}</section>
     <template v-else-if="snapshot && metadata">
       <section class="TierPage_Hero" aria-labelledby="tier-title">
         <div>
-          <p class="Common_Eyebrow">TierList</p>
-          <h1 id="tier-title">综合榜单</h1>
+          <p class="Common_Eyebrow">{{ pageCopy.eyebrow }}</p>
+          <h1 id="tier-title">{{ pageCopy.title }}</h1>
           <p class="TierPage_MetaLine">
             <span>{{ metadata.targetVersion || "未指定版本" }}</span>
             <span>Run {{ metadata.sourceRunId }}</span>
@@ -373,8 +404,8 @@ function switchClusterVariant(deck: TierListRow): void {
 
       <section class="Common_TableCard TierPage_TableCard" aria-labelledby="TierPage_Table_Title">
         <div class="Common_SectionHeading Common_SectionHeading_Compact">
-          <p class="Common_Eyebrow">Ranking</p>
-          <h2 id="TierPage_Table_Title">榜单明细</h2>
+          <p class="Common_Eyebrow">{{ pageCopy.tableEyebrow }}</p>
+          <h2 id="TierPage_Table_Title">{{ pageCopy.tableTitle }}</h2>
         </div>
         <table v-if="!mobileViewport" class="Common_TableLayout TierPage_Table">
           <colgroup>

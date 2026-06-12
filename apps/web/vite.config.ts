@@ -22,6 +22,14 @@ export default defineConfig(({ mode }) => {
       target: leaderboardApiOrigin,
       changeOrigin: true
     },
+    "/api/battle-festival-snapshot": {
+      target: leaderboardApiOrigin,
+      changeOrigin: true
+    },
+    "/api/battle-festival-deck-config": {
+      target: leaderboardApiOrigin,
+      changeOrigin: true
+    },
     "/api/match-search-options": {
       target: leaderboardApiOrigin,
       changeOrigin: true
@@ -56,7 +64,8 @@ export default defineConfig(({ mode }) => {
           leaderboardStatus: resolve(__dirname, "leaderboard-status/index.html"),
           adminStats: resolve(__dirname, "admin-stats/index.html"),
           matchSearch: resolve(__dirname, "match-search/index.html"),
-          tierList: resolve(__dirname, "tier-list/index.html")
+          tierList: resolve(__dirname, "tier-list/index.html"),
+          battleFestival: resolve(__dirname, "battle-festival/index.html")
         }
       }
     }

@@ -67,11 +67,11 @@ function unknownFactionCount(payload) {
   return (JSON.stringify(payload).match(/"faction":"unknown"/g) || []).length;
 }
 
-function deckRow(id, deckId, cards, rank, winCount, lossCount) {
+function deckRow(id, deckId, cards, rank, winCount, lossCount, runId = 1) {
   const sampleCount = winCount + lossCount;
   return {
     id,
-    run_id: 1,
+    run_id: runId,
     row_type: "deck",
     rank_scope: "all",
     cluster_enabled: 0,
@@ -96,11 +96,11 @@ function deckRow(id, deckId, cards, rank, winCount, lossCount) {
   };
 }
 
-function archetypeRow(id, title, cards, rank, winCount, lossCount, representativeDeckId = deckB, memberDecks = []) {
+function archetypeRow(id, title, cards, rank, winCount, lossCount, representativeDeckId = deckB, memberDecks = [], runId = 1) {
   const sampleCount = winCount + lossCount;
   return {
     id,
-    run_id: 1,
+    run_id: runId,
     row_type: "archetype",
     rank_scope: "all",
     cluster_enabled: 1,
@@ -155,26 +155,43 @@ function matchSide(id, matchId, sideIndex, result, playerName) {
   };
 }
 
-async function createLegacyFixture(root) {
+async function createLegacyFixture(root, options = {}) {
   const tableRoot = join(root, "tables");
   const cardRoot = join(root, "cards");
+  const includeBattleFestival = Boolean(options.includeBattleFestival);
   await mkdir(tableRoot, { recursive: true });
   await mkdir(cardRoot, { recursive: true });
   await writeJsonl(join(tableRoot, "server_share_config.jsonl"), [
     { id: 1, target_version: "Ver.test", updated_at: "2026-05-25T00:00:00" }
   ]);
-  await writeJsonl(join(tableRoot, "server_leaderboard_runs.jsonl"), [
+  const runs = [
     {
       id: 1,
       status: "ready",
       target_version: "Ver.test",
       date_from: "2026-05-20",
       date_to: "2026-05-25",
+      include_solo: 0,
+      include_battle_festival: 0,
       generated_at: "2026-05-25T00:00:00",
       updated_at: "2026-05-25T00:00:00"
     }
-  ]);
-  await writeJsonl(join(tableRoot, "server_leaderboard_rows.jsonl"), [
+  ];
+  if (includeBattleFestival) {
+    runs.push({
+      id: 2,
+      status: "ready",
+      target_version: "Ver.test",
+      date_from: "2026-06-10",
+      date_to: "2026-06-14",
+      include_solo: 0,
+      include_battle_festival: 1,
+      generated_at: "2026-06-12T00:00:00",
+      updated_at: "2026-06-12T00:00:00"
+    });
+  }
+  await writeJsonl(join(tableRoot, "server_leaderboard_runs.jsonl"), runs);
+  const rows = [
     deckRow(1, deckA, [card("legacy-card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 1, 0, 1),
     deckRow(2, deckB, [card("card-b1", "緋001", "Gamma"), card("card-b2", "緋002", "Delta")], 2, 1, 0),
     archetypeRow(3, "Published Cluster", [card("card-b1", "緋001", "Gamma"), card("card-b2", "緋002", "Delta")], 1, 4, 1, deckB, [
@@ -187,7 +204,11 @@ async function createLegacyFixture(root) {
     archetypeRow(5, "Late Better Cluster", [card("legacy-card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 99, 10, 0, deckA, [
       { deck_fingerprint: deckA, sample_count: 10 }
     ])
-  ]);
+  ];
+  if (includeBattleFestival) {
+    rows.push(deckRow(6, deckA, [card("legacy-card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 1, 3, 1, 2));
+  }
+  await writeJsonl(join(tableRoot, "server_leaderboard_rows.jsonl"), rows);
   await writeJsonl(join(tableRoot, "matches.jsonl"), [
     {
       id: 1,
@@ -247,9 +268,10 @@ async function testRefreshWritesAtomicSnapshot() {
     const logs = [];
     const originalLog = console.log;
     let snapshot;
+    let battleFestival;
     try {
       console.log = (...args) => logs.push(args.join(" "));
-      ({ snapshot } = await refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: true }));
+      ({ snapshot, battleFestival } = await refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: true }));
     } finally {
       console.log = originalLog;
     }
@@ -261,6 +283,7 @@ async function testRefreshWritesAtomicSnapshot() {
     const tierListConfigs = JSON.parse(tierListConfigsText);
 
     assert.equal(snapshot.metadata.sourceRunId, 1);
+    assert.equal(battleFestival.status, "skipped");
     assert.equal(output.metadata.sourceKind, "server_leaderboard");
     assert.equal(output.tierRows.length, 2);
     assert.equal(output.clusterRows.length, 2);
@@ -319,6 +342,34 @@ async function testRefreshWritesAtomicSnapshot() {
   }
 }
 
+async function testRefreshWritesBattleFestivalSnapshot() {
+  const root = await mkdtemp(join(tmpdir(), "battle-festival-refresh-"));
+  const legacyRoot = join(root, "legacy-service");
+  const outputPath = join(root, "published", "leaderboard-snapshot.json");
+
+  try {
+    await createLegacyFixture(legacyRoot, { includeBattleFestival: true });
+    const { snapshot, battleFestival } = await refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: false });
+    const battleFestivalText = await readFile(join(root, "published", "battle-festival-snapshot.json"), "utf8");
+    const battleFestivalSnapshot = JSON.parse(battleFestivalText);
+    const battleFestivalConfigsText = await readFile(join(root, "published", "battle-festival-configs.json"), "utf8");
+    const battleFestivalConfigs = JSON.parse(battleFestivalConfigsText);
+
+    assert.equal(snapshot.metadata.sourceRunId, 1);
+    assert.equal(battleFestival.status, "completed");
+    assert.equal(battleFestival.sourceRunId, 2);
+    assert.equal(battleFestivalSnapshot.metadata.sourceRunId, 2);
+    assert.equal(battleFestivalSnapshot.metadata.sourceKind, "battle_festival");
+    assert.equal(battleFestivalSnapshot.metadata.dateFrom, "2026-06-10");
+    assert.equal(battleFestivalSnapshot.metadata.dateTo, "2026-06-14");
+    assert.equal(battleFestivalSnapshot.tierRows.length, 1);
+    assert.ok(battleFestivalConfigs.deckConfigs[battleFestivalSnapshot.tierRows[0].deckId]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 await testRefreshWritesAtomicSnapshot();
+await testRefreshWritesBattleFestivalSnapshot();
 
 console.log("leaderboard snapshot refresh tests passed");

@@ -57,6 +57,7 @@ class ShareConfig:
     date_from: str = ""
     date_to: str = ""
     include_solo: bool = False
+    include_battle_festival: bool = False
     high_ranker_rank: int = 100
     report_formats: list[str] = field(default_factory=lambda: list(DEFAULT_REPORT_FORMATS))
     reports: list[str] = field(default_factory=lambda: list(DEFAULT_REPORTS))
@@ -69,6 +70,7 @@ class ShareConfig:
             date_from=str(payload.get("date_from") or ""),
             date_to=str(payload.get("date_to") or ""),
             include_solo=bool(payload.get("include_solo", False)),
+            include_battle_festival=bool(payload.get("include_battle_festival", False)),
             high_ranker_rank=int(payload.get("high_ranker_rank") or 100),
             report_formats=[str(item) for item in payload.get("report_formats") or DEFAULT_REPORT_FORMATS],
             reports=[str(item) for item in payload.get("reports") or DEFAULT_REPORTS],
@@ -142,6 +144,7 @@ def effective_share_config(config: ShareConfig, today: date | None = None) -> Sh
         date_from=config.date_from,
         date_to=effective_date_to,
         include_solo=config.include_solo,
+        include_battle_festival=config.include_battle_festival,
         high_ranker_rank=config.high_ranker_rank,
         report_formats=list(config.report_formats),
         reports=list(config.reports),
@@ -196,6 +199,7 @@ def export_contribution(
         "date_from": config.date_from,
         "date_to": config.date_to,
         "include_solo": config.include_solo,
+        "include_battle_festival": config.include_battle_festival,
         "body_hash": body_hash,
         "match_count": len(records),
         "created_at": utc_now().isoformat(timespec="seconds"),
@@ -344,6 +348,7 @@ def sync_shared(
             config.date_from,
             config.date_to,
             include_solo=config.include_solo,
+            include_battle_festival=config.include_battle_festival,
             auth_source=auth_source,
             interactive_auth=True,
             save_raw_snapshots=False,
@@ -391,7 +396,11 @@ def _match_in_share_scope(match: Match, config: ShareConfig) -> bool:
         return False
     if str(match.version or "") != config.target_version:
         return False
-    return config.include_solo or is_environment_mode(match.mode or "", include_solo=False)
+    return is_environment_mode(
+        match.mode or "",
+        include_solo=config.include_solo,
+        include_battle_festival=config.include_battle_festival,
+    )
 
 
 def _match_to_shared_record(match: Match) -> dict[str, Any]:

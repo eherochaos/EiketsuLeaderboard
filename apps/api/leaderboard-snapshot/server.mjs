@@ -16,6 +16,8 @@ const DEFAULT_STATUS_FILE = resolve("apps/api/data/leaderboard-refresh-status.js
 const DEFAULT_MATCH_SEARCH_INDEX_FILE = resolve("apps/api/data/match-search-index.json");
 const DEFAULT_TIER_LIST_SNAPSHOT_FILE = resolve("apps/api/data/tier-list-snapshot.json");
 const DEFAULT_TIER_LIST_CONFIGS_FILE = resolve("apps/api/data/tier-list-configs.json");
+const DEFAULT_BATTLE_FESTIVAL_SNAPSHOT_FILE = resolve("apps/api/data/battle-festival-snapshot.json");
+const DEFAULT_BATTLE_FESTIVAL_CONFIGS_FILE = resolve("apps/api/data/battle-festival-configs.json");
 const DEFAULT_SITE_ANALYTICS_FILE = resolve("apps/api/data/site-analytics-events.jsonl");
 
 function jsonHeaders(extra = {}) {
@@ -161,6 +163,8 @@ export function createLeaderboardSnapshotServer(options = {}) {
   const matchSearchIndexFile = resolve(options.matchSearchIndexFile || DEFAULT_MATCH_SEARCH_INDEX_FILE);
   const tierListSnapshotFile = resolve(options.tierListSnapshotFile || DEFAULT_TIER_LIST_SNAPSHOT_FILE);
   const tierListConfigsFile = resolve(options.tierListConfigsFile || DEFAULT_TIER_LIST_CONFIGS_FILE);
+  const battleFestivalSnapshotFile = resolve(options.battleFestivalSnapshotFile || DEFAULT_BATTLE_FESTIVAL_SNAPSHOT_FILE);
+  const battleFestivalConfigsFile = resolve(options.battleFestivalConfigsFile || DEFAULT_BATTLE_FESTIVAL_CONFIGS_FILE);
   const siteAnalyticsFile = resolve(options.siteAnalyticsFile || DEFAULT_SITE_ANALYTICS_FILE);
   const siteAnalyticsAdminToken = String(options.siteAnalyticsAdminToken || "");
   const snapshotCache = createStaticJsonFileCache(snapshotFile);
@@ -168,6 +172,8 @@ export function createLeaderboardSnapshotServer(options = {}) {
   const matchSearchIndexCache = createParsedJsonFileCache(matchSearchIndexFile);
   const tierListSnapshotCache = createStaticJsonFileCache(tierListSnapshotFile);
   const tierListConfigsCache = createParsedJsonFileCache(tierListConfigsFile);
+  const battleFestivalSnapshotCache = createStaticJsonFileCache(battleFestivalSnapshotFile);
+  const battleFestivalConfigsCache = createParsedJsonFileCache(battleFestivalConfigsFile);
 
   function writeStaticJson(request, response, entry) {
     const headers = {
@@ -242,6 +248,18 @@ export function createLeaderboardSnapshotServer(options = {}) {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/battle-festival-snapshot") {
+      try {
+        writeStaticJson(request, response, await battleFestivalSnapshotCache.load());
+      } catch (error) {
+        battleFestivalSnapshotCache.clear();
+        const message = publicError(error, "battle festival failed", "battle festival data is not available");
+        console.error(message);
+        writeJson(response, 500, { error: message });
+      }
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/tier-list-deck-config") {
       try {
         const scope = url.searchParams.get("scope") === "cluster" ? "cluster" : "deck";
@@ -280,6 +298,36 @@ export function createLeaderboardSnapshotServer(options = {}) {
         const message = publicError(error, "leaderboard refresh status failed");
         console.error(message);
         writeJson(response, 500, { error: error?.code === "ENOENT" ? "leaderboard refresh status is not available" : message });
+      }
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/battle-festival-deck-config") {
+      try {
+        const scope = url.searchParams.get("scope") === "cluster" ? "cluster" : "deck";
+        const deckId = String(url.searchParams.get("deckId") || "").trim();
+        if (!deckId) {
+          writeJson(response, 400, { error: "deckId is required" });
+          return;
+        }
+        const payload = await battleFestivalConfigsCache.load();
+        const configs = scope === "cluster" ? payload.clusterConfigs : payload.deckConfigs;
+        const deckConfig = configs?.[deckId];
+        if (!deckConfig) {
+          writeJson(response, 404, { error: "battle festival deck config is not available" });
+          return;
+        }
+        writeJson(response, 200, {
+          metadata: payload.metadata,
+          scope,
+          deckId,
+          deckConfig
+        });
+      } catch (error) {
+        battleFestivalConfigsCache.clear();
+        const message = publicError(error, "battle festival deck config failed", "battle festival deck config data is not available");
+        console.error(message);
+        writeJson(response, 500, { error: message });
       }
       return;
     }
@@ -366,6 +414,12 @@ export function startLeaderboardSnapshotServer(options = {}) {
   const tierListConfigsFile = options.tierListConfigsFile || env.LEADERBOARD_TIER_LIST_CONFIGS_FILE || (
     snapshotFile ? resolve(dirname(resolve(snapshotFile)), "tier-list-configs.json") : undefined
   );
+  const battleFestivalSnapshotFile = options.battleFestivalSnapshotFile || env.LEADERBOARD_BATTLE_FESTIVAL_SNAPSHOT_FILE || (
+    snapshotFile ? resolve(dirname(resolve(snapshotFile)), "battle-festival-snapshot.json") : undefined
+  );
+  const battleFestivalConfigsFile = options.battleFestivalConfigsFile || env.LEADERBOARD_BATTLE_FESTIVAL_CONFIGS_FILE || (
+    snapshotFile ? resolve(dirname(resolve(snapshotFile)), "battle-festival-configs.json") : undefined
+  );
   const siteAnalyticsFile = options.siteAnalyticsFile || env.SITE_ANALYTICS_FILE || (
     snapshotFile ? resolve(dirname(resolve(snapshotFile)), "site-analytics-events.jsonl") : undefined
   );
@@ -376,6 +430,8 @@ export function startLeaderboardSnapshotServer(options = {}) {
     matchSearchIndexFile,
     tierListSnapshotFile,
     tierListConfigsFile,
+    battleFestivalSnapshotFile,
+    battleFestivalConfigsFile,
     siteAnalyticsFile,
     siteAnalyticsAdminToken
   });
