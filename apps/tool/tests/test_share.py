@@ -30,14 +30,14 @@ def _config() -> ShareConfig:
     return ShareConfig(target_version="Ver.share", date_from="2026-05-10", date_to="2026-05-12")
 
 
-def _detail(replay_id: str, version: str = "Ver.share", result: str = "win") -> dict:
+def _detail(replay_id: str, version: str = "Ver.share", result: str = "win", mode: str = "全国対戦") -> dict:
     return {
         "detail_url": "https://eiketsu-taisen.net/members/history/detail?f=586",
         "url": "https://eiketsu-taisen.net/members/history/detail?f=586",
         "follow_id": "586",
         "played_at": "2026-05-11 12:34",
         "date": "2026-05-11 12:34",
-        "mode": "全国対戦",
+        "mode": mode,
         "version": version,
         "result": result,
         "replay_id": replay_id,
@@ -102,6 +102,31 @@ def test_export_contribution_jsonl_keeps_only_standardized_data(tmp_path):
     assert "raw_snapshots" not in serialized
     assert "cookies" not in serialized
     assert "firefox_profile" not in serialized
+
+
+def test_export_contribution_can_include_battle_festival(tmp_path):
+    settings = _settings(tmp_path)
+    engine = _init_db(settings)
+    with Session(engine) as session:
+        repo = EnvRepository(session, settings)
+        repo.upsert_match_detail(_detail("regular-replay"))
+        repo.upsert_match_detail(_detail("battle-festival-replay", mode="戦祭り"))
+        session.commit()
+
+    default_result = export_contribution(settings, _config(), "alice")
+    battle_config = ShareConfig(
+        target_version="Ver.share",
+        date_from="2026-05-10",
+        date_to="2026-05-12",
+        include_battle_festival=True,
+    )
+    battle_result = export_contribution(settings, battle_config, "alice")
+    battle_lines = [json.loads(line) for line in battle_result.path.read_text(encoding="utf-8").splitlines()]
+
+    assert default_result.match_count == 1
+    assert battle_result.match_count == 2
+    assert battle_lines[0]["include_battle_festival"] is True
+    assert any(record.get("mode") == "戦祭り" for record in battle_lines[1:])
 
 
 def test_import_contributions_is_idempotent_and_dedupes_replay(tmp_path):
@@ -252,6 +277,14 @@ def test_share_cli_parser_accepts_sync_command():
     assert args.share_command == "sync"
     assert args.contributor == "alice"
     assert args.skip_collect is True
+
+
+def test_collect_cli_parser_accepts_battle_festival_flag():
+    args = build_parser().parse_args(["collect", "follow", "--date", "2026-06-13", "--include-battle-festival"])
+
+    assert args.command == "collect"
+    assert args.collect_command == "follow"
+    assert args.include_battle_festival is True
 
 
 class _FakeGitRunner:

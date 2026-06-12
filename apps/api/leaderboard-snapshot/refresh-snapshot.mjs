@@ -62,7 +62,7 @@ async function refreshBattleFestivalSnapshot(outputPath, options = {}) {
   try {
     const snapshot = await buildLeaderboardSnapshot({
       legacyRoot: legacyRootFromOptions(options),
-      includeSolo: true,
+      includeBattleFestival: true,
       sourceKind: "battle_festival",
       logDiagnostics: options.logDiagnostics ?? true
     });

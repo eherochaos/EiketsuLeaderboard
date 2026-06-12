@@ -172,6 +172,7 @@ async function createLegacyFixture(root, options = {}) {
       date_from: "2026-05-20",
       date_to: "2026-05-25",
       include_solo: 0,
+      include_battle_festival: 0,
       generated_at: "2026-05-25T00:00:00",
       updated_at: "2026-05-25T00:00:00"
     }
@@ -183,7 +184,8 @@ async function createLegacyFixture(root, options = {}) {
       target_version: "Ver.test",
       date_from: "2026-06-10",
       date_to: "2026-06-14",
-      include_solo: 1,
+      include_solo: 0,
+      include_battle_festival: 1,
       generated_at: "2026-06-12T00:00:00",
       updated_at: "2026-06-12T00:00:00"
     });

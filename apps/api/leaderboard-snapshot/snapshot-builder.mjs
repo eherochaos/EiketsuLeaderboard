@@ -331,10 +331,19 @@ function latestShareConfig(configRows) {
 
 function latestFormalRun(runs, targetVersion, options = {}) {
   const includeSolo = Boolean(options.includeSolo);
+  const includeBattleFestival = Boolean(options.includeBattleFestival);
   return runs
     .filter((run) => run.status === "ready")
     .filter((run) => !targetVersion || run.target_version === targetVersion)
-    .filter((run) => Boolean(toNumber(run.include_solo)) === includeSolo)
+    .filter((run) => {
+      const runSolo = Boolean(toNumber(run.include_solo));
+      if (includeBattleFestival) {
+        return "include_battle_festival" in run
+          ? Boolean(toNumber(run.include_battle_festival))
+          : runSolo;
+      }
+      return Boolean(toNumber(run.include_battle_festival)) === false && runSolo === includeSolo;
+    })
     .sort((left, right) => toNumber(right.id) - toNumber(left.id))[0] || null;
 }
 
@@ -1664,7 +1673,10 @@ function buildFeaturedCards(cardStats, cardCatalog) {
 async function buildSnapshotFromData(options = {}) {
   const shareConfig = latestShareConfig(await readJsonl(resolve(legacyRoot, "tables/server_share_config.jsonl")));
   const formalRuns = await readJsonl(resolve(legacyRoot, "tables/server_leaderboard_runs.jsonl"));
-  const formalRun = latestFormalRun(formalRuns, shareConfig?.target_version, { includeSolo: Boolean(options.includeSolo) });
+  const formalRun = latestFormalRun(formalRuns, shareConfig?.target_version, {
+    includeSolo: Boolean(options.includeSolo),
+    includeBattleFestival: Boolean(options.includeBattleFestival)
+  });
 
   if (formalRun) {
     const formalRows = await readJsonl(resolve(legacyRoot, "tables/server_leaderboard_rows.jsonl"));
@@ -1676,7 +1688,7 @@ async function buildSnapshotFromData(options = {}) {
     return snapshot;
   }
 
-  if (options.includeSolo) {
+  if (options.includeSolo || options.includeBattleFestival) {
     throw new Error("No ready battle festival leaderboard run.");
   }
 
@@ -1747,6 +1759,7 @@ export async function buildLeaderboardSnapshot(options = {}) {
   try {
     return await buildSnapshotFromData({
       includeSolo: Boolean(options.includeSolo),
+      includeBattleFestival: Boolean(options.includeBattleFestival),
       sourceKind: options.sourceKind
     });
   } finally {

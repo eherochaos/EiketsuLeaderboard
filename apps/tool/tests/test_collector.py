@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from eiketsu_env.config import Settings
 from eiketsu_env.db.base import Base
-from eiketsu_env.db.models import RawSnapshot
+from eiketsu_env.db.models import CollectionRun, Match, RawSnapshot
 from eiketsu_env.db.session import make_engine
 from eiketsu_env.services import collector
 from eiketsu_env.services.collector import _existing_detail_is_complete, _filter_active_players, collect_follow
@@ -121,3 +121,45 @@ def test_collect_follow_can_skip_raw_html_snapshots(tmp_path, monkeypatch):
     assert settings.raw_dir.exists() is False
     with Session(engine) as session:
         assert session.query(RawSnapshot).count() == 0
+
+
+def test_collect_follow_can_include_battle_festival(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    engine = make_engine(settings)
+    Base.metadata.create_all(engine)
+
+    class FakeMember:
+        def fetch_text(self, url, referer=None):
+            return f"<html>{url}</html>", url
+
+    battle_detail = {**_detail(), "mode": "戦祭り"}
+    monkeypatch.setattr(collector, "create_member_session", lambda *args, **kwargs: FakeMember())
+    monkeypatch.setattr(collector, "parse_follow_html", lambda html, url, base_url: [{"follow_id": "586", "name": "A"}])
+    monkeypatch.setattr(collector, "parse_follow_api_json", lambda payload, base_url: [])
+    monkeypatch.setattr(
+        collector,
+        "parse_daily_html",
+        lambda html, url, base_url, iso_date, player: [
+            {
+                "detail_url": "https://eiketsu-taisen.net/members/history/detail?t=1773932045&f=586",
+                "follow_id": "586",
+                "mode": "戦祭り",
+            }
+        ],
+    )
+    monkeypatch.setattr(collector, "parse_detail_html", lambda html, url, base_url, seed: battle_detail)
+
+    result = collect_follow(
+        settings,
+        "2026-05-10",
+        "2026-05-10",
+        include_battle_festival=True,
+        save_raw_snapshots=False,
+    )
+
+    assert result.status == "completed"
+    assert result.counts["matches"] == 1
+    with Session(engine) as session:
+        assert session.query(Match).filter_by(mode="戦祭り").count() == 1
+        run = session.get(CollectionRun, result.run_id)
+        assert run.scope_json["include_battle_festival"] is True

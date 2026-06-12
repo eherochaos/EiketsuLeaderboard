@@ -178,6 +178,35 @@ def test_sync_client_clamps_user_date_to_server_window(tmp_path, monkeypatch):
     assert seen_dates == [("2026-05-11", "2026-05-12")]
 
 
+def test_sync_client_passes_battle_festival_scope(tmp_path, monkeypatch):
+    monkeypatch.setenv("EIKETSU_CLIENT_CONFIG_DIR", str(tmp_path / "client-config"))
+    settings = _settings(tmp_path)
+    save_client_config(
+        settings,
+        client_upload.ClientConfig(
+            server_url="http://127.0.0.1:8000",
+            api_token="token-secret",
+            contributor="alice",
+            user_public_id="u_test",
+        ),
+    )
+    transport = _FakeTransport()
+    seen_kwargs: dict[str, Any] = {}
+
+    def fake_collect(settings, date_from, date_to, **kwargs):
+        seen_kwargs.update(kwargs)
+        engine = make_engine(settings)
+        Base.metadata.create_all(engine)
+        return CollectResult(1, "completed", {"matches": 0}, [])
+
+    monkeypatch.setattr(client_upload, "collect_follow", fake_collect)
+
+    sync_client(settings, interactive_auth=False, transport=transport, target_version="Ver.battle")
+
+    assert seen_kwargs["include_solo"] is False
+    assert seen_kwargs["include_battle_festival"] is True
+
+
 def test_fetch_client_share_config_can_request_target_version(tmp_path, monkeypatch):
     monkeypatch.setenv("EIKETSU_CLIENT_CONFIG_DIR", str(tmp_path / "client-config"))
     settings = _settings(tmp_path)
@@ -198,17 +227,24 @@ def test_fetch_client_share_config_can_request_target_version(tmp_path, monkeypa
     assert config.target_version == "Ver.old"
     assert config.date_from == "2026-04-22"
     assert config.date_to == "2026-05-19"
+    assert config.include_battle_festival is False
     assert state.current_target_version == "Ver.client"
     assert state.available_target_versions == ["Ver.client", "Ver.old"]
     assert transport.calls[-2][1].endswith("/api/v1/config?target_version=Ver.old")
 
 
 def test_client_date_override_rejects_date_before_effective_start():
-    config = client_upload.ShareConfig(target_version="Ver.client", date_from="2026-05-10", date_to="2026-05-12")
+    config = client_upload.ShareConfig(
+        target_version="Ver.client",
+        date_from="2026-05-10",
+        date_to="2026-05-12",
+        include_battle_festival=True,
+    )
 
     assert minimum_client_date_from(config) == "2026-05-10"
     effective = apply_client_date_override(config, date_from="2026-05-11", date_to="2026-05-12")
     assert effective.date_from == "2026-05-11"
+    assert effective.include_battle_festival is True
     clamped = apply_client_date_override(config, date_from="2026-05-11", date_to="2026-05-20")
     assert clamped.date_to == "2026-05-12"
 
@@ -313,6 +349,21 @@ class _FakeTransport:
                 "current_target_version": "Ver.client",
                 "available_target_versions": ["Ver.client", "Ver.old"],
                 "include_solo": False,
+                "high_ranker_rank": 100,
+                "report_formats": ["md"],
+                "reports": ["overview"],
+            }
+        if url.endswith("/api/v1/config?target_version=Ver.battle"):
+            return {
+                "configured": True,
+                "schema_version": "share_v1",
+                "target_version": "Ver.battle",
+                "date_from": "2026-06-10",
+                "date_to": "2026-06-14",
+                "current_target_version": "Ver.client",
+                "available_target_versions": ["Ver.client", "Ver.battle"],
+                "include_solo": False,
+                "include_battle_festival": True,
                 "high_ranker_rank": 100,
                 "report_formats": ["md"],
                 "reports": ["overview"],
