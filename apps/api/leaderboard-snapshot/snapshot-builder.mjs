@@ -38,6 +38,7 @@ const CARD_UNIT_TYPE_REPAIRS = {
 };
 
 const OFFICIAL_CARD_TYPE_PREFIXES = new Set(["ST", "EX", "PL"]);
+const BATTLE_FESTIVAL_MODES = new Set(["戦祭り", "戦祭", "戰祭", "战祭"]);
 
 function csvParts(row) {
   return String(row || "").split(",");
@@ -468,6 +469,17 @@ function matchesFormalRun(match, run) {
   const playedDate = formalRunDate(match.played_at || match.created_at);
   if (run.date_from && playedDate && playedDate < run.date_from) return false;
   if (run.date_to && playedDate && playedDate > run.date_to) return false;
+
+  return true;
+}
+
+function matchesBattleFestivalScope(match, shareConfig) {
+  if (!BATTLE_FESTIVAL_MODES.has(String(match.mode || "").trim())) return false;
+  if (shareConfig?.target_version && match.version !== shareConfig.target_version) return false;
+
+  const playedDate = formalRunDate(match.played_at || match.created_at);
+  if (shareConfig?.date_from && playedDate && playedDate < shareConfig.date_from) return false;
+  if (shareConfig?.date_to && playedDate && playedDate > shareConfig.date_to) return false;
 
   return true;
 }
@@ -1670,6 +1682,125 @@ function buildFeaturedCards(cardStats, cardCatalog) {
     .slice(0, 8);
 }
 
+function battleFestivalDeckId(deck, unitsByDeckId) {
+  const deckId = String(deck.deck_fingerprint || "").trim();
+  if (deckId) return deckId;
+  return (unitsByDeckId.get(toNumber(deck.id)) || [])
+    .slice()
+    .sort((left, right) => toNumber(left.slot) - toNumber(right.slot))
+    .map((unit) => String(unit.card_hash || "").trim())
+    .filter(Boolean)
+    .join(",");
+}
+
+async function buildBattleFestivalSnapshotFromMatches(shareConfig) {
+  const matches = await readJsonl(
+    resolve(legacyRoot, "tables/matches.jsonl"),
+    (match) => matchesBattleFestivalScope(match, shareConfig)
+  );
+  const matchIds = new Set(matches.map((match) => toNumber(match.id)));
+  if (!matchIds.size) {
+    throw new Error("No ready battle festival leaderboard run.");
+  }
+
+  const matchDecks = await readJsonl(
+    resolve(legacyRoot, "tables/match_decks.jsonl"),
+    (deck) => matchIds.has(toNumber(deck.match_id))
+  );
+  const deckRowIds = new Set(matchDecks.map((deck) => toNumber(deck.id)));
+  const deckUnits = await readJsonl(
+    resolve(legacyRoot, "tables/match_deck_units.jsonl"),
+    (unit) => deckRowIds.has(toNumber(unit.deck_id))
+  );
+  const unitsByDeckId = new Map();
+  for (const unit of deckUnits) {
+    const deckId = toNumber(unit.deck_id);
+    if (!unitsByDeckId.has(deckId)) unitsByDeckId.set(deckId, []);
+    unitsByDeckId.get(deckId).push(unit);
+  }
+
+  const sideKeys = new Set(matchDecks.map((deck) => matchSideKey(deck.match_id, deck.side_index)));
+  const sides = await readJsonl(
+    resolve(legacyRoot, "tables/match_sides.jsonl"),
+    (side) => sideKeys.has(matchSideKey(side.match_id, side.side_index))
+  );
+  const sideByKey = new Map(sides.map((side) => [matchSideKey(side.match_id, side.side_index), side]));
+
+  const statsByDeck = new Map();
+  for (const deck of matchDecks) {
+    const deckId = battleFestivalDeckId(deck, unitsByDeckId);
+    if (!deckId) continue;
+    const result = normalizedSideResult(sideByKey.get(matchSideKey(deck.match_id, deck.side_index))?.result);
+    if (!result) continue;
+    const current = statsByDeck.get(deckId) || {
+      deck_fingerprint: deckId,
+      sample_count: 0,
+      win_count: 0,
+      loss_count: 0,
+      draw_count: 0
+    };
+    current.sample_count += 1;
+    if (result === "win") current.win_count += 1;
+    if (result === "loss") current.loss_count += 1;
+    if (result === "draw") current.draw_count += 1;
+    current.win_rate = current.sample_count ? current.win_count / current.sample_count : 0;
+    statsByDeck.set(deckId, current);
+  }
+
+  const deckStats = Array.from(statsByDeck.values());
+  if (!deckStats.length) {
+    throw new Error("No ready battle festival leaderboard run.");
+  }
+
+  const cardCatalog = await loadCardCatalog();
+  const strategyTypes = await readOptionalJson(resolve(legacyRoot, "cards/card_strategy_types.json"), []);
+  const classifierDecks = deckStats.map((row) => ({
+    deckId: row.deck_fingerprint,
+    deckName: row.deck_fingerprint,
+    cards: String(row.deck_fingerprint).split(",").filter(Boolean),
+    sampleCount: toNumber(row.sample_count),
+    winCount: toNumber(row.win_count),
+    lossCount: toNumber(row.loss_count),
+    drawCount: toNumber(row.draw_count)
+  }));
+  const classification = classifyAnalysisDecks(classifierDecks, cardCatalog, {
+    now: new Date().toISOString(),
+    strategyTypes
+  });
+  const tierRows = buildTierRows(deckStats, classification, cardCatalog);
+  const representativeDecks = balancedUsageWinRows(tierRows, 4, {
+    minWinRate: 54,
+    minUsageRate: 0.6,
+    minUsageShareOfMax: 0.15,
+    minSampleSize: 1
+  });
+  const topDeck = tierRows[0] || null;
+  const topShareTotal = buildFactionShare(tierRows).slice(0, 3).reduce((sum, item) => sum + item.share, 0);
+
+  return {
+    metadata: {
+      sourceRunId: 0,
+      sourceKind: "battle_festival",
+      targetVersion: shareConfig?.target_version || "",
+      dateFrom: shareConfig?.date_from || "",
+      dateTo: shareConfig?.date_to || "",
+      updatedAt: new Date().toISOString(),
+      sampleSize: deckStats.reduce((sum, row) => sum + toNumber(row.sample_count), 0)
+    },
+    home: {
+      factionShare: buildFactionShare(tierRows),
+      representativeDecks,
+      featuredCards: featuredCardsFromTopUsageDecks(tierRows, 4),
+      summary: topDeck
+        ? `前三区间合计 ${topShareTotal}%，战祭榜单按战祭对局样本自动排序。`
+        : "当前没有可展示的战祭数据。",
+      tierRows
+    },
+    clusterRows: tierRows,
+    tierRows
+  };
+}
+
 async function buildSnapshotFromData(options = {}) {
   const shareConfig = latestShareConfig(await readJsonl(resolve(legacyRoot, "tables/server_share_config.jsonl")));
   const formalRuns = await readJsonl(resolve(legacyRoot, "tables/server_leaderboard_runs.jsonl"));
@@ -1688,7 +1819,11 @@ async function buildSnapshotFromData(options = {}) {
     return snapshot;
   }
 
-  if (options.includeSolo || options.includeBattleFestival) {
+  if (options.includeBattleFestival) {
+    return buildBattleFestivalSnapshotFromMatches(shareConfig);
+  }
+
+  if (options.includeSolo) {
     throw new Error("No ready battle festival leaderboard run.");
   }
 

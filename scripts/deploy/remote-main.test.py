@@ -32,6 +32,7 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn("/api/tier-list-deck-config?scope=deck&deckId=", api_smoke)
         self.assertIn("/api/battle-festival-snapshot", api_smoke)
         self.assertIn("/api/battle-festival-deck-config?scope=deck&deckId=", api_smoke)
+        self.assertIn("smoke_check_client_config", api_smoke)
         self.assertIn("/api/match-search-options", api_smoke)
         self.assertIn("-X POST \"$base/api/match-search\"", api_smoke)
         self.assertIn("-X POST \"$base/api/site-analytics-event\"", api_smoke)
@@ -41,6 +42,22 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn("/battle-festival/", live_smoke)
         self.assertIn("/admin-stats/", live_smoke)
         self.assertNotIn("/api/tier-list-snapshot", live_smoke)
+
+    def test_client_config_smoke_requires_battle_festival(self) -> None:
+        client_config = self.function_body("smoke_check_client_config")
+        self.assertIn("CLIENT_CONFIG_URL=\"$base/api/v1/config\"", client_config)
+        self.assertIn("include_battle_festival", client_config)
+        self.assertIn("battle festival client config is not enabled", self.text)
+
+    def test_deploy_enables_battle_festival_scope_before_refresh(self) -> None:
+        scope = self.function_body("enable_battle_festival_scope")
+        self.assertIn("enable_battle_festival_scope.py", scope)
+        self.assertIn("docker cp apps/api/data-migration/enable_battle_festival_scope.py", scope)
+        self.assert_order(
+            "log 'enable battle festival scope'",
+            "log 'refresh leaderboard run'",
+            "log 'refresh leaderboard snapshot'",
+        )
 
     def test_node_api_has_writable_analytics_data_mount(self) -> None:
         start_node = self.function_body("start_leaderboard_node_api")

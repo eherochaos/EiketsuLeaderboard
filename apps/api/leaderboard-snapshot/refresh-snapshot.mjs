@@ -55,6 +55,31 @@ function assertSnapshotShape(snapshot) {
   }
 }
 
+function emptyBattleFestivalSnapshot(fallbackSnapshot) {
+  const metadata = fallbackSnapshot?.metadata || {};
+  const updatedAt = metadata.updatedAt || new Date().toISOString();
+  return {
+    metadata: {
+      sourceRunId: 0,
+      sourceKind: "battle_festival",
+      targetVersion: metadata.targetVersion || "",
+      dateFrom: metadata.dateFrom || "",
+      dateTo: metadata.dateTo || "",
+      updatedAt,
+      sampleSize: 0
+    },
+    home: {
+      factionShare: [],
+      representativeDecks: [],
+      featuredCards: [],
+      summary: "No battle festival data is available.",
+      tierRows: []
+    },
+    clusterRows: [],
+    tierRows: []
+  };
+}
+
 async function refreshBattleFestivalSnapshot(outputPath, options = {}) {
   const snapshotFile = battleFestivalSnapshotFileFromOptions(outputPath, options);
   const configsFile = battleFestivalConfigsFileFromOptions(outputPath, options);
@@ -81,7 +106,21 @@ async function refreshBattleFestivalSnapshot(outputPath, options = {}) {
     };
   } catch (error) {
     if (String(error?.message || "").includes("No ready battle festival leaderboard run.")) {
-      return { status: "skipped", reason: "battle festival run is not available" };
+      const snapshot = emptyBattleFestivalSnapshot(options.fallbackSnapshot);
+      const tierList = await writeTierListSnapshotFiles({
+        snapshot,
+        tierListSnapshotFile: snapshotFile,
+        tierListConfigsFile: configsFile
+      });
+      return {
+        status: "empty",
+        reason: "battle festival run is not available",
+        snapshotFile,
+        configsFile,
+        sourceRunId: snapshot.metadata.sourceRunId,
+        tierRows: tierList.tierRows,
+        clusterRows: tierList.clusterRows
+      };
     }
     throw error;
   }
@@ -106,7 +145,7 @@ export async function refreshLeaderboardSnapshot(options = {}) {
       tierListSnapshotFile: tierListSnapshotFileFromOptions(outputPath, options),
       tierListConfigsFile: tierListConfigsFileFromOptions(outputPath, options)
     });
-    const battleFestival = await refreshBattleFestivalSnapshot(outputPath, options);
+    const battleFestival = await refreshBattleFestivalSnapshot(outputPath, { ...options, fallbackSnapshot: snapshot });
     return { outputPath, snapshot, tierList, battleFestival };
   } catch (error) {
     await rm(temporaryPath, { force: true }).catch(() => {});
