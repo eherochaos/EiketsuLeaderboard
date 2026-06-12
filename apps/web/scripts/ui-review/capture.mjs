@@ -275,6 +275,26 @@ async function collectVisualSignals(page) {
         && Number(style.opacity || 1) > 0.01;
     }
 
+    function isHitTestVisible(node) {
+      if (!isVisible(node)) return false;
+      const rect = node.getBoundingClientRect();
+      const points = [
+        [rect.left + rect.width / 2, rect.top + rect.height / 2],
+        [rect.left + Math.min(8, rect.width / 3), rect.top + Math.min(8, rect.height / 3)],
+        [rect.right - Math.min(8, rect.width / 3), rect.bottom - Math.min(8, rect.height / 3)]
+      ].filter(([x, y]) => (
+        x >= 0
+        && y >= 0
+        && x <= document.documentElement.clientWidth
+        && y <= document.documentElement.clientHeight
+      ));
+      if (!points.length) return false;
+      return points.some(([x, y]) => {
+        const topNode = document.elementFromPoint(x, y);
+        return Boolean(topNode && (node === topNode || node.contains(topNode)));
+      });
+    }
+
     function labelOf(node) {
       return String(
         node.getAttribute("aria-label")
@@ -309,6 +329,40 @@ async function collectVisualSignals(page) {
       return Math.max(0, right - left) * Math.max(0, bottom - top);
     }
 
+    function clipRect(rect, clip) {
+      const x = Math.max(rect.x, clip.x);
+      const y = Math.max(rect.y, clip.y);
+      const right = Math.min(rect.right, clip.right);
+      const bottom = Math.min(rect.bottom, clip.bottom);
+      return {
+        x: Math.round(x),
+        y: Math.round(y),
+        width: Math.max(0, Math.round(right - x)),
+        height: Math.max(0, Math.round(bottom - y)),
+        right: Math.round(right),
+        bottom: Math.round(bottom)
+      };
+    }
+
+    function visibleRectOf(node) {
+      let rect = rectOf(node);
+      rect = clipRect(rect, {
+        x: 0,
+        y: 0,
+        right: document.documentElement.clientWidth,
+        bottom: document.documentElement.clientHeight
+      });
+      for (let parent = node.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+        const style = window.getComputedStyle(parent);
+        const overflow = `${style.overflow} ${style.overflowX} ${style.overflowY}`;
+        if (/(auto|scroll|hidden|clip)/.test(overflow)) {
+          rect = clipRect(rect, rectOf(parent));
+          if (rect.width <= 0 || rect.height <= 0) break;
+        }
+      }
+      return rect;
+    }
+
     function childCoverage(node, rect) {
       const children = Array.from(node.children).filter(isVisible).slice(0, 80);
       const area = Math.max(1, rect.width * rect.height);
@@ -324,7 +378,7 @@ async function collectVisualSignals(page) {
       "textarea",
       "[role='button']",
       "[tabindex]:not([tabindex='-1'])"
-    ].join(","))).filter(isVisible).slice(0, 220);
+    ].join(","))).filter(isHitTestVisible).slice(0, 220);
 
     const textNodes = Array.from(document.querySelectorAll([
       "button",
@@ -343,7 +397,7 @@ async function collectVisualSignals(page) {
       ".MatchSearch_ResultSideTitle"
     ].join(","))).filter(isVisible).slice(0, 360);
 
-    const imageNodes = Array.from(document.querySelectorAll("img, .Common_ImageFrame")).filter(isVisible).slice(0, 260);
+    const imageNodes = Array.from(document.querySelectorAll("img, .Common_ImageFrame")).filter(isHitTestVisible).slice(0, 260);
     const containerNodes = Array.from(document.querySelectorAll([
       "main > section",
       "main article",
@@ -394,9 +448,9 @@ async function collectVisualSignals(page) {
       .slice(0, 40);
 
     const overlapCandidates = [
-      ...interactiveNodes.map((node) => ({ node, item: summarize(node, "control") })),
-      ...imageNodes.map((node) => ({ node, item: summarize(node, "media") }))
-    ].slice(0, 180);
+      ...interactiveNodes.map((node) => ({ node, item: { ...summarize(node, "control"), rect: visibleRectOf(node) } })),
+      ...imageNodes.map((node) => ({ node, item: { ...summarize(node, "media"), rect: visibleRectOf(node) } }))
+    ].filter(({ item }) => item.rect.width > 0 && item.rect.height > 0).slice(0, 180);
     const overlaps = [];
     for (let index = 0; index < overlapCandidates.length; index += 1) {
       for (let next = index + 1; next < overlapCandidates.length; next += 1) {
