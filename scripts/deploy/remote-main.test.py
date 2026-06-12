@@ -75,6 +75,12 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn("BATTLE_FESTIVAL_SNAPSHOT_FILE", worker_install)
         self.assertIn("BATTLE_FESTIVAL_CONFIGS_FILE", worker_install)
 
+    def test_postgres_export_copies_through_host_temp_dir(self) -> None:
+        self.assertIn('host_export_root="/tmp/eiketsu-legacy-service-export-host-$$"', self.text)
+        self.assertIn('docker cp "$DEPLOY_EXPORT_CONTAINER:$container_export_root/." "$host_export_root"', self.text)
+        self.assertIn('mv "$host_export_root" "$DATA_ROOT/legacy-service.next"', self.text)
+        self.assertNotIn('docker cp "$DEPLOY_EXPORT_CONTAINER:$container_export_root" "$DATA_ROOT/legacy-service.next"', self.text)
+
     def test_upload_worker_systemd_execstart_uses_absolute_script(self) -> None:
         worker_install = self.function_body("install_upload_refresh_worker")
         self.assertIn('local worker_root="$DEPLOY_PATH/$DATA_ROOT"', worker_install)

@@ -514,6 +514,9 @@ if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ]; then
   if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -Fx "$DEPLOY_EXPORT_CONTAINER" >/dev/null 2>&1; then
     container_export_root="/tmp/eiketsu-legacy-service-export-$$"
     container_settings_root="/tmp/eiketsu-export-settings-$$"
+    host_export_root="/tmp/eiketsu-legacy-service-export-host-$$"
+    rm -rf "$host_export_root"
+    mkdir -p "$host_export_root"
     docker exec "$DEPLOY_EXPORT_CONTAINER" rm -rf "$container_export_root" "$container_settings_root" /tmp/export_legacy_service_from_postgres.py
     docker cp apps/api/data-migration/export_legacy_service_from_postgres.py "$DEPLOY_EXPORT_CONTAINER:/tmp/export_legacy_service_from_postgres.py"
     if [ -d "$DEPLOY_EXPORT_ASSET_ROOT" ]; then
@@ -523,8 +526,10 @@ if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ]; then
     else
       docker exec "$DEPLOY_EXPORT_CONTAINER" python /tmp/export_legacy_service_from_postgres.py --output "$container_export_root"
     fi
-    docker cp "$DEPLOY_EXPORT_CONTAINER:$container_export_root" "$DATA_ROOT/legacy-service.next"
+    docker cp "$DEPLOY_EXPORT_CONTAINER:$container_export_root/." "$host_export_root"
     docker exec "$DEPLOY_EXPORT_CONTAINER" rm -rf "$container_export_root" "$container_settings_root" /tmp/export_legacy_service_from_postgres.py
+    ensure_deploy_owner "$host_export_root"
+    mv "$host_export_root" "$DATA_ROOT/legacy-service.next"
     ensure_deploy_owner "$DATA_ROOT/legacy-service.next"
   else
     python3 apps/api/data-migration/export_legacy_service_from_postgres.py --output "$DATA_ROOT/legacy-service.next"
