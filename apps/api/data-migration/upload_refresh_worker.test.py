@@ -96,6 +96,8 @@ class UploadRefreshWorkerTests(unittest.TestCase):
             def fake_refresh_static_snapshot_after_upload(**kwargs):
                 captured["tier_list_snapshot_file"] = kwargs["tier_list_snapshot_file"]
                 captured["tier_list_configs_file"] = kwargs["tier_list_configs_file"]
+                captured["battle_festival_snapshot_file"] = kwargs["battle_festival_snapshot_file"]
+                captured["battle_festival_configs_file"] = kwargs["battle_festival_configs_file"]
                 captured["live_status_file"] = kwargs["live_status_file"]
                 return {"status": "completed"}
 
@@ -108,6 +110,8 @@ class UploadRefreshWorkerTests(unittest.TestCase):
             self.assertEqual(result["status"], "completed")
             self.assertEqual(captured["tier_list_snapshot_file"], config.tier_list_snapshot_file)
             self.assertEqual(captured["tier_list_configs_file"], config.tier_list_configs_file)
+            self.assertEqual(captured["battle_festival_snapshot_file"], config.battle_festival_snapshot_file)
+            self.assertEqual(captured["battle_festival_configs_file"], config.battle_festival_configs_file)
             self.assertEqual(captured["live_status_file"], config.live_status_file)
 
     def _config(self, root: Path) -> UploadRefreshConfig:
@@ -118,6 +122,8 @@ class UploadRefreshWorkerTests(unittest.TestCase):
             match_search_index_file=root / "apps/api/data/match-search-index.json",
             tier_list_snapshot_file=root / "apps/api/data/tier-list-snapshot.json",
             tier_list_configs_file=root / "apps/api/data/tier-list-configs.json",
+            battle_festival_snapshot_file=root / "apps/api/data/battle-festival-snapshot.json",
+            battle_festival_configs_file=root / "apps/api/data/battle-festival-configs.json",
             status_file=root / "apps/api/data/leaderboard-refresh-status.json",
         )
 

@@ -80,6 +80,8 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             self.assertEqual(len(calls), 3)
             self.assertTrue(calls[1][1]["LEADERBOARD_TIER_LIST_SNAPSHOT_FILE"].endswith("tier-list-snapshot.json"))
             self.assertTrue(calls[1][1]["LEADERBOARD_TIER_LIST_CONFIGS_FILE"].endswith("tier-list-configs.json"))
+            self.assertTrue(calls[1][1]["LEADERBOARD_BATTLE_FESTIVAL_SNAPSHOT_FILE"].endswith("battle-festival-snapshot.json"))
+            self.assertTrue(calls[1][1]["LEADERBOARD_BATTLE_FESTIVAL_CONFIGS_FILE"].endswith("battle-festival-configs.json"))
             self.assertEqual(calls[-1][1]["LEADERBOARD_LEGACY_ROOT"], str(legacy_root))
             self.assertEqual(calls[-1][1]["LEADERBOARD_SNAPSHOT_FILE"], str(snapshot_file))
             self.assertTrue(calls[-1][1]["LEADERBOARD_MATCH_SEARCH_INDEX_FILE"].endswith("match-search-index.json"))

@@ -20,6 +20,8 @@ DEFAULT_STATUS_FILE = Path("apps/api/data/leaderboard-refresh-status.json")
 DEFAULT_MATCH_SEARCH_INDEX_FILE = Path("apps/api/data/match-search-index.json")
 DEFAULT_TIER_LIST_SNAPSHOT_FILE = Path("apps/api/data/tier-list-snapshot.json")
 DEFAULT_TIER_LIST_CONFIGS_FILE = Path("apps/api/data/tier-list-configs.json")
+DEFAULT_BATTLE_FESTIVAL_SNAPSHOT_FILE = Path("apps/api/data/battle-festival-snapshot.json")
+DEFAULT_BATTLE_FESTIVAL_CONFIGS_FILE = Path("apps/api/data/battle-festival-configs.json")
 STATUS_SCHEMA_VERSION = 1
 RECENT_STATUS_LIMIT = 20
 
@@ -36,6 +38,8 @@ def refresh_static_snapshot_after_upload(
     match_search_index_file: Path | None = None,
     tier_list_snapshot_file: Path | None = None,
     tier_list_configs_file: Path | None = None,
+    battle_festival_snapshot_file: Path | None = None,
+    battle_festival_configs_file: Path | None = None,
     status_file: Path | None = None,
     live_snapshot_file: Path | None = None,
     live_status_file: Path | None = None,
@@ -52,6 +56,8 @@ def refresh_static_snapshot_after_upload(
     match_search_index = _resolve(root, match_search_index_file or DEFAULT_MATCH_SEARCH_INDEX_FILE)
     tier_list_snapshot = _resolve(root, tier_list_snapshot_file or DEFAULT_TIER_LIST_SNAPSHOT_FILE)
     tier_list_configs = _resolve(root, tier_list_configs_file or DEFAULT_TIER_LIST_CONFIGS_FILE)
+    battle_festival_snapshot = _resolve(root, battle_festival_snapshot_file or DEFAULT_BATTLE_FESTIVAL_SNAPSHOT_FILE)
+    battle_festival_configs = _resolve(root, battle_festival_configs_file or DEFAULT_BATTLE_FESTIVAL_CONFIGS_FILE)
     status_path = _resolve(root, status_file or DEFAULT_STATUS_FILE)
     live_snapshot = _resolve(root, live_snapshot_file) if live_snapshot_file else None
     live_status = _resolve(root, live_status_file) if live_status_file else None
@@ -81,7 +87,17 @@ def refresh_static_snapshot_after_upload(
         )
         export_manifest = _refresh_legacy_export(legacy, exporter or _default_exporter)
         official_card_result = _refresh_official_card_data(root, legacy, node_bin, runner or _default_runner)
-        snapshot_result = _refresh_snapshot(root, legacy, snapshot, tier_list_snapshot, tier_list_configs, node_bin, runner or _default_runner)
+        snapshot_result = _refresh_snapshot(
+            root,
+            legacy,
+            snapshot,
+            tier_list_snapshot,
+            tier_list_configs,
+            battle_festival_snapshot,
+            battle_festival_configs,
+            node_bin,
+            runner or _default_runner,
+        )
         match_search_result = _refresh_match_search_index(root, legacy, snapshot, match_search_index, node_bin, runner or _default_runner)
         consistency_result = _validate_refresh_run_consistency(snapshot, tier_list_snapshot, match_search_index)
         live_result = _publish_live_snapshot(snapshot, live_snapshot) if live_snapshot else None
@@ -197,12 +213,31 @@ def _refresh_snapshot(
     snapshot_file: Path,
     tier_list_snapshot_file: Path,
     tier_list_configs_file: Path,
+    battle_festival_snapshot_file: Path,
+    battle_festival_configs_file: Path,
     node_bin: str,
     runner: CommandRunner,
 ) -> dict[str, Any]:
     command = [node_bin, str(repo_root / "apps/api/leaderboard-snapshot/refresh-snapshot.mjs")]
-    runner(command, _snapshot_env(legacy_root, snapshot_file, None, tier_list_snapshot_file, tier_list_configs_file))
-    return {"status": "completed", "tierListSnapshot": "completed", "tierListConfigs": "completed"}
+    runner(
+        command,
+        _snapshot_env(
+            legacy_root,
+            snapshot_file,
+            None,
+            tier_list_snapshot_file,
+            tier_list_configs_file,
+            battle_festival_snapshot_file,
+            battle_festival_configs_file,
+        ),
+    )
+    return {
+        "status": "completed",
+        "tierListSnapshot": "completed",
+        "tierListConfigs": "completed",
+        "battleFestivalSnapshot": "completed",
+        "battleFestivalConfigs": "completed",
+    }
 
 
 def _refresh_match_search_index(
@@ -500,6 +535,8 @@ def _snapshot_env(
     match_search_index_file: Path | None = None,
     tier_list_snapshot_file: Path | None = None,
     tier_list_configs_file: Path | None = None,
+    battle_festival_snapshot_file: Path | None = None,
+    battle_festival_configs_file: Path | None = None,
 ) -> dict[str, str]:
     env = dict(os.environ)
     env["LEADERBOARD_LEGACY_ROOT"] = str(legacy_root)
@@ -511,6 +548,10 @@ def _snapshot_env(
         env["LEADERBOARD_TIER_LIST_SNAPSHOT_FILE"] = str(tier_list_snapshot_file)
     if tier_list_configs_file is not None:
         env["LEADERBOARD_TIER_LIST_CONFIGS_FILE"] = str(tier_list_configs_file)
+    if battle_festival_snapshot_file is not None:
+        env["LEADERBOARD_BATTLE_FESTIVAL_SNAPSHOT_FILE"] = str(battle_festival_snapshot_file)
+    if battle_festival_configs_file is not None:
+        env["LEADERBOARD_BATTLE_FESTIVAL_CONFIGS_FILE"] = str(battle_festival_configs_file)
     return env
 
 
@@ -574,6 +615,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--match-search-index-file", type=Path, default=DEFAULT_MATCH_SEARCH_INDEX_FILE)
     parser.add_argument("--tier-list-snapshot-file", type=Path, default=DEFAULT_TIER_LIST_SNAPSHOT_FILE)
     parser.add_argument("--tier-list-configs-file", type=Path, default=DEFAULT_TIER_LIST_CONFIGS_FILE)
+    parser.add_argument("--battle-festival-snapshot-file", type=Path, default=DEFAULT_BATTLE_FESTIVAL_SNAPSHOT_FILE)
+    parser.add_argument("--battle-festival-configs-file", type=Path, default=DEFAULT_BATTLE_FESTIVAL_CONFIGS_FILE)
     parser.add_argument("--status-file", type=Path, default=DEFAULT_STATUS_FILE)
     parser.add_argument("--live-snapshot-file", type=Path, default=None)
     parser.add_argument("--live-status-file", type=Path, default=None)
@@ -607,6 +650,8 @@ def main() -> int:
         match_search_index_file=args.match_search_index_file,
         tier_list_snapshot_file=args.tier_list_snapshot_file,
         tier_list_configs_file=args.tier_list_configs_file,
+        battle_festival_snapshot_file=args.battle_festival_snapshot_file,
+        battle_festival_configs_file=args.battle_festival_configs_file,
         status_file=args.status_file,
         live_snapshot_file=args.live_snapshot_file,
         live_status_file=args.live_status_file,

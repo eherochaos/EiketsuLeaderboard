@@ -102,6 +102,27 @@ async function testMissingTierListDataDoesNotExposePath() {
   }
 }
 
+async function testMissingBattleFestivalDataDoesNotExposePath() {
+  const missingFile = resolve("apps/api/leaderboard-snapshot/__missing_battle_festival__.json");
+  const server = createLeaderboardSnapshotServer({ battleFestivalSnapshotFile: missingFile });
+  const address = await listen(server);
+  const originalConsoleError = console.error;
+
+  try {
+    console.error = () => {};
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/battle-festival-snapshot`);
+    const bodyText = await response.text();
+    const body = JSON.parse(bodyText);
+
+    assert.equal(response.status, 500);
+    assert.equal(body.error, "battle festival data is not available");
+    assert.equal(bodyText.includes(missingFile), false);
+  } finally {
+    console.error = originalConsoleError;
+    await close(server);
+  }
+}
+
 function testSnapshot(sourceRunId, summary) {
   return {
     metadata: {
@@ -332,6 +353,27 @@ async function testTierListDeckConfigEndpointUsesStaticConfigFile() {
     const missingText = await missing.text();
     assert.equal(missing.status, 404);
     assert.equal(/token|cookie|secret|C:\\|E:\\/.test(missingText), false);
+  } finally {
+    await close(server);
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testBattleFestivalDeckConfigEndpointUsesStaticConfigFile() {
+  const root = await mkdtemp(join(tmpdir(), "battle-festival-config-"));
+  const battleFestivalConfigsFile = join(root, "battle-festival-configs.json");
+  const server = createLeaderboardSnapshotServer({ battleFestivalConfigsFile });
+
+  try {
+    await writeFile(battleFestivalConfigsFile, `${JSON.stringify(testTierListConfigs())}\n`, "utf8");
+    const address = await listen(server);
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/battle-festival-deck-config?scope=deck&deckId=deck-a`);
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.metadata.sourceRunId, 1);
+    assert.equal(body.scope, "deck");
+    assert.equal(body.deckConfig.strategies[0].name, "strategy-a");
   } finally {
     await close(server);
     await rm(root, { recursive: true, force: true });
@@ -587,10 +629,12 @@ await testMissingDataDoesNotExposePath();
 await testMissingRefreshStatusDoesNotExposePath();
 await testMissingMatchSearchIndexDoesNotExposePath();
 await testMissingTierListDataDoesNotExposePath();
+await testMissingBattleFestivalDataDoesNotExposePath();
 await testSnapshotFileIsServedWithoutBuild();
 await testSnapshotFileReplacementIsReloaded();
 await testTierListSnapshotUsesStaticCacheHeaders();
 await testTierListDeckConfigEndpointUsesStaticConfigFile();
+await testBattleFestivalDeckConfigEndpointUsesStaticConfigFile();
 await testRefreshStatusFileReplacementIsReloaded();
 await testMatchSearchEndpointsUseStaticIndex();
 await testMatchSearchIndexReplacementIsReloaded();

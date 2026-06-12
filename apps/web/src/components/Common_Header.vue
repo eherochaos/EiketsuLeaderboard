@@ -1,16 +1,25 @@
 <script setup lang="ts">
+import { onMounted, ref } from "vue";
+import { isBattleFestivalActive, loadBattleFestivalPeriod } from "../lib/battleFestival";
 import { trackSiteEvent } from "../lib/siteAnalytics";
 
 const props = defineProps<{
-  current: "home" | "tier" | "status" | "matchSearch" | "adminStats";
+  current: "home" | "tier" | "battleFestival" | "status" | "matchSearch" | "adminStats";
 }>();
 
 const navItems = [
-  { key: "home", label: "首页", href: "/leaderboard/" },
-  { key: "tier", label: "TierList", href: "/tier-list/" },
-  { key: "matchSearch", label: "对局搜索", href: "/match-search/" },
-  { key: "status", label: "数据状态", href: "/leaderboard-status/" }
+  { key: "home", label: "首页", href: "/leaderboard/", activeOnly: false },
+  { key: "tier", label: "TierList", href: "/tier-list/", activeOnly: false },
+  { key: "battleFestival", label: "战祭", href: "/battle-festival/", activeOnly: true },
+  { key: "matchSearch", label: "对局搜索", href: "/match-search/", activeOnly: false },
+  { key: "status", label: "数据状态", href: "/leaderboard-status/", activeOnly: false }
 ] as const;
+
+const showBattleFestival = ref(false);
+
+onMounted(async () => {
+  showBattleFestival.value = isBattleFestivalActive(await loadBattleFestivalPeriod());
+});
 
 function trackNavClick(key: string, href: string): void {
   trackSiteEvent("nav_click", key, { href });
@@ -27,7 +36,7 @@ function trackNavClick(key: string, href: string): void {
       <span class="Common_Header_Links">
         <a
           v-for="item in navItems"
-          v-show="item.key !== props.current"
+          v-show="item.key !== props.current && (!item.activeOnly || showBattleFestival)"
           :key="item.key"
           class="Common_NavPrimary"
           :href="item.href"
