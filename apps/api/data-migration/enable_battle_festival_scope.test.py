@@ -36,6 +36,7 @@ class EnableBattleFestivalScopeTests(unittest.TestCase):
             self.assertIn("mode_scope", upload_columns)
             self.assertIn("festival_date_from", upload_columns)
             self.assertIn("festival_date_to", upload_columns)
+            self.assertEqual(result["backfilledScopeRows"], 0)
 
     def test_target_version_does_not_toggle_collection_scope(self) -> None:
         with tempfile.TemporaryDirectory() as root:
@@ -49,6 +50,45 @@ class EnableBattleFestivalScopeTests(unittest.TestCase):
                     "SELECT target_version, include_battle_festival FROM server_share_config ORDER BY id"
                 ).fetchall()
             self.assertEqual(rows, [("Ver.old", 0), ("Ver.current", 0)])
+
+    def test_backfills_battle_festival_scope_from_linked_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            db_path = Path(root) / "service.db"
+            self._create_backfill_database(db_path)
+
+            result = module.enable_battle_festival_scope_sqlite(db_path)
+
+            self.assertEqual(result["backfilledScopeRows"], 2)
+            with closing(sqlite3.connect(db_path)) as connection:
+                package_rows = connection.execute(
+                    """
+                    SELECT package_id, mode_scope, festival_date_from, festival_date_to
+                    FROM shared_contribution_packages
+                    ORDER BY package_id
+                    """
+                ).fetchall()
+                upload_rows = connection.execute(
+                    """
+                    SELECT package_id, mode_scope, festival_date_from, festival_date_to
+                    FROM server_uploads
+                    ORDER BY package_id
+                    """
+                ).fetchall()
+
+            self.assertEqual(
+                package_rows,
+                [
+                    ("pkg-battle", "battle_festival", "2026-06-11", "2026-06-13"),
+                    ("pkg-tier", "tier_list", "", ""),
+                ],
+            )
+            self.assertEqual(
+                upload_rows,
+                [
+                    ("pkg-battle", "battle_festival", "2026-06-11", "2026-06-13"),
+                    ("pkg-tier", "tier_list", "", ""),
+                ],
+            )
 
     def _create_database(self, db_path: Path) -> None:
         with closing(sqlite3.connect(db_path)) as connection:
@@ -92,6 +132,64 @@ class EnableBattleFestivalScopeTests(unittest.TestCase):
                         (1, "Ver.old", "2026-06-01T00:00:00"),
                         (2, "Ver.current", "2026-06-13T00:00:00"),
                     ],
+                )
+
+    def _create_backfill_database(self, db_path: Path) -> None:
+        with closing(sqlite3.connect(db_path)) as connection:
+            with connection:
+                connection.execute("CREATE TABLE server_share_config (id INTEGER PRIMARY KEY, target_version TEXT NOT NULL)")
+                connection.execute("CREATE TABLE server_leaderboard_runs (id INTEGER PRIMARY KEY, target_version TEXT NOT NULL)")
+                connection.execute(
+                    """
+                    CREATE TABLE shared_contribution_packages (
+                      package_id TEXT PRIMARY KEY,
+                      date_from TEXT NOT NULL,
+                      date_to TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    CREATE TABLE server_uploads (
+                      id INTEGER PRIMARY KEY,
+                      package_id TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    CREATE TABLE shared_contribution_matches (
+                      package_id TEXT NOT NULL,
+                      match_id INTEGER NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    CREATE TABLE matches (
+                      id INTEGER PRIMARY KEY,
+                      mode TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.executemany(
+                    "INSERT INTO shared_contribution_packages (package_id, date_from, date_to) VALUES (?, ?, ?)",
+                    [
+                        ("pkg-battle", "2026-06-11", "2026-06-13"),
+                        ("pkg-tier", "2026-06-11", "2026-06-13"),
+                    ],
+                )
+                connection.executemany(
+                    "INSERT INTO server_uploads (id, package_id) VALUES (?, ?)",
+                    [(1, "pkg-battle"), (2, "pkg-tier")],
+                )
+                connection.executemany(
+                    "INSERT INTO matches (id, mode) VALUES (?, ?)",
+                    [(10, "\u6226\u796d\u308a"), (11, "\u6226\u796d\u308a"), (12, "\u5168\u56fd\u5bfe\u6226")],
+                )
+                connection.executemany(
+                    "INSERT INTO shared_contribution_matches (package_id, match_id) VALUES (?, ?)",
+                    [("pkg-battle", 10), ("pkg-battle", 11), ("pkg-tier", 12)],
                 )
 
     def _columns(self, connection: sqlite3.Connection, table: str) -> set[str]:
