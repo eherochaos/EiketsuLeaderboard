@@ -40,6 +40,33 @@ class ExportLegacyServiceFromPostgresTests(unittest.TestCase):
             module.SNAPSHOT_RUNTIME_TABLES.index("shared_contribution_packages"),
         )
 
+    def test_shared_contribution_packages_export_orders_by_package_id(self) -> None:
+        module = load_export_module()
+
+        class FakeRows:
+            def mappings(self):
+                return iter([{"package_id": "pkg-1", "mode_scope": "battle_festival"}])
+
+        class FakeSession:
+            statement = ""
+
+            def execute(self, statement):
+                self.statement = statement
+                return FakeRows()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "shared_contribution_packages.jsonl"
+            session = FakeSession()
+
+            count = module.export_table(session, "shared_contribution_packages", output_path)
+
+            self.assertEqual(count, 1)
+            self.assertIn('ORDER BY "package_id"', session.statement)
+            self.assertEqual(
+                output_path.read_text(encoding="utf-8").strip(),
+                '{"package_id":"pkg-1","mode_scope":"battle_festival"}',
+            )
+
     def test_required_card_asset_missing_raises(self) -> None:
         module = load_export_module()
         with tempfile.TemporaryDirectory() as temp_dir:
