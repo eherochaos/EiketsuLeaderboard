@@ -23,17 +23,38 @@ export async function refreshOfficialCardData(options = {}) {
   try {
     payload = await fetchOfficialDatalistBase();
   } catch (error) {
+    const reason = String(error.message || error);
     if (!(await fileExists(outputPath))) {
-      throw error;
+      await writePayload(outputPath, {});
+      console.warn(`officialCardDataRefresh=wrote-empty-fallback reason="${reason}"`);
+      return {
+        outputPath,
+        generalCount: 0,
+        reusedExisting: false,
+        usedEmptyFallback: true
+      };
     }
     const generalCount = await readExistingGeneralCount(outputPath);
-    console.warn(`officialCardDataRefresh=kept-existing reason="${String(error.message || error)}"`);
+    console.warn(`officialCardDataRefresh=kept-existing reason="${reason}"`);
     return {
       outputPath,
       generalCount,
-      reusedExisting: true
+      reusedExisting: true,
+      usedEmptyFallback: false
     };
   }
+
+  await writePayload(outputPath, payload);
+
+  return {
+    outputPath,
+    generalCount: Array.isArray(payload.general) ? payload.general.length : 0,
+    reusedExisting: false,
+    usedEmptyFallback: false
+  };
+}
+
+async function writePayload(outputPath, payload) {
   const temporaryPath = `${outputPath}.tmp-${process.pid}`;
 
   await mkdir(dirname(outputPath), { recursive: true });
@@ -45,12 +66,6 @@ export async function refreshOfficialCardData(options = {}) {
     await rm(temporaryPath, { force: true }).catch(() => {});
     throw error;
   }
-
-  return {
-    outputPath,
-    generalCount: Array.isArray(payload.general) ? payload.general.length : 0,
-    reusedExisting: false
-  };
 }
 
 async function fileExists(path) {
