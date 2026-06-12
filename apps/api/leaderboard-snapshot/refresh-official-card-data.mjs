@@ -1,4 +1,4 @@
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -19,7 +19,21 @@ async function fetchOfficialDatalistBase() {
 
 export async function refreshOfficialCardData(options = {}) {
   const outputPath = resolve(options.outputPath || process.argv[2] || DEFAULT_OUTPUT_PATH);
-  const payload = await fetchOfficialDatalistBase();
+  let payload;
+  try {
+    payload = await fetchOfficialDatalistBase();
+  } catch (error) {
+    if (!(await fileExists(outputPath))) {
+      throw error;
+    }
+    const generalCount = await readExistingGeneralCount(outputPath);
+    console.warn(`officialCardDataRefresh=kept-existing reason="${String(error.message || error)}"`);
+    return {
+      outputPath,
+      generalCount,
+      reusedExisting: true
+    };
+  }
   const temporaryPath = `${outputPath}.tmp-${process.pid}`;
 
   await mkdir(dirname(outputPath), { recursive: true });
@@ -34,8 +48,27 @@ export async function refreshOfficialCardData(options = {}) {
 
   return {
     outputPath,
-    generalCount: Array.isArray(payload.general) ? payload.general.length : 0
+    generalCount: Array.isArray(payload.general) ? payload.general.length : 0,
+    reusedExisting: false
   };
+}
+
+async function fileExists(path) {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readExistingGeneralCount(path) {
+  try {
+    const payload = JSON.parse(await readFile(path, "utf8"));
+    return Array.isArray(payload.general) ? payload.general.length : 0;
+  } catch {
+    return 0;
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
