@@ -26,6 +26,10 @@ SNAPSHOT_RUNTIME_TABLES = [
     "match_deck_units",
 ]
 
+TABLE_ORDER_COLUMNS = {
+    "shared_contribution_packages": "package_id",
+}
+
 
 def json_default(value: Any) -> str:
     if isinstance(value, (datetime, date)):
@@ -35,8 +39,9 @@ def json_default(value: Any) -> str:
 
 def export_table(session, table_name: str, output_path: Path) -> int:
     count = 0
+    order_column = TABLE_ORDER_COLUMNS.get(table_name, "id")
     with output_path.open("w", encoding="utf-8", newline="\n") as handle:
-        rows = session.execute(text(f'SELECT * FROM "{table_name}" ORDER BY id')).mappings()
+        rows = session.execute(text(f'SELECT * FROM "{table_name}" ORDER BY "{order_column}"')).mappings()
         for row in rows:
             handle.write(json.dumps(dict(row), ensure_ascii=False, default=json_default, separators=(",", ":")))
             handle.write("\n")
