@@ -32,6 +32,40 @@ ROUTE_BLOCK = f"""
     from fastapi import Request as _CodexRequest
     globals()["_CodexRequest"] = _CodexRequest
 
+    @app.middleware("http")
+    async def _codex_include_battle_festival_config(request: _CodexRequest, call_next):
+        response = await call_next(request)
+        if request.method != "GET" or request.url.path != "/api/v1/config" or response.status_code != 200:
+            return response
+        content_type = response.headers.get("content-type") or ""
+        if "application/json" not in content_type:
+            return response
+
+        import json as _codex_json
+        from fastapi.responses import Response as _CodexResponse
+
+        body = b""
+        async for chunk in response.body_iterator:
+            body += chunk
+        try:
+            payload = _codex_json.loads(body)
+        except Exception:
+            return _CodexResponse(content=body, status_code=response.status_code, media_type=content_type)
+
+        if isinstance(payload, dict) and payload.get("configured", True):
+            payload["include_battle_festival"] = True
+        headers = {{
+            key: value
+            for key, value in response.headers.items()
+            if key.lower() not in ("content-length", "content-type")
+        }}
+        return _CodexResponse(
+            content=_codex_json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            status_code=response.status_code,
+            media_type="application/json",
+            headers=headers,
+        )
+
     def _codex_proxy_headers(upstream_headers):
         headers = {{}}
         for name in ("cache-control", "etag", "last-modified", "vary", "content-encoding"):

@@ -148,6 +148,7 @@ const visibleRows = computed(() => usePublishedClusters.value ? filteredClusterR
 const renderedRows = computed(() => visibleRows.value.slice(0, visibleRowLimit.value));
 const hasMoreRows = computed(() => renderedRows.value.length < visibleRows.value.length);
 const renderedCountLabel = computed(() => `${integer(renderedRows.value.length)} / ${integer(visibleRows.value.length)}`);
+const emptyStateMessage = computed(() => props.pageKind === "battleFestival" ? "暂无战祭数据" : "暂无榜单数据");
 
 const filterCountLabel = computed(() => {
   if (!clusterSameName.value) return `${integer(filteredRows.value.length)} 条`;
@@ -344,7 +345,7 @@ function switchClusterVariant(deck: TierListRow): void {
           <h1 id="tier-title">{{ pageCopy.title }}</h1>
           <p class="TierPage_MetaLine">
             <span>{{ metadata.targetVersion || "未指定版本" }}</span>
-            <span>Run {{ metadata.sourceRunId }}</span>
+            <span>Run {{ metadata.sourceRunId || "-" }}</span>
             <span>{{ dateOnly(metadata.dateFrom) }} - {{ dateOnly(metadata.dateTo) }}</span>
             <span>样本 {{ integer(metadata.sampleSize) }}</span>
           </p>
@@ -407,7 +408,10 @@ function switchClusterVariant(deck: TierListRow): void {
           <p class="Common_Eyebrow">{{ pageCopy.tableEyebrow }}</p>
           <h2 id="TierPage_Table_Title">{{ pageCopy.tableTitle }}</h2>
         </div>
-        <table v-if="!mobileViewport" class="Common_TableLayout TierPage_Table">
+        <section v-if="!visibleRows.length" class="Common_StatusPanel TierPage_EmptyState">
+          {{ emptyStateMessage }}
+        </section>
+        <table v-else-if="!mobileViewport" class="Common_TableLayout TierPage_Table">
           <colgroup>
             <col class="Common_TableColumn Common_TableColumn_Fixed" style="--Common_TableColumnWidth: var(--TierPage_TableRankColumn)">
             <col class="Common_TableColumn">
@@ -940,6 +944,11 @@ function switchClusterVariant(deck: TierListRow): void {
   margin-top: 0;
   padding: 14px;
   box-shadow: none;
+}
+
+.TierPage_EmptyState {
+  margin-top: var(--space-sm);
+  padding: 24px;
 }
 
 .TierPage_LoadMore {

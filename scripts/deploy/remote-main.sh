@@ -353,11 +353,27 @@ smoke_check_run_consistency() {
   [ "$leaderboard_run" = "$status_run" ] || fail 'refresh status run does not match leaderboard snapshot'
 }
 
+smoke_check_client_config() {
+  local base="${DEPLOY_SMOKE_URL_BASE%/}"
+  CLIENT_CONFIG_URL="$base/api/v1/config" python3 - <<'PY' || fail 'battle festival client config is not enabled'
+import json
+import os
+import urllib.request
+
+with urllib.request.urlopen(os.environ["CLIENT_CONFIG_URL"], timeout=30) as response:
+    payload = json.load(response)
+
+if payload.get("include_battle_festival") is not True:
+    raise SystemExit("include_battle_festival is not true")
+PY
+}
+
 smoke_check_api_routes() {
   [ -n "$DEPLOY_SMOKE_URL_BASE" ] || return 0
   command -v curl >/dev/null 2>&1 || return 0
   local base="${DEPLOY_SMOKE_URL_BASE%/}"
   wait_for_live_health
+  smoke_check_client_config
   curl -fsS "$base/api/tier-list-snapshot" >/dev/null || fail 'tier list snapshot api is not live'
   local tier_deck_id
   tier_deck_id="$(tier_list_smoke_deck_id)"
@@ -421,6 +437,16 @@ refresh_public_run() {
     docker exec "$DEPLOY_EXPORT_CONTAINER" rm -f /tmp/refresh_public_leaderboard_run.py
   else
     python3 apps/api/data-migration/refresh_public_leaderboard_run.py
+  fi
+}
+
+enable_battle_festival_scope() {
+  if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -Fx "$DEPLOY_EXPORT_CONTAINER" >/dev/null 2>&1; then
+    docker cp apps/api/data-migration/enable_battle_festival_scope.py "$DEPLOY_EXPORT_CONTAINER:/tmp/enable_battle_festival_scope.py"
+    docker exec "$DEPLOY_EXPORT_CONTAINER" python /tmp/enable_battle_festival_scope.py
+    docker exec "$DEPLOY_EXPORT_CONTAINER" rm -f /tmp/enable_battle_festival_scope.py
+  else
+    python3 apps/api/data-migration/enable_battle_festival_scope.py
   fi
 }
 
@@ -505,6 +531,9 @@ TIER_LIST_CONFIGS_FILE="$DATA_ROOT/tier-list-configs.json"
 BATTLE_FESTIVAL_SNAPSHOT_FILE="$DATA_ROOT/battle-festival-snapshot.json"
 BATTLE_FESTIVAL_CONFIGS_FILE="$DATA_ROOT/battle-festival-configs.json"
 if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ]; then
+  log 'enable battle festival scope'
+  enable_battle_festival_scope
+
   log 'refresh leaderboard run'
   refresh_public_run
 

@@ -159,6 +159,7 @@ async function createLegacyFixture(root, options = {}) {
   const tableRoot = join(root, "tables");
   const cardRoot = join(root, "cards");
   const includeBattleFestival = Boolean(options.includeBattleFestival);
+  const includeBattleFestivalMatches = Boolean(options.includeBattleFestivalMatches);
   await mkdir(tableRoot, { recursive: true });
   await mkdir(cardRoot, { recursive: true });
   await writeJsonl(join(tableRoot, "server_share_config.jsonl"), [
@@ -209,7 +210,7 @@ async function createLegacyFixture(root, options = {}) {
     rows.push(deckRow(6, deckA, [card("legacy-card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 1, 3, 1, 2));
   }
   await writeJsonl(join(tableRoot, "server_leaderboard_rows.jsonl"), rows);
-  await writeJsonl(join(tableRoot, "matches.jsonl"), [
+  const matches = [
     {
       id: 1,
       version: "Ver.test",
@@ -219,21 +220,57 @@ async function createLegacyFixture(root, options = {}) {
       detail_url: "https://eiketsu.example.test/detail/1",
       replay_id: "fixture-replay-1"
     }
-  ]);
-  await writeJsonl(join(tableRoot, "match_decks.jsonl"), [
+  ];
+  if (includeBattleFestivalMatches) {
+    matches.push({
+      id: 2,
+      version: "Ver.test",
+      mode: "戦祭り",
+      played_at: "2026-05-24 18:00",
+      created_at: "2026-05-24 18:00",
+      play_url: "https://eiketsu.example.test/play/battle-festival",
+      detail_url: "https://eiketsu.example.test/detail/battle-festival",
+      replay_id: "battle-festival-replay"
+    });
+  }
+  await writeJsonl(join(tableRoot, "matches.jsonl"), matches);
+  const matchDecks = [
     { id: 1, match_id: 1, side_index: 0, deck_fingerprint: deckA },
     { id: 2, match_id: 1, side_index: 1, deck_fingerprint: deckB }
-  ]);
-  await writeJsonl(join(tableRoot, "match_sides.jsonl"), [
+  ];
+  if (includeBattleFestivalMatches) {
+    matchDecks.push(
+      { id: 3, match_id: 2, side_index: 0, deck_fingerprint: deckA },
+      { id: 4, match_id: 2, side_index: 1, deck_fingerprint: deckB }
+    );
+  }
+  await writeJsonl(join(tableRoot, "match_decks.jsonl"), matchDecks);
+  const matchSides = [
     matchSide(1, 1, 0, "loss", "alice"),
     matchSide(2, 1, 1, "win", "bob")
-  ]);
-  await writeJsonl(join(tableRoot, "match_deck_units.jsonl"), [
+  ];
+  if (includeBattleFestivalMatches) {
+    matchSides.push(
+      matchSide(3, 2, 0, "win", "carol"),
+      matchSide(4, 2, 1, "loss", "dave")
+    );
+  }
+  await writeJsonl(join(tableRoot, "match_sides.jsonl"), matchSides);
+  const matchDeckUnits = [
     { id: 1, deck_id: 1, slot: 1, card_hash: "card-a1" },
     { id: 2, deck_id: 1, slot: 2, card_hash: "card-a2" },
     { id: 3, deck_id: 2, slot: 1, card_hash: "card-b1" },
     { id: 4, deck_id: 2, slot: 2, card_hash: "card-b2" }
-  ]);
+  ];
+  if (includeBattleFestivalMatches) {
+    matchDeckUnits.push(
+      { id: 5, deck_id: 3, slot: 1, card_hash: "card-a1" },
+      { id: 6, deck_id: 3, slot: 2, card_hash: "card-a2" },
+      { id: 7, deck_id: 4, slot: 1, card_hash: "card-b1" },
+      { id: 8, deck_id: 4, slot: 2, card_hash: "card-b2" }
+    );
+  }
+  await writeJsonl(join(tableRoot, "match_deck_units.jsonl"), matchDeckUnits);
   await writeJson(join(cardRoot, "card_catalog.json"), {
     cards: [
       { hash_id: "card-a1", card_code: "蒼001", name: "Alpha", faction: "蒼", cost: "1.0", unitType: "妲嶅叺" },
@@ -281,15 +318,30 @@ async function testRefreshWritesAtomicSnapshot() {
     const tierList = JSON.parse(tierListText);
     const tierListConfigsText = await readFile(join(root, "published", "tier-list-configs.json"), "utf8");
     const tierListConfigs = JSON.parse(tierListConfigsText);
+    const battleFestivalText = await readFile(join(root, "published", "battle-festival-snapshot.json"), "utf8");
+    const battleFestivalSnapshot = JSON.parse(battleFestivalText);
+    const battleFestivalConfigsText = await readFile(join(root, "published", "battle-festival-configs.json"), "utf8");
+    const battleFestivalConfigs = JSON.parse(battleFestivalConfigsText);
 
     assert.equal(snapshot.metadata.sourceRunId, 1);
-    assert.equal(battleFestival.status, "skipped");
+    assert.equal(battleFestival.status, "empty");
+    assert.equal(battleFestival.sourceRunId, 0);
     assert.equal(output.metadata.sourceKind, "server_leaderboard");
     assert.equal(output.tierRows.length, 2);
     assert.equal(output.clusterRows.length, 2);
     assert.equal(tierList.tierRows.length, 2);
     assert.equal(tierList.clusterRows.length, 2);
     assert.equal(tierList.tierRows[0].deckConfig, undefined);
+    assert.equal(battleFestivalSnapshot.metadata.sourceRunId, 0);
+    assert.equal(battleFestivalSnapshot.metadata.sourceKind, "battle_festival");
+    assert.equal(battleFestivalSnapshot.metadata.targetVersion, output.metadata.targetVersion);
+    assert.equal(battleFestivalSnapshot.metadata.dateFrom, output.metadata.dateFrom);
+    assert.equal(battleFestivalSnapshot.metadata.dateTo, output.metadata.dateTo);
+    assert.equal(battleFestivalSnapshot.metadata.sampleSize, 0);
+    assert.equal(battleFestivalSnapshot.tierRows.length, 0);
+    assert.equal(battleFestivalSnapshot.clusterRows.length, 0);
+    assert.deepEqual(battleFestivalConfigs.deckConfigs, {});
+    assert.deepEqual(battleFestivalConfigs.clusterConfigs, {});
     assert.ok(tierListConfigs.deckConfigs[output.tierRows[0].deckId].strategies.length > 0);
     assert.ok(tierListConfigs.clusterConfigs[output.clusterRows[0].deckId].schoolStages.length > 0);
     assert.equal(output.home.tierRows.length, 2);
@@ -369,7 +421,31 @@ async function testRefreshWritesBattleFestivalSnapshot() {
   }
 }
 
+async function testRefreshBuildsBattleFestivalSnapshotFromMatches() {
+  const root = await mkdtemp(join(tmpdir(), "battle-festival-matches-refresh-"));
+  const legacyRoot = join(root, "legacy-service");
+  const outputPath = join(root, "published", "leaderboard-snapshot.json");
+
+  try {
+    await createLegacyFixture(legacyRoot, { includeBattleFestivalMatches: true });
+    const { battleFestival } = await refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: false });
+    const battleFestivalText = await readFile(join(root, "published", "battle-festival-snapshot.json"), "utf8");
+    const battleFestivalSnapshot = JSON.parse(battleFestivalText);
+
+    assert.equal(battleFestival.status, "completed");
+    assert.equal(battleFestival.sourceRunId, 0);
+    assert.equal(battleFestivalSnapshot.metadata.sourceKind, "battle_festival");
+    assert.equal(battleFestivalSnapshot.metadata.sampleSize, 2);
+    assert.equal(battleFestivalSnapshot.tierRows.length, 2);
+    assert.ok(battleFestivalSnapshot.tierRows.some((row) => row.deckId === deckA));
+    assert.ok(battleFestivalSnapshot.tierRows.some((row) => row.deckId === deckB));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 await testRefreshWritesAtomicSnapshot();
 await testRefreshWritesBattleFestivalSnapshot();
+await testRefreshBuildsBattleFestivalSnapshotFromMatches();
 
 console.log("leaderboard snapshot refresh tests passed");
