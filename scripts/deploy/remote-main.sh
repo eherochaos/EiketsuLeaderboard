@@ -355,7 +355,7 @@ smoke_check_run_consistency() {
 
 smoke_check_client_config() {
   local base="${DEPLOY_SMOKE_URL_BASE%/}"
-  CLIENT_CONFIG_URL="$base/api/v1/config" python3 - <<'PY' || fail 'battle festival client config is not enabled'
+  CLIENT_CONFIG_URL="$base/api/v1/config" python3 - <<'PY' || fail 'battle festival client config field is missing'
 import json
 import os
 import urllib.request
@@ -363,8 +363,8 @@ import urllib.request
 with urllib.request.urlopen(os.environ["CLIENT_CONFIG_URL"], timeout=30) as response:
     payload = json.load(response)
 
-if payload.get("include_battle_festival") is not True:
-    raise SystemExit("include_battle_festival is not true")
+if "include_battle_festival" not in payload:
+    raise SystemExit("include_battle_festival is missing")
 PY
 }
 
@@ -440,7 +440,7 @@ refresh_public_run() {
   fi
 }
 
-enable_battle_festival_scope() {
+ensure_battle_festival_scope() {
   if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -Fx "$DEPLOY_EXPORT_CONTAINER" >/dev/null 2>&1; then
     docker cp apps/api/data-migration/enable_battle_festival_scope.py "$DEPLOY_EXPORT_CONTAINER:/tmp/enable_battle_festival_scope.py"
     docker exec "$DEPLOY_EXPORT_CONTAINER" python /tmp/enable_battle_festival_scope.py
@@ -531,8 +531,8 @@ TIER_LIST_CONFIGS_FILE="$DATA_ROOT/tier-list-configs.json"
 BATTLE_FESTIVAL_SNAPSHOT_FILE="$DATA_ROOT/battle-festival-snapshot.json"
 BATTLE_FESTIVAL_CONFIGS_FILE="$DATA_ROOT/battle-festival-configs.json"
 if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ]; then
-  log 'enable battle festival scope'
-  enable_battle_festival_scope
+  log 'ensure battle festival schema'
+  ensure_battle_festival_scope
 
   log 'refresh leaderboard run'
   refresh_public_run

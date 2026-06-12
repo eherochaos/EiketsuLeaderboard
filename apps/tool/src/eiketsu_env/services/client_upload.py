@@ -20,7 +20,14 @@ from sqlalchemy.orm import Session
 from eiketsu_env.db.base import Base
 from eiketsu_env.db.models import RawSnapshot
 from eiketsu_env.db.session import make_engine
+from eiketsu_env.services.battle_festival import (
+    BattleFestivalPeriod,
+    detect_battle_festival_period,
+    is_battle_festival_active,
+    today_jst,
+)
 from eiketsu_env.services.collector import CollectResult, collect_follow
+from eiketsu_env.services.mode_filter import MODE_SCOPE_BATTLE_FESTIVAL, MODE_SCOPE_TIER_LIST
 from eiketsu_env.services.progress import ProgressReporter
 from eiketsu_env.services.share import ShareConfig, assert_safe_contribution_payload, export_contribution
 from eiketsu_env.utils import sha256_text
@@ -62,6 +69,9 @@ class ClientSyncResult:
     package_path: Path
     upload: dict[str, Any]
     viewer_url: str
+    battle_festival_collect_result: CollectResult | None = None
+    battle_festival_package_path: Path | None = None
+    battle_festival_upload: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
@@ -165,16 +175,18 @@ def sync_client(
     transport = transport or UrllibJsonTransport()
     share_config = _request_share_config(config, transport, target_version=target_version)
     share_config = apply_client_date_override(share_config, date_from=date_from, date_to=date_to)
+    tier_config = tier_list_share_config(share_config)
 
     _ensure_client_database(settings)
     if progress:
         progress.message("快速同步模式：并发采集详情，自动跳过已完整采集的旧详情")
     collect_result = collect_follow(
         settings,
-        share_config.date_from,
-        share_config.date_to,
-        include_solo=share_config.include_solo,
-        include_battle_festival=share_config.include_battle_festival,
+        tier_config.date_from,
+        tier_config.date_to,
+        include_solo=tier_config.include_solo,
+        include_battle_festival=False,
+        mode_scope=tier_config.mode_scope,
         auth_source=auth_source,
         interactive_auth=interactive_auth,
         skip_existing=True,
@@ -183,29 +195,42 @@ def sync_client(
         progress=progress,
         save_raw_snapshots=False,
     )
-    if progress:
-        progress.message("正在打包标准化贡献数据")
-    package_path = _client_tmp_dir(settings) / f"{share_config.target_version}_{share_config.date_from}_{share_config.date_to}.jsonl"
-    export_result = export_contribution(settings, share_config, config.contributor, package_path)
-    package_text = export_result.path.read_text(encoding="utf-8")
-    assert_safe_contribution_payload(package_text)
-    if progress:
-        progress.message("正在上传到服务器")
-    upload = transport.request_json(
-        "POST",
-        f"{config.server_url}/api/v1/uploads",
-        {"package_text": package_text, "content_hash": sha256_text(package_text)},
-        token=config.api_token,
-    )
-    try:
-        export_result.path.unlink()
-    except OSError:
-        pass
+    upload, package_path = _upload_contribution(settings, config, transport, tier_config, progress)
+
+    battle_collect = None
+    battle_upload = None
+    battle_package_path = None
+    battle_config = active_battle_festival_share_config(settings, share_config, auth_source=auth_source)
+    if battle_config is not None:
+        if progress:
+            progress.message(f"检测到战祭周期 {battle_config.festival_date_from} - {battle_config.festival_date_to}，开始独立采集")
+        battle_collect = collect_follow(
+            settings,
+            battle_config.date_from,
+            battle_config.date_to,
+            include_solo=False,
+            include_battle_festival=True,
+            mode_scope=battle_config.mode_scope,
+            auth_source=auth_source,
+            interactive_auth=False,
+            skip_existing=True,
+            skip_inactive=True,
+            concurrency_profile="aggressive",
+            progress=progress,
+            save_raw_snapshots=False,
+        )
+        battle_upload, battle_package_path = _upload_contribution(settings, config, transport, battle_config, progress)
+    elif progress:
+        progress.message("未检测到进行中的战祭，跳过战祭采集")
+
     return ClientSyncResult(
         collect_result=collect_result,
-        package_path=export_result.path,
+        package_path=package_path,
         upload=upload,
         viewer_url=f"{config.server_url}/me?token={urllib.parse.quote(config.api_token)}",
+        battle_festival_collect_result=battle_collect,
+        battle_festival_package_path=battle_package_path,
+        battle_festival_upload=battle_upload,
     )
 
 
@@ -278,6 +303,9 @@ def apply_client_date_override(config: ShareConfig, date_from: str = "", date_to
         target_version=config.target_version,
         date_from=effective_from,
         date_to=effective_to,
+        mode_scope=config.mode_scope,
+        festival_date_from=config.festival_date_from,
+        festival_date_to=config.festival_date_to,
         include_solo=config.include_solo,
         include_battle_festival=config.include_battle_festival,
         high_ranker_rank=config.high_ranker_rank,
@@ -293,6 +321,84 @@ def minimum_client_date_from(config: ShareConfig) -> str:
     if config.date_from:
         return config.date_from
     return known_start
+
+
+def tier_list_share_config(config: ShareConfig) -> ShareConfig:
+    tier_config = ShareConfig(
+        schema_version=config.schema_version,
+        target_version=config.target_version,
+        date_from=config.date_from,
+        date_to=config.date_to,
+        mode_scope=MODE_SCOPE_TIER_LIST,
+        include_solo=config.include_solo,
+        include_battle_festival=False,
+        high_ranker_rank=config.high_ranker_rank,
+        report_formats=list(config.report_formats),
+        reports=list(config.reports),
+    )
+    tier_config.validate()
+    return tier_config
+
+
+def active_battle_festival_share_config(
+    settings: Settings,
+    base_config: ShareConfig,
+    auth_source: str = "",
+    period: BattleFestivalPeriod | None = None,
+) -> ShareConfig | None:
+    detected = period or detect_battle_festival_period(settings, auth_source=auth_source, interactive_auth=False)
+    current_day = today_jst()
+    if not is_battle_festival_active(detected, today=current_day):
+        return None
+    assert detected is not None
+    collect_to = min(detected.date_to, current_day.isoformat())
+    battle_config = ShareConfig(
+        schema_version=base_config.schema_version,
+        target_version=base_config.target_version,
+        date_from=detected.date_from,
+        date_to=collect_to,
+        mode_scope=MODE_SCOPE_BATTLE_FESTIVAL,
+        festival_date_from=detected.date_from,
+        festival_date_to=detected.date_to,
+        include_solo=False,
+        include_battle_festival=True,
+        high_ranker_rank=base_config.high_ranker_rank,
+        report_formats=list(base_config.report_formats),
+        reports=list(base_config.reports),
+    )
+    battle_config.validate()
+    return battle_config
+
+
+def _upload_contribution(
+    settings: Settings,
+    config: ClientConfig,
+    transport: JsonTransport,
+    share_config: ShareConfig,
+    progress: ProgressReporter | None = None,
+) -> tuple[dict[str, Any], Path]:
+    if progress:
+        progress.message(f"正在打包 {share_config.mode_scope} 标准化贡献数据")
+    package_path = (
+        _client_tmp_dir(settings)
+        / f"{share_config.mode_scope}_{share_config.target_version}_{share_config.date_from}_{share_config.date_to}.jsonl"
+    )
+    export_result = export_contribution(settings, share_config, config.contributor, package_path)
+    package_text = export_result.path.read_text(encoding="utf-8")
+    assert_safe_contribution_payload(package_text)
+    if progress:
+        progress.message(f"正在上传 {share_config.mode_scope} 到服务器")
+    upload = transport.request_json(
+        "POST",
+        f"{config.server_url}/api/v1/uploads",
+        {"package_text": package_text, "content_hash": sha256_text(package_text)},
+        token=config.api_token,
+    )
+    try:
+        export_result.path.unlink()
+    except OSError:
+        pass
+    return upload, export_result.path
 
 
 def doctor_client(settings: Settings, transport: JsonTransport | None = None) -> dict[str, Any]:

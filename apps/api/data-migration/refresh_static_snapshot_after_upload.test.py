@@ -211,6 +211,9 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
                         "target_version": "Ver.3.5.0B",
                         "date_from": "2026-06-01",
                         "date_to": "2026-06-01",
+                        "mode_scope": "battle_festival",
+                        "festival_date_from": "2026-06-11",
+                        "festival_date_to": "2026-06-13",
                         "status": "completed",
                         "match_count": 12,
                         "imported_match_count": 10,
@@ -235,6 +238,9 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             status = json.loads(status_text)
             upload = status["latestUpload"]
             self.assertEqual(upload["id"], 21)
+            self.assertEqual(upload["modeScope"], "battle_festival")
+            self.assertEqual(upload["festivalDateFrom"], "2026-06-11")
+            self.assertEqual(upload["festivalDateTo"], "2026-06-13")
             self.assertEqual(upload["contributorName"], "alice token=[redacted]")
             self.assertEqual(upload["userPublicId"], "u_public")
             self.assertNotIn("user_id", json.dumps(upload, ensure_ascii=False))

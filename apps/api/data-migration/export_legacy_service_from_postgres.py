@@ -17,6 +17,7 @@ SNAPSHOT_RUNTIME_TABLES = [
     "server_share_config",
     "server_users",
     "server_uploads",
+    "shared_contribution_packages",
     "server_leaderboard_runs",
     "server_leaderboard_rows",
     "matches",

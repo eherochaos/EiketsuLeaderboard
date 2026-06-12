@@ -53,6 +53,26 @@ class UploadRefreshWorkerTests(unittest.TestCase):
 
             self.assertEqual(result, {"status": "skipped", "reason": "no new completed upload"})
 
+    def test_manifest_only_battle_festival_upload_triggers_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(Path(temp_dir))
+            calls: list[str] = []
+
+            result = run_upload_refresh_once(
+                config,
+                latest_upload_reader=lambda: {
+                    "id": 13,
+                    "status": "completed",
+                    "imported_match_count": 0,
+                    "mode_scope": "battle_festival",
+                },
+                refresher=lambda: calls.append("refresh") or {"status": "completed", "reason": "upload refresh completed"},
+            )
+
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["uploadId"], 13)
+            self.assertEqual(calls, ["refresh"])
+
     def test_lock_skip_result_is_returned(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config = self._config(Path(temp_dir))

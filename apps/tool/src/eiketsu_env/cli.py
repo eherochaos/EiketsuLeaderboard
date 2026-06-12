@@ -15,6 +15,7 @@ from eiketsu_env.services.browser_session import doctor_browser
 from eiketsu_env.services.collector import collect_follow, parse_collect_dates
 from eiketsu_env.services.exporter import export_matches
 from eiketsu_env.services.firefox_session import doctor_firefox
+from eiketsu_env.services.mode_filter import MODE_SCOPE_BATTLE_FESTIVAL, MODE_SCOPE_TIER_LIST
 from eiketsu_env.services.progress import ProgressReporter
 from eiketsu_env.services.share import (
     aggregate_shared,
@@ -152,6 +153,7 @@ def main(argv: list[str] | None = None) -> None:
             player_name=args.player_name,
             include_solo=args.include_solo,
             include_battle_festival=args.include_battle_festival,
+            mode_scope=MODE_SCOPE_BATTLE_FESTIVAL if args.include_battle_festival else MODE_SCOPE_TIER_LIST,
             auth_source=args.auth_source,
             skip_existing=args.skip_existing,
             skip_inactive=args.skip_inactive,

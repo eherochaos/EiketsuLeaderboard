@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 from typing import Any
 
+import pytest
 from sqlalchemy.orm import Session
 
 from eiketsu_env.config import Settings
@@ -11,6 +13,7 @@ from eiketsu_env.db.base import Base
 from eiketsu_env.db.models import RawSnapshot
 from eiketsu_env.db.session import make_engine
 from eiketsu_env.services import client_upload
+from eiketsu_env.services.battle_festival import BattleFestivalPeriod
 from eiketsu_env.services.client_upload import (
     apply_client_date_override,
     bind_client,
@@ -23,6 +26,7 @@ from eiketsu_env.services.client_upload import (
     sync_client,
 )
 from eiketsu_env.services.collector import CollectResult
+from eiketsu_env.services.mode_filter import MODE_SCOPE_BATTLE_FESTIVAL, MODE_SCOPE_TIER_LIST
 from eiketsu_env.services.repository import EnvRepository
 
 
@@ -62,6 +66,11 @@ def _detail() -> dict:
             }
         ],
     }
+
+
+@pytest.fixture(autouse=True)
+def _skip_battle_festival_probe(monkeypatch):
+    monkeypatch.setattr(client_upload, "detect_battle_festival_period", lambda *args, **kwargs: None)
 
 
 def test_bind_client_saves_local_config(tmp_path, monkeypatch):
@@ -178,7 +187,7 @@ def test_sync_client_clamps_user_date_to_server_window(tmp_path, monkeypatch):
     assert seen_dates == [("2026-05-11", "2026-05-12")]
 
 
-def test_sync_client_passes_battle_festival_scope(tmp_path, monkeypatch):
+def test_sync_client_keeps_tier_list_scope_when_server_has_legacy_battle_flag(tmp_path, monkeypatch):
     monkeypatch.setenv("EIKETSU_CLIENT_CONFIG_DIR", str(tmp_path / "client-config"))
     settings = _settings(tmp_path)
     save_client_config(
@@ -204,7 +213,60 @@ def test_sync_client_passes_battle_festival_scope(tmp_path, monkeypatch):
     sync_client(settings, interactive_auth=False, transport=transport, target_version="Ver.battle")
 
     assert seen_kwargs["include_solo"] is False
-    assert seen_kwargs["include_battle_festival"] is True
+    assert seen_kwargs["include_battle_festival"] is False
+    assert seen_kwargs["mode_scope"] == MODE_SCOPE_TIER_LIST
+
+
+def test_sync_client_collects_and_uploads_active_battle_festival_scope(tmp_path, monkeypatch):
+    monkeypatch.setenv("EIKETSU_CLIENT_CONFIG_DIR", str(tmp_path / "client-config"))
+    settings = _settings(tmp_path)
+    save_client_config(
+        settings,
+        client_upload.ClientConfig(
+            server_url="http://127.0.0.1:8000",
+            api_token="token-secret",
+            contributor="alice",
+            user_public_id="u_test",
+        ),
+    )
+    transport = _FakeTransport()
+    seen_calls: list[tuple[str, str, dict[str, Any]]] = []
+
+    def fake_collect(settings, date_from, date_to, **kwargs):
+        seen_calls.append((date_from, date_to, dict(kwargs)))
+        engine = make_engine(settings)
+        Base.metadata.create_all(engine)
+        return CollectResult(1, "completed", {"matches": 0}, [])
+
+    monkeypatch.setattr(client_upload, "collect_follow", fake_collect)
+    monkeypatch.setattr(
+        client_upload,
+        "detect_battle_festival_period",
+        lambda *args, **kwargs: BattleFestivalPeriod("2026-06-11", "2026-06-13"),
+    )
+    monkeypatch.setattr(client_upload, "today_jst", lambda: date(2026, 6, 12))
+
+    result = sync_client(settings, interactive_auth=False, transport=transport, target_version="Ver.battle")
+
+    assert result.battle_festival_collect_result is not None
+    assert result.battle_festival_upload is not None
+    assert [(date_from, date_to) for date_from, date_to, _ in seen_calls] == [
+        ("2026-06-10", "2026-06-14"),
+        ("2026-06-11", "2026-06-12"),
+    ]
+    assert seen_calls[0][2]["mode_scope"] == MODE_SCOPE_TIER_LIST
+    assert seen_calls[0][2]["include_battle_festival"] is False
+    assert seen_calls[1][2]["mode_scope"] == MODE_SCOPE_BATTLE_FESTIVAL
+    assert seen_calls[1][2]["include_battle_festival"] is True
+    assert len(transport.upload_payloads) == 2
+    manifests = [
+        json.loads(payload["package_text"].splitlines()[0])
+        for payload in transport.upload_payloads
+    ]
+    assert manifests[0]["mode_scope"] == MODE_SCOPE_TIER_LIST
+    assert manifests[1]["mode_scope"] == MODE_SCOPE_BATTLE_FESTIVAL
+    assert manifests[1]["festival_date_from"] == "2026-06-11"
+    assert manifests[1]["festival_date_to"] == "2026-06-13"
 
 
 def test_fetch_client_share_config_can_request_target_version(tmp_path, monkeypatch):
@@ -320,6 +382,7 @@ class _FakeTransport:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, dict[str, Any] | None, str]] = []
         self.upload_payload: dict[str, Any] | None = None
+        self.upload_payloads: list[dict[str, Any]] = []
 
     def request_json(self, method: str, url: str, payload: dict[str, Any] | None = None, token: str = "") -> dict[str, Any]:
         self.calls.append((method, url, payload, token))
@@ -370,6 +433,8 @@ class _FakeTransport:
             }
         if url.endswith("/api/v1/uploads"):
             self.upload_payload = payload
+            if payload is not None:
+                self.upload_payloads.append(payload)
             assert token == "token-secret"
             return {
                 "upload_id": 1,

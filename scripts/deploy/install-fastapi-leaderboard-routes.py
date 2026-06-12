@@ -33,7 +33,7 @@ ROUTE_BLOCK = f"""
     globals()["_CodexRequest"] = _CodexRequest
 
     @app.middleware("http")
-    async def _codex_include_battle_festival_config(request: _CodexRequest, call_next):
+    async def _codex_default_battle_festival_config(request: _CodexRequest, call_next):
         response = await call_next(request)
         if request.method != "GET" or request.url.path != "/api/v1/config" or response.status_code != 200:
             return response
@@ -53,7 +53,7 @@ ROUTE_BLOCK = f"""
             return _CodexResponse(content=body, status_code=response.status_code, media_type=content_type)
 
         if isinstance(payload, dict) and payload.get("configured", True):
-            payload["include_battle_festival"] = True
+            payload.setdefault("include_battle_festival", False)
         headers = {{
             key: value
             for key, value in response.headers.items()

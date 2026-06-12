@@ -13,6 +13,7 @@ from eiketsu_env.db.base import Base
 from eiketsu_env.db.models import Match, SharedContributionMatch, SharedContributionPackage
 from eiketsu_env.db.session import make_engine
 from eiketsu_env.services.collector import CollectResult
+from eiketsu_env.services.mode_filter import MODE_SCOPE_BATTLE_FESTIVAL
 from eiketsu_env.services.repository import EnvRepository
 from eiketsu_env.services.share import ShareConfig, export_contribution, import_contributions, load_share_config, sync_shared
 
@@ -118,15 +119,17 @@ def test_export_contribution_can_include_battle_festival(tmp_path):
         target_version="Ver.share",
         date_from="2026-05-10",
         date_to="2026-05-12",
+        mode_scope=MODE_SCOPE_BATTLE_FESTIVAL,
         include_battle_festival=True,
     )
     battle_result = export_contribution(settings, battle_config, "alice")
     battle_lines = [json.loads(line) for line in battle_result.path.read_text(encoding="utf-8").splitlines()]
 
     assert default_result.match_count == 1
-    assert battle_result.match_count == 2
+    assert battle_result.match_count == 1
+    assert battle_lines[0]["mode_scope"] == MODE_SCOPE_BATTLE_FESTIVAL
     assert battle_lines[0]["include_battle_festival"] is True
-    assert any(record.get("mode") == "戦祭り" for record in battle_lines[1:])
+    assert all(record.get("mode") == "戦祭り" for record in battle_lines[1:])
 
 
 def test_import_contributions_is_idempotent_and_dedupes_replay(tmp_path):

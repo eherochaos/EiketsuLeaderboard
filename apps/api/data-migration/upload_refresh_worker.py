@@ -48,10 +48,14 @@ with make_session_factory(settings)() as session:
         text(
             '''
             SELECT id, status, imported_match_count, match_count, target_version,
-                   date_from, date_to, created_at, updated_at
+                   date_from, date_to, mode_scope, festival_date_from, festival_date_to,
+                   created_at, updated_at
             FROM server_uploads
             WHERE status = 'completed'
-              AND COALESCE(imported_match_count, 0) > 0
+              AND (
+                COALESCE(imported_match_count, 0) > 0
+                OR COALESCE(mode_scope, '') = 'battle_festival'
+              )
             ORDER BY id DESC
             LIMIT 1
             '''
@@ -300,7 +304,9 @@ def _record_failure_status(config: UploadRefreshConfig, reason: str) -> dict[str
 def _is_refreshable_upload(upload: dict[str, Any] | None) -> bool:
     if not isinstance(upload, dict):
         return False
-    return str(upload.get("status") or "") == "completed" and _to_int(upload.get("imported_match_count")) > 0
+    if str(upload.get("status") or "") != "completed":
+        return False
+    return _to_int(upload.get("imported_match_count")) > 0 or str(upload.get("mode_scope") or "") == "battle_festival"
 
 
 def _to_int(value: Any) -> int:

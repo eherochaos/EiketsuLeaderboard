@@ -15,7 +15,7 @@ from eiketsu_env.config import Settings
 from eiketsu_env.db.models import Match, MatchAlias
 from eiketsu_env.db.session import make_session_factory
 from eiketsu_env.services.browser_session import create_member_session
-from eiketsu_env.services.mode_filter import is_environment_mode
+from eiketsu_env.services.mode_filter import MODE_SCOPE_TIER_LIST, is_mode_in_scope, normalize_mode_scope
 from eiketsu_env.services.parsers import parse_daily_html, parse_detail_html, parse_follow_api_json, parse_follow_html
 from eiketsu_env.services.progress import ProgressReporter
 from eiketsu_env.services.requesting import FollowConcurrencyProfile, call_with_retries, follow_concurrency_profile
@@ -112,6 +112,7 @@ def collect_follow(
     player_name: str = "",
     include_solo: bool = False,
     include_battle_festival: bool = False,
+    mode_scope: str = MODE_SCOPE_TIER_LIST,
     auth_source: str = "",
     interactive_auth: bool = False,
     skip_existing: bool = False,
@@ -121,6 +122,7 @@ def collect_follow(
     save_raw_snapshots: bool = True,
 ) -> CollectResult:
     dates = _date_range(date_from, date_to)
+    normalized_mode_scope = normalize_mode_scope(mode_scope)
     profile = follow_concurrency_profile(concurrency_profile)
     factory = make_session_factory(settings)
     member = create_member_session(settings, auth_source or None, interactive=interactive_auth)
@@ -153,6 +155,7 @@ def collect_follow(
                 "player_name": player_name,
                 "include_solo": include_solo,
                 "include_battle_festival": include_battle_festival,
+                "mode_scope": normalized_mode_scope,
                 "skip_existing": skip_existing,
                 "skip_inactive": skip_inactive,
                 "save_raw_snapshots": save_raw_snapshots,
@@ -211,8 +214,9 @@ def collect_follow(
                     counts["daily_pages"] += 1
                     counts["players_visited"] += 1
                     for seed in daily_result.seeds:
-                        if not is_environment_mode(
+                        if not is_mode_in_scope(
                             str(seed.get("mode") or ""),
+                            mode_scope=normalized_mode_scope,
                             include_solo=include_solo,
                             include_battle_festival=include_battle_festival,
                         ):
@@ -235,8 +239,9 @@ def collect_follow(
                 for detail_result in detail_results:
                     counts["detail_pages"] += 1
                     detail = detail_result.detail
-                    if not is_environment_mode(
+                    if not is_mode_in_scope(
                         str(detail.get("mode") or ""),
+                        mode_scope=normalized_mode_scope,
                         include_solo=include_solo,
                         include_battle_festival=include_battle_festival,
                     ):
