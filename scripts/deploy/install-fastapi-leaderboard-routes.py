@@ -97,6 +97,14 @@ ROUTE_BLOCK = f"""
             raise HTTPException(status_code=404, detail="static file not found")
         return FileResponse(path, media_type="text/html; charset=utf-8")
 
+    @app.get("/battle-festival")
+    @app.get("/battle-festival/")
+    def battle_festival_page():
+        path = _codex_leaderboard_frontend_root() / "battle-festival" / "index.html"
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="static file not found")
+        return FileResponse(path, media_type="text/html; charset=utf-8")
+
     @app.get("/api/leaderboard-refresh-status")
     def api_leaderboard_refresh_status(request: _CodexRequest):
         return _codex_proxy_leaderboard_node_api("/api/leaderboard-refresh-status", forward_headers=request.headers)
@@ -113,6 +121,18 @@ ROUTE_BLOCK = f"""
     def api_tier_list_deck_config(request: _CodexRequest):
         query = request.url.query
         path = "/api/tier-list-deck-config"
+        if query:
+            path = f"{{path}}?{{query}}"
+        return _codex_proxy_leaderboard_node_api(path, forward_headers=request.headers)
+
+    @app.get("/api/battle-festival-snapshot")
+    def api_battle_festival_snapshot(request: _CodexRequest):
+        return _codex_proxy_leaderboard_node_api("/api/battle-festival-snapshot", forward_headers=request.headers)
+
+    @app.get("/api/battle-festival-deck-config")
+    def api_battle_festival_deck_config(request: _CodexRequest):
+        query = request.url.query
+        path = "/api/battle-festival-deck-config"
         if query:
             path = f"{{path}}?{{query}}"
         return _codex_proxy_leaderboard_node_api(path, forward_headers=request.headers)
