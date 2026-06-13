@@ -80,7 +80,17 @@ function emptyBattleFestivalSnapshot(fallbackSnapshot) {
     battleFestival: {
       camps: [],
       campShare: [],
-      rowsByCamp: {}
+      rowsByCamp: {},
+      meritRows: [],
+      meritSummary: {
+        observedPlayerCount: 0,
+        meritPlayerCount: 0,
+        rankedPlayerCount: 0,
+        singleSamplePlayerCount: 0,
+        meritSampleCount: 0,
+        maxMeritDelta: 0,
+        topPlayerName: ""
+      }
     }
   };
 }

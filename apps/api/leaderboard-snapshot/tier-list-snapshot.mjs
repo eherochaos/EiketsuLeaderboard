@@ -75,6 +75,51 @@ function metadataForConfigs(metadata) {
   };
 }
 
+function emptyBattleFestivalMeritSummary() {
+  return {
+    observedPlayerCount: 0,
+    meritPlayerCount: 0,
+    rankedPlayerCount: 0,
+    singleSamplePlayerCount: 0,
+    meritSampleCount: 0,
+    maxMeritDelta: 0,
+    topPlayerName: ""
+  };
+}
+
+function slimBattleFestivalMeritRow(row) {
+  return {
+    playerName: String(row?.playerName || ""),
+    camp: String(row?.camp || ""),
+    firstSeenAt: String(row?.firstSeenAt || ""),
+    lastSeenAt: String(row?.lastSeenAt || ""),
+    firstMerit: Number(row?.firstMerit || 0),
+    lastMerit: Number(row?.lastMerit || 0),
+    maxMerit: Number(row?.maxMerit || 0),
+    meritDelta: Number(row?.meritDelta || 0),
+    meritSampleCount: Number(row?.meritSampleCount || 0),
+    observedMatchCount: Number(row?.observedMatchCount || 0),
+    winCount: Number(row?.winCount || 0),
+    lossCount: Number(row?.lossCount || 0),
+    drawCount: Number(row?.drawCount || 0),
+    unknownCount: Number(row?.unknownCount || 0),
+    confidence: String(row?.confidence || "single")
+  };
+}
+
+function slimBattleFestivalMeritSummary(summary) {
+  if (!summary || typeof summary !== "object") return emptyBattleFestivalMeritSummary();
+  return {
+    observedPlayerCount: Number(summary.observedPlayerCount || 0),
+    meritPlayerCount: Number(summary.meritPlayerCount || 0),
+    rankedPlayerCount: Number(summary.rankedPlayerCount || 0),
+    singleSamplePlayerCount: Number(summary.singleSamplePlayerCount || 0),
+    meritSampleCount: Number(summary.meritSampleCount || 0),
+    maxMeritDelta: Number(summary.maxMeritDelta || 0),
+    topPlayerName: String(summary.topPlayerName || "")
+  };
+}
+
 function slimBattleFestival(value) {
   if (!value || typeof value !== "object") return undefined;
   const rowsByCamp = {};
@@ -88,7 +133,9 @@ function slimBattleFestival(value) {
   return {
     camps: Array.isArray(value.camps) ? value.camps : [],
     campShare: Array.isArray(value.campShare) ? value.campShare : [],
-    rowsByCamp
+    rowsByCamp,
+    meritRows: Array.isArray(value.meritRows) ? value.meritRows.map(slimBattleFestivalMeritRow) : [],
+    meritSummary: slimBattleFestivalMeritSummary(value.meritSummary)
   };
 }
 
