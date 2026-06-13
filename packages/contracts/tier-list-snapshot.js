@@ -18,7 +18,16 @@ const TIER_LIST_DECK_CONFIG_FIELDS = Object.freeze([
   "deckConfig",
 ]);
 
+const BATTLE_FESTIVAL_SNAPSHOT_FIELDS = Object.freeze([
+  "camps",
+  "campShare",
+  "rowsByCamp",
+  "meritRows",
+  "meritSummary",
+]);
+
 module.exports = {
+  BATTLE_FESTIVAL_SNAPSHOT_FIELDS,
   TIER_LIST_DECK_CONFIG_ENDPOINT,
   TIER_LIST_DECK_CONFIG_FIELDS,
   TIER_LIST_SNAPSHOT_ENDPOINT,

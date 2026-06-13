@@ -40,6 +40,12 @@ const CARD_UNIT_TYPE_REPAIRS = {
 const OFFICIAL_CARD_TYPE_PREFIXES = new Set(["ST", "EX", "PL"]);
 const OFFICIAL_ASSET_BASE_URL = "https://image.eiketsu-taisen.net/";
 const BATTLE_FESTIVAL_CAMP_KEYS = ["\u6240\u5c5e\u9663\u55b6", "\u6240\u5c5e\u9635\u8425"];
+const BATTLE_FESTIVAL_MERIT_KEY = "\u6226\u529f";
+const BATTLE_FESTIVAL_MERIT_CONFIDENCE = {
+  high: "high",
+  medium: "medium",
+  single: "single"
+};
 const BATTLE_FESTIVAL_MODES = new Set(["戦祭り", "戦祭", "戰祭", "战祭"]);
 
 function csvParts(row) {
@@ -558,7 +564,9 @@ function emptyBattleFestivalSnapshot(shareConfig, uploadScope = null) {
     battleFestival: {
       camps: [],
       campShare: [],
-      rowsByCamp: {}
+      rowsByCamp: {},
+      meritRows: [],
+      meritSummary: emptyBattleFestivalMeritSummary()
     }
   };
 }
@@ -1792,6 +1800,137 @@ function battleFestivalCamp(side) {
   return "";
 }
 
+function parseBattleFestivalMerit(value) {
+  const text = String(value ?? "").replace(/,/g, "").trim();
+  if (!text) return null;
+  const match = text.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const number = Number(match[0]);
+  return Number.isFinite(number) ? Math.round(number) : null;
+}
+
+function battleFestivalMerit(side) {
+  const profile = jsonObject(side?.profile_json);
+  return parseBattleFestivalMerit(profile[BATTLE_FESTIVAL_MERIT_KEY]);
+}
+
+function emptyBattleFestivalMeritSummary() {
+  return {
+    observedPlayerCount: 0,
+    meritPlayerCount: 0,
+    rankedPlayerCount: 0,
+    singleSamplePlayerCount: 0,
+    meritSampleCount: 0,
+    maxMeritDelta: 0,
+    topPlayerName: ""
+  };
+}
+
+function battleFestivalMeritConfidence(sampleCount) {
+  if (sampleCount >= 3) return BATTLE_FESTIVAL_MERIT_CONFIDENCE.high;
+  if (sampleCount >= 2) return BATTLE_FESTIVAL_MERIT_CONFIDENCE.medium;
+  return BATTLE_FESTIVAL_MERIT_CONFIDENCE.single;
+}
+
+function mostCommonText(counter) {
+  return Array.from(counter.entries())
+    .filter(([value]) => value)
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "ja"))[0]?.[0] || "";
+}
+
+function compareMeritSamples(left, right) {
+  return String(left.playedAt || "").localeCompare(String(right.playedAt || "")) ||
+    toNumber(left.matchId) - toNumber(right.matchId) ||
+    left.merit - right.merit;
+}
+
+function buildBattleFestivalMeritAnalysis(sides, matchById) {
+  const players = new Map();
+  for (const side of sides) {
+    const playerName = firstText(side?.player_name);
+    if (!playerName) continue;
+    const matchId = toNumber(side?.match_id);
+    const match = matchById.get(matchId) || {};
+    const playedAt = firstText(match.played_at, match.created_at);
+    const current = players.get(playerName) || {
+      playerName,
+      camps: new Map(),
+      observedMatchIds: new Set(),
+      winCount: 0,
+      lossCount: 0,
+      drawCount: 0,
+      unknownCount: 0,
+      meritSamples: []
+    };
+
+    current.observedMatchIds.add(matchId);
+    const result = normalizedSideResult(side?.result);
+    if (result === "win") current.winCount += 1;
+    else if (result === "loss") current.lossCount += 1;
+    else if (result === "draw") current.drawCount += 1;
+    else current.unknownCount += 1;
+
+    const camp = battleFestivalCamp(side);
+    if (camp) current.camps.set(camp, (current.camps.get(camp) || 0) + 1);
+
+    const merit = battleFestivalMerit(side);
+    if (merit !== null) {
+      current.meritSamples.push({ merit, playedAt, matchId });
+    }
+    players.set(playerName, current);
+  }
+
+  const meritRows = Array.from(players.values())
+    .map((player) => {
+      const meritSamples = player.meritSamples.slice().sort(compareMeritSamples);
+      if (!meritSamples.length) return null;
+      const firstSample = meritSamples[0];
+      const lastSample = meritSamples[meritSamples.length - 1];
+      const maxMerit = Math.max(...meritSamples.map((sample) => sample.merit));
+      const meritDelta = meritSamples.length >= 2 ? lastSample.merit - firstSample.merit : 0;
+      return {
+        playerName: player.playerName,
+        camp: mostCommonText(player.camps),
+        firstSeenAt: firstSample.playedAt,
+        lastSeenAt: lastSample.playedAt,
+        firstMerit: firstSample.merit,
+        lastMerit: lastSample.merit,
+        maxMerit,
+        meritDelta,
+        meritSampleCount: meritSamples.length,
+        observedMatchCount: player.observedMatchIds.size,
+        winCount: player.winCount,
+        lossCount: player.lossCount,
+        drawCount: player.drawCount,
+        unknownCount: player.unknownCount,
+        confidence: battleFestivalMeritConfidence(meritSamples.length)
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftRanked = left.meritSampleCount >= 2 ? 1 : 0;
+      const rightRanked = right.meritSampleCount >= 2 ? 1 : 0;
+      return rightRanked - leftRanked ||
+        right.meritDelta - left.meritDelta ||
+        right.maxMerit - left.maxMerit ||
+        right.meritSampleCount - left.meritSampleCount ||
+        right.observedMatchCount - left.observedMatchCount ||
+        left.playerName.localeCompare(right.playerName, "ja");
+    });
+
+  const rankedRows = meritRows.filter((row) => row.meritSampleCount >= 2);
+  const meritSummary = {
+    observedPlayerCount: players.size,
+    meritPlayerCount: meritRows.length,
+    rankedPlayerCount: rankedRows.length,
+    singleSamplePlayerCount: meritRows.length - rankedRows.length,
+    meritSampleCount: meritRows.reduce((sum, row) => sum + row.meritSampleCount, 0),
+    maxMeritDelta: rankedRows[0]?.meritDelta || 0,
+    topPlayerName: rankedRows[0]?.playerName || ""
+  };
+  return { meritRows, meritSummary };
+}
+
 function addBattleFestivalDeckResult(statsByDeck, deckId, result) {
   const current = statsByDeck.get(deckId) || {
     deck_fingerprint: deckId,
@@ -1873,6 +2012,7 @@ async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope =
     (match) => matchesBattleFestivalScope(match, filterScope)
   );
   const matchIds = new Set(matches.map((match) => toNumber(match.id)));
+  const matchById = new Map(matches.map((match) => [toNumber(match.id), match]));
   if (!matchIds.size) {
     if (uploadScope) return emptyBattleFestivalSnapshot(shareConfig, uploadScope);
     throw new Error("No ready battle festival leaderboard run.");
@@ -1900,6 +2040,7 @@ async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope =
     (side) => sideKeys.has(matchSideKey(side.match_id, side.side_index))
   );
   const sideByKey = new Map(sides.map((side) => [matchSideKey(side.match_id, side.side_index), side]));
+  const { meritRows, meritSummary } = buildBattleFestivalMeritAnalysis(sides, matchById);
 
   const statsByDeck = new Map();
   const statsByCamp = new Map();
@@ -1969,7 +2110,9 @@ async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope =
     battleFestival: {
       camps: campShare.map((item) => item.camp),
       campShare,
-      rowsByCamp
+      rowsByCamp,
+      meritRows,
+      meritSummary
     }
   };
 }

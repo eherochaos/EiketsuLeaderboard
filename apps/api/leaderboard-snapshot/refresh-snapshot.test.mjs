@@ -137,14 +137,14 @@ function archetypeRow(id, title, cards, rank, winCount, lossCount, representativ
   };
 }
 
-function matchSide(id, matchId, sideIndex, result, playerName, profile = {}) {
+function matchSide(id, matchId, sideIndex, result, playerName, profile = {}, overrides = {}) {
   return {
     id,
     match_id: matchId,
     side_index: sideIndex,
-    role: "player",
+    role: overrides.role || "player",
     player_name: playerName,
-    follow_id: String(id),
+    follow_id: "followId" in overrides ? overrides.followId : String(id),
     result,
     profile_json: {
       ...profile,
@@ -181,6 +181,7 @@ async function createLegacyFixture(root, options = {}) {
   const includeBattleFestival = Boolean(options.includeBattleFestival);
   const includeBattleFestivalMatches = Boolean(options.includeBattleFestivalMatches);
   const includeBattleFestivalCamp = options.includeBattleFestivalCamp !== false;
+  const includeBattleFestivalMeritSamples = Boolean(options.includeBattleFestivalMeritSamples);
   const battleFestivalUploadScope = options.battleFestivalUploadScope || null;
   await mkdir(tableRoot, { recursive: true });
   await mkdir(cardRoot, { recursive: true });
@@ -279,6 +280,40 @@ async function createLegacyFixture(root, options = {}) {
       detail_url: "https://eiketsu.example.test/detail/battle-festival",
       replay_id: "battle-festival-replay"
     });
+    if (includeBattleFestivalMeritSamples) {
+      matches.push(
+        {
+          id: 3,
+          version: "Ver.test",
+          mode: "戦祭り",
+          played_at: "2026-05-24 19:00",
+          created_at: "2026-05-24 19:00",
+          play_url: "https://eiketsu.example.test/play/battle-festival-3",
+          detail_url: "https://eiketsu.example.test/detail/battle-festival-3",
+          replay_id: "battle-festival-replay-3"
+        },
+        {
+          id: 4,
+          version: "Ver.test",
+          mode: "戦祭り",
+          played_at: "2026-05-24 22:00",
+          created_at: "2026-05-24 22:00",
+          play_url: "https://eiketsu.example.test/play/battle-festival-4",
+          detail_url: "https://eiketsu.example.test/detail/battle-festival-4",
+          replay_id: "battle-festival-replay-4"
+        },
+        {
+          id: 5,
+          version: "Ver.test",
+          mode: "戦祭り",
+          played_at: "2026-05-24 23:00",
+          created_at: "2026-05-24 23:00",
+          play_url: "https://eiketsu.example.test/play/battle-festival-5",
+          detail_url: "https://eiketsu.example.test/detail/battle-festival-5",
+          replay_id: "battle-festival-replay-5"
+        }
+      );
+    }
   }
   await writeJsonl(join(tableRoot, "matches.jsonl"), matches);
   const matchDecks = [
@@ -290,6 +325,16 @@ async function createLegacyFixture(root, options = {}) {
       { id: 3, match_id: 2, side_index: 0, deck_fingerprint: battleDeckA },
       { id: 4, match_id: 2, side_index: 1, deck_fingerprint: battleDeckB }
     );
+    if (includeBattleFestivalMeritSamples) {
+      matchDecks.push(
+        { id: 5, match_id: 3, side_index: 0, deck_fingerprint: battleDeckA },
+        { id: 6, match_id: 3, side_index: 1, deck_fingerprint: battleDeckB },
+        { id: 7, match_id: 4, side_index: 0, deck_fingerprint: battleDeckA },
+        { id: 8, match_id: 4, side_index: 1, deck_fingerprint: battleDeckB },
+        { id: 9, match_id: 5, side_index: 0, deck_fingerprint: battleDeckA },
+        { id: 10, match_id: 5, side_index: 1, deck_fingerprint: battleDeckB }
+      );
+    }
   }
   await writeJsonl(join(tableRoot, "match_decks.jsonl"), matchDecks);
   const matchSides = [
@@ -304,6 +349,18 @@ async function createLegacyFixture(root, options = {}) {
       matchSide(3, 2, 0, "win", "carol", campProfiles[0]),
       matchSide(4, 2, 1, "loss", "dave", campProfiles[1])
     );
+    if (includeBattleFestivalMeritSamples) {
+      const yinCamp = includeBattleFestivalCamp ? { [battleCampKey]: "\u6bb7\u8ecd" } : {};
+      const zhouCamp = includeBattleFestivalCamp ? { [battleCampKey]: "\u5468\u8ecd" } : {};
+      matchSides.push(
+        matchSide(5, 3, 0, "win", "odds-only", { ...yinCamp, "\u6226\u529f\u30aa\u30c3\u30ba": "\u00d79.9" }),
+        matchSide(6, 3, 1, "unknown", "\u5929\u304b\u3089\u304a\u5869", { ...zhouCamp, "\u6226\u529f": "2100" }, { role: "enemy", followId: "" }),
+        matchSide(7, 4, 0, "loss", "odds-only-2", { ...yinCamp, "\u6226\u529f\u30aa\u30c3\u30ba": "\u00d71.3" }),
+        matchSide(8, 4, 1, "unknown", "\u5929\u304b\u3089\u304a\u5869", { ...zhouCamp, "\u6226\u529f": "124194" }, { role: "enemy", followId: "" }),
+        matchSide(9, 5, 0, "win", "single-probe", yinCamp),
+        matchSide(10, 5, 1, "unknown", "\u5358\u767a\u738b", { ...zhouCamp, "\u6226\u529f": "999999" }, { role: "enemy", followId: "" })
+      );
+    }
   }
   await writeJsonl(join(tableRoot, "match_sides.jsonl"), matchSides);
   const matchDeckUnits = [
@@ -317,6 +374,16 @@ async function createLegacyFixture(root, options = {}) {
       ...deckUnitRows(5, 3, battleDeckA),
       ...deckUnitRows(7, 4, battleDeckB)
     );
+    if (includeBattleFestivalMeritSamples) {
+      matchDeckUnits.push(
+        ...deckUnitRows(9, 5, battleDeckA),
+        ...deckUnitRows(11, 6, battleDeckB),
+        ...deckUnitRows(13, 7, battleDeckA),
+        ...deckUnitRows(15, 8, battleDeckB),
+        ...deckUnitRows(17, 9, battleDeckA),
+        ...deckUnitRows(19, 10, battleDeckB)
+      );
+    }
   }
   await writeJsonl(join(tableRoot, "match_deck_units.jsonl"), matchDeckUnits);
   await writeJson(join(cardRoot, "card_catalog.json"), {
@@ -519,6 +586,46 @@ async function testRefreshBuildsBattleFestivalSnapshotFromMatches() {
   }
 }
 
+async function testRefreshBuildsBattleFestivalMeritRows() {
+  const root = await mkdtemp(join(tmpdir(), "battle-festival-merit-refresh-"));
+  const legacyRoot = join(root, "legacy-service");
+  const outputPath = join(root, "published", "leaderboard-snapshot.json");
+
+  try {
+    await createLegacyFixture(legacyRoot, {
+      includeBattleFestivalMatches: true,
+      includeBattleFestivalMeritSamples: true
+    });
+    await refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: false });
+    const battleFestivalText = await readFile(join(root, "published", "battle-festival-snapshot.json"), "utf8");
+    const battleFestivalSnapshot = JSON.parse(battleFestivalText);
+    const meritRows = battleFestivalSnapshot.battleFestival.meritRows;
+
+    assert.ok(Array.isArray(meritRows));
+    assert.equal(meritRows[0].playerName, "\u5929\u304b\u3089\u304a\u5869");
+    assert.equal(meritRows[0].camp, "\u5468\u8ecd");
+    assert.equal(meritRows[0].firstMerit, 2100);
+    assert.equal(meritRows[0].lastMerit, 124194);
+    assert.equal(meritRows[0].maxMerit, 124194);
+    assert.equal(meritRows[0].meritDelta, 122094);
+    assert.equal(meritRows[0].meritSampleCount, 2);
+    assert.equal(meritRows[0].observedMatchCount, 2);
+    assert.equal(meritRows[0].unknownCount, 2);
+    assert.equal(meritRows[0].confidence, "medium");
+    assert.equal(meritRows.some((row) => row.playerName === "odds-only"), false);
+    assert.equal(meritRows.some((row) => row.firstMerit === 9.9 || row.lastMerit === 9.9), false);
+    const singleRowIndex = meritRows.findIndex((row) => row.playerName === "\u5358\u767a\u738b");
+    assert.ok(singleRowIndex > 0);
+    assert.equal(meritRows[singleRowIndex].meritSampleCount, 1);
+    assert.equal(meritRows[singleRowIndex].confidence, "single");
+    assert.equal(battleFestivalSnapshot.battleFestival.meritSummary.rankedPlayerCount, 1);
+    assert.equal(battleFestivalSnapshot.battleFestival.meritSummary.singleSamplePlayerCount, 1);
+    assert.equal(battleFestivalSnapshot.battleFestival.meritSummary.maxMeritDelta, 122094);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 async function testRefreshBuildsBattleFestivalSnapshotWithoutCampField() {
   const root = await mkdtemp(join(tmpdir(), "battle-festival-no-camp-refresh-"));
   const legacyRoot = join(root, "legacy-service");
@@ -581,6 +688,7 @@ async function testRefreshWritesManifestOnlyBattleFestivalSnapshot() {
 await testRefreshWritesAtomicSnapshot();
 await testRefreshWritesBattleFestivalSnapshot();
 await testRefreshBuildsBattleFestivalSnapshotFromMatches();
+await testRefreshBuildsBattleFestivalMeritRows();
 await testRefreshBuildsBattleFestivalSnapshotWithoutCampField();
 await testRefreshWritesManifestOnlyBattleFestivalSnapshot();
 

@@ -9,7 +9,7 @@ import { dateOnly, integer, percent, sourceLabels } from "./lib/format";
 import { trackPageView, trackSiteEvent } from "./lib/siteAnalytics";
 import { loadTierListDeckConfig, loadTierListSnapshot } from "./lib/tierList";
 import type { TierListPageKind } from "./lib/tierList";
-import type { CardView, DeckConfigStats, TierListClusterVariant, TierListRow, TierListScope, TierListSnapshot } from "./types";
+import type { BattleFestivalMeritRow, CardView, DeckConfigStats, TierListClusterVariant, TierListRow, TierListScope, TierListSnapshot } from "./types";
 
 type SortKey = "rankScore" | "winRate" | "playerAverageWinRate" | "usageRate" | "kabukiPoints" | "sampleSize";
 
@@ -21,6 +21,8 @@ const props = withDefaults(defineProps<{
 
 const INITIAL_VISIBLE_ROWS = 100;
 const VISIBLE_ROWS_STEP = 100;
+const INITIAL_VISIBLE_MERIT_ROWS = 50;
+const VISIBLE_MERIT_ROWS_STEP = 50;
 
 const snapshot = ref<TierListSnapshot | null>(null);
 const loading = ref(true);
@@ -33,6 +35,7 @@ const clusterSameName = ref(false);
 const clusterVariantIndexes = ref<Record<string, number>>({});
 const expandedDeckIds = ref(new Set<string>());
 const visibleRowLimit = ref(INITIAL_VISIBLE_ROWS);
+const visibleMeritRowLimit = ref(INITIAL_VISIBLE_MERIT_ROWS);
 const mobileViewport = ref(false);
 const compactMobileViewport = ref(false);
 const mobileFiltersOpen = ref(false);
@@ -114,6 +117,8 @@ onBeforeUnmount(() => {
 const metadata = computed(() => snapshot.value?.metadata ?? null);
 const battleFestivalData = computed(() => props.pageKind === "battleFestival" ? snapshot.value?.battleFestival ?? null : null);
 const battleCampOptions = computed(() => battleFestivalData.value?.campShare ?? []);
+const battleFestivalMeritSummary = computed(() => battleFestivalData.value?.meritSummary ?? null);
+const battleFestivalMeritRows = computed(() => battleFestivalData.value?.meritRows ?? []);
 const showBattleCampFilter = computed(() => props.pageKind === "battleFestival" && battleCampOptions.value.length > 0);
 const battleCampRows = computed(() => {
   if (battleCampFilter.value === "all") return null;
@@ -162,6 +167,13 @@ const renderedRows = computed(() => visibleRows.value.slice(0, visibleRowLimit.v
 const hasMoreRows = computed(() => renderedRows.value.length < visibleRows.value.length);
 const renderedCountLabel = computed(() => `${integer(renderedRows.value.length)} / ${integer(visibleRows.value.length)}`);
 const emptyStateMessage = computed(() => props.pageKind === "battleFestival" ? "暂无战祭数据" : "暂无榜单数据");
+const showBattleFestivalMerit = computed(() => props.pageKind === "battleFestival");
+const filteredBattleFestivalMeritRows = computed(() => battleFestivalMeritRows.value
+  .filter((row) => battleCampFilter.value === "all" || row.camp === battleCampFilter.value)
+);
+const renderedBattleFestivalMeritRows = computed(() => filteredBattleFestivalMeritRows.value.slice(0, visibleMeritRowLimit.value));
+const hasMoreBattleFestivalMeritRows = computed(() => renderedBattleFestivalMeritRows.value.length < filteredBattleFestivalMeritRows.value.length);
+const renderedMeritCountLabel = computed(() => `${integer(renderedBattleFestivalMeritRows.value.length)} / ${integer(filteredBattleFestivalMeritRows.value.length)}`);
 
 const filterCountLabel = computed(() => {
   if (!clusterSameName.value) return `${integer(filteredRows.value.length)} 条`;
@@ -173,6 +185,7 @@ const topDeck = computed(() => visibleRows.value[0] ?? null);
 
 watch([battleCampFilter, factionFilter, sourceFilter, sortKey, clusterSameName], () => {
   visibleRowLimit.value = INITIAL_VISIBLE_ROWS;
+  visibleMeritRowLimit.value = INITIAL_VISIBLE_MERIT_ROWS;
   trackSiteEvent("filter_change", pageCopy.value.analyticsPage, {
     battleCamp: battleCampFilter.value,
     faction: factionFilter.value,
@@ -244,6 +257,10 @@ function loadMoreRows(): void {
   visibleRowLimit.value = Math.min(visibleRows.value.length, visibleRowLimit.value + VISIBLE_ROWS_STEP);
 }
 
+function loadMoreMeritRows(): void {
+  visibleMeritRowLimit.value = Math.min(filteredBattleFestivalMeritRows.value.length, visibleMeritRowLimit.value + VISIBLE_MERIT_ROWS_STEP);
+}
+
 async function toggleDeckConfig(deck: TierListRow): Promise<void> {
   const next = new Set(expandedDeckIds.value);
   const key = deckStateKey(deck);
@@ -283,6 +300,32 @@ function deckSubtitle(deck: TierListRow): string {
 function mobileDeckSubtitle(deck: TierListRow): string {
   const camp = battleCampLabel(deck);
   return camp ? `${camp} · ${deckSubtitle(deck)}` : deckSubtitle(deck);
+}
+
+function meritDeltaLabel(row: BattleFestivalMeritRow): string {
+  if (row.meritSampleCount < 2) return "单点";
+  const sign = row.meritDelta > 0 ? "+" : "";
+  return `${sign}${integer(row.meritDelta)}`;
+}
+
+function meritRangeLabel(row: BattleFestivalMeritRow): string {
+  return `${integer(row.firstMerit)} → ${integer(row.lastMerit)}`;
+}
+
+function meritPeakLabel(row: BattleFestivalMeritRow): string {
+  return integer(row.maxMerit);
+}
+
+function meritTimeLabel(row: BattleFestivalMeritRow): string {
+  const first = String(row.firstSeenAt || "").slice(5, 16).replace("T", " ") || "-";
+  const last = String(row.lastSeenAt || "").slice(5, 16).replace("T", " ") || "-";
+  return first === last ? first : `${first} - ${last}`;
+}
+
+function meritConfidenceLabel(row: BattleFestivalMeritRow): string {
+  if (row.confidence === "high") return "高";
+  if (row.confidence === "medium") return "中";
+  return "单点";
 }
 
 function displayRowKey(deck: TierListRow): string {
@@ -432,6 +475,90 @@ function switchClusterVariant(deck: TierListRow): void {
             同名聚类
           </button>
           <span class="TierPage_FilterCount">{{ filterCountLabel }}</span>
+        </div>
+      </section>
+
+      <section v-if="showBattleFestivalMerit" class="Common_TableCard TierPage_MeritCard" aria-labelledby="TierPage_Merit_Title">
+        <div class="Common_SectionHeading Common_SectionHeading_Compact TierPage_MeritHeading">
+          <div>
+            <p class="Common_Eyebrow">Merit</p>
+            <h2 id="TierPage_Merit_Title">战功冲刺榜</h2>
+          </div>
+          <p>采集样本推理榜，不是官方完整战功榜</p>
+        </div>
+        <div v-if="battleFestivalMeritSummary" class="TierPage_MeritSummary" aria-label="战功冲刺概览">
+          <span><b>{{ integer(battleFestivalMeritSummary.rankedPlayerCount) }}</b>可计算</span>
+          <span><b>{{ integer(battleFestivalMeritSummary.meritPlayerCount) }}</b>有战功</span>
+          <span><b>{{ integer(battleFestivalMeritSummary.meritSampleCount) }}</b>战功样本</span>
+          <span><b>{{ integer(battleFestivalMeritSummary.maxMeritDelta) }}</b>最高涨幅</span>
+        </div>
+        <section v-if="!filteredBattleFestivalMeritRows.length" class="Common_StatusPanel TierPage_EmptyState">
+          暂无可计算战功涨幅
+        </section>
+        <table v-else-if="!mobileViewport" class="Common_TableLayout TierPage_MeritTable">
+          <colgroup>
+            <col class="Common_TableColumn Common_TableColumn_Fixed" style="--Common_TableColumnWidth: 72px">
+            <col class="Common_TableColumn">
+            <col class="Common_TableColumn Common_TableColumn_Fixed" style="--Common_TableColumnWidth: 132px">
+            <col class="Common_TableColumn Common_TableColumn_Fixed" style="--Common_TableColumnWidth: 156px">
+            <col class="Common_TableColumn Common_TableColumn_Fixed" style="--Common_TableColumnWidth: 112px">
+            <col class="Common_TableColumn Common_TableColumn_Fixed" style="--Common_TableColumnWidth: 172px">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>玩家</th>
+              <th>战功涨幅</th>
+              <th>当前 / 最高</th>
+              <th>样本</th>
+              <th>时间范围</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, index) in renderedBattleFestivalMeritRows" :key="`${row.playerName}-${row.firstSeenAt}-${row.lastSeenAt}`">
+              <td class="Common_RankCell">{{ index + 1 }}</td>
+              <td class="TierPage_MeritPlayerCell">
+                <strong>{{ row.playerName }}</strong>
+                <span>
+                  <em v-if="row.camp" class="TierPage_CampPill">{{ row.camp }}</em>
+                  <em>{{ meritConfidenceLabel(row) }}</em>
+                </span>
+              </td>
+              <td class="TierPage_MeritNumber TierPage_MeritDelta">{{ meritDeltaLabel(row) }}</td>
+              <td class="TierPage_MeritNumber">
+                <b>{{ meritRangeLabel(row) }}</b>
+                <small>最高 {{ meritPeakLabel(row) }}</small>
+              </td>
+              <td class="TierPage_MeritNumber">
+                <b>{{ integer(row.meritSampleCount) }}</b>
+                <small>观察 {{ integer(row.observedMatchCount) }}</small>
+              </td>
+              <td class="TierPage_MeritTime">{{ meritTimeLabel(row) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-else class="TierPage_MeritMobileList">
+          <article v-for="(row, index) in renderedBattleFestivalMeritRows" :key="`${row.playerName}-${row.firstSeenAt}-${row.lastSeenAt}-mobile`" class="TierPage_MeritMobileRow">
+            <div>
+              <span class="Common_RankCell">#{{ index + 1 }}</span>
+              <strong>{{ row.playerName }}</strong>
+            </div>
+            <p>
+              <span v-if="row.camp">{{ row.camp }}</span>
+              <span>{{ meritConfidenceLabel(row) }}</span>
+              <span>{{ meritTimeLabel(row) }}</span>
+            </p>
+            <div class="TierPage_MeritMobileMetrics">
+              <span><b>{{ meritDeltaLabel(row) }}</b>战功涨幅</span>
+              <span><b>{{ integer(row.lastMerit) }}</b>当前战功</span>
+              <span><b>{{ integer(row.maxMerit) }}</b>最高战功</span>
+              <span><b>{{ integer(row.meritSampleCount) }}</b>战功样本</span>
+            </div>
+          </article>
+        </div>
+        <div v-if="hasMoreBattleFestivalMeritRows" class="TierPage_LoadMore">
+          <span>已显示 {{ renderedMeritCountLabel }}</span>
+          <button type="button" @click="loadMoreMeritRows">加载更多</button>
         </div>
       </section>
 
@@ -766,6 +893,196 @@ function switchClusterVariant(deck: TierListRow): void {
   font-weight: 700;
 }
 
+.TierPage_MeritCard {
+  margin-top: var(--space-md);
+  padding: 16px 24px;
+}
+
+.TierPage_MeritHeading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: var(--space-sm);
+}
+
+.TierPage_MeritHeading p:last-child {
+  max-width: 320px;
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.55;
+  text-align: right;
+}
+
+.TierPage_MeritSummary {
+  margin-bottom: var(--space-sm);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.TierPage_MeritSummary span {
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-panel);
+  color: var(--color-muted);
+  font-family: var(--font-control);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.TierPage_MeritSummary b {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--color-brown);
+  font-family: var(--font-number);
+  font-size: 20px;
+  line-height: 1.05;
+}
+
+.TierPage_MeritTable {
+  table-layout: fixed;
+}
+
+.TierPage_MeritTable th,
+.TierPage_MeritTable td {
+  padding: var(--space-sm);
+}
+
+.TierPage_MeritTable th:nth-child(n+3),
+.TierPage_MeritTable td:nth-child(n+3) {
+  text-align: right;
+}
+
+.TierPage_MeritPlayerCell {
+  min-width: 0;
+}
+
+.TierPage_MeritPlayerCell strong {
+  display: block;
+  color: var(--color-brown);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.TierPage_MeritPlayerCell span {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.TierPage_MeritPlayerCell em {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  color: var(--color-muted);
+  background: var(--color-panel);
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.TierPage_MeritNumber {
+  color: var(--color-brown);
+  font-family: var(--font-number);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.TierPage_MeritDelta {
+  color: var(--color-red);
+  font-size: 20px;
+}
+
+.TierPage_MeritNumber b,
+.TierPage_MeritNumber small {
+  display: block;
+}
+
+.TierPage_MeritNumber small,
+.TierPage_MeritTime {
+  color: var(--color-muted);
+  font-family: var(--font-control);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.TierPage_MeritMobileList {
+  display: grid;
+  gap: 8px;
+}
+
+.TierPage_MeritMobileRow {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-panel);
+}
+
+.TierPage_MeritMobileRow > div:first-child {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.TierPage_MeritMobileRow strong {
+  min-width: 0;
+  color: var(--color-brown);
+  font-size: 16px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.TierPage_MeritMobileRow p {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--color-muted);
+  font-family: var(--font-control);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.TierPage_MeritMobileMetrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.TierPage_MeritMobileMetrics span {
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  color: var(--color-muted);
+  background: var(--color-panel-strong);
+  font-family: var(--font-control);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.TierPage_MeritMobileMetrics b {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--color-brown);
+  font-family: var(--font-number);
+  font-size: 20px;
+  line-height: 1.05;
+}
+
 /* 榜单表格外壳。 */
 .TierPage_TableCard {
   margin-top: var(--space-md);
@@ -1031,6 +1348,10 @@ function switchClusterVariant(deck: TierListRow): void {
   .TierPage_Table {
     min-width: 1060px;
   }
+
+  .TierPage_MeritTable {
+    min-width: 920px;
+  }
 }
 
 /* 手机端：隐藏表格，改为卡片行块。 */
@@ -1160,6 +1481,24 @@ function switchClusterVariant(deck: TierListRow): void {
     margin-left: 0;
   }
 
+  .TierPage_MeritCard {
+    padding: 16px;
+  }
+
+  .TierPage_MeritHeading {
+    display: grid;
+    gap: 8px;
+  }
+
+  .TierPage_MeritHeading p:last-child {
+    max-width: none;
+    text-align: left;
+  }
+
+  .TierPage_MeritSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   /* 手机核心构成标题。 */
   .TierPage_MobileDeckSection > span {
     display: block;
@@ -1265,6 +1604,11 @@ function switchClusterVariant(deck: TierListRow): void {
   }
 
   .TierPage_TableCard {
+    margin-top: 12px;
+    padding: 12px 10px;
+  }
+
+  .TierPage_MeritCard {
     margin-top: 12px;
     padding: 12px 10px;
   }

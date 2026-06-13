@@ -20,10 +20,42 @@ export interface BattleFestivalCampRows {
   clusterRows: TierListRow[];
 }
 
+export type BattleFestivalMeritConfidence = "high" | "medium" | "single";
+
+export interface BattleFestivalMeritRow {
+  playerName: string;
+  camp: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  firstMerit: number;
+  lastMerit: number;
+  maxMerit: number;
+  meritDelta: number;
+  meritSampleCount: number;
+  observedMatchCount: number;
+  winCount: number;
+  lossCount: number;
+  drawCount: number;
+  unknownCount: number;
+  confidence: BattleFestivalMeritConfidence;
+}
+
+export interface BattleFestivalMeritSummary {
+  observedPlayerCount: number;
+  meritPlayerCount: number;
+  rankedPlayerCount: number;
+  singleSamplePlayerCount: number;
+  meritSampleCount: number;
+  maxMeritDelta: number;
+  topPlayerName: string;
+}
+
 export interface BattleFestivalSnapshotData {
   camps: string[];
   campShare: BattleFestivalCampShare[];
   rowsByCamp: Record<string, BattleFestivalCampRows>;
+  meritRows?: BattleFestivalMeritRow[];
+  meritSummary?: BattleFestivalMeritSummary;
 }
 
 export interface TierListClusterVariant {
