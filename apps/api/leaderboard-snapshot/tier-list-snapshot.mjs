@@ -79,11 +79,25 @@ function emptyBattleFestivalMeritSummary() {
   return {
     observedPlayerCount: 0,
     meritPlayerCount: 0,
-    rankedPlayerCount: 0,
-    singleSamplePlayerCount: 0,
     meritSampleCount: 0,
-    maxMeritDelta: 0,
-    topPlayerName: ""
+    highestMerit: 0,
+    topPlayerName: "",
+    observedMatchCount: 0
+  };
+}
+
+function slimBattleFestivalMeritDeck(deck) {
+  return {
+    deckId: String(deck?.deckId || ""),
+    deckName: String(deck?.deckName || ""),
+    faction: String(deck?.faction || "unknown"),
+    sampleSize: Number(deck?.sampleSize || 0),
+    winCount: Number(deck?.winCount || 0),
+    lossCount: Number(deck?.lossCount || 0),
+    drawCount: Number(deck?.drawCount || 0),
+    unknownCount: Number(deck?.unknownCount || 0),
+    winRate: Number(deck?.winRate || 0),
+    deckCards: Array.isArray(deck?.deckCards) ? deck.deckCards : []
   };
 }
 
@@ -93,17 +107,16 @@ function slimBattleFestivalMeritRow(row) {
     camp: String(row?.camp || ""),
     firstSeenAt: String(row?.firstSeenAt || ""),
     lastSeenAt: String(row?.lastSeenAt || ""),
-    firstMerit: Number(row?.firstMerit || 0),
-    lastMerit: Number(row?.lastMerit || 0),
-    maxMerit: Number(row?.maxMerit || 0),
-    meritDelta: Number(row?.meritDelta || 0),
+    highestMerit: Number(row?.highestMerit || 0),
+    highestMeritSeenAt: String(row?.highestMeritSeenAt || ""),
     meritSampleCount: Number(row?.meritSampleCount || 0),
     observedMatchCount: Number(row?.observedMatchCount || 0),
     winCount: Number(row?.winCount || 0),
     lossCount: Number(row?.lossCount || 0),
     drawCount: Number(row?.drawCount || 0),
     unknownCount: Number(row?.unknownCount || 0),
-    confidence: String(row?.confidence || "single")
+    winRate: Number(row?.winRate || 0),
+    decks: Array.isArray(row?.decks) ? row.decks.map(slimBattleFestivalMeritDeck) : []
   };
 }
 
@@ -112,11 +125,10 @@ function slimBattleFestivalMeritSummary(summary) {
   return {
     observedPlayerCount: Number(summary.observedPlayerCount || 0),
     meritPlayerCount: Number(summary.meritPlayerCount || 0),
-    rankedPlayerCount: Number(summary.rankedPlayerCount || 0),
-    singleSamplePlayerCount: Number(summary.singleSamplePlayerCount || 0),
     meritSampleCount: Number(summary.meritSampleCount || 0),
-    maxMeritDelta: Number(summary.maxMeritDelta || 0),
-    topPlayerName: String(summary.topPlayerName || "")
+    highestMerit: Number(summary.highestMerit || 0),
+    topPlayerName: String(summary.topPlayerName || ""),
+    observedMatchCount: Number(summary.observedMatchCount || 0)
   };
 }
 

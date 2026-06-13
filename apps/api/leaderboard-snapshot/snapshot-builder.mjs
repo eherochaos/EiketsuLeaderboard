@@ -41,11 +41,7 @@ const OFFICIAL_CARD_TYPE_PREFIXES = new Set(["ST", "EX", "PL"]);
 const OFFICIAL_ASSET_BASE_URL = "https://image.eiketsu-taisen.net/";
 const BATTLE_FESTIVAL_CAMP_KEYS = ["\u6240\u5c5e\u9663\u55b6", "\u6240\u5c5e\u9635\u8425"];
 const BATTLE_FESTIVAL_MERIT_KEY = "\u6226\u529f";
-const BATTLE_FESTIVAL_MERIT_CONFIDENCE = {
-  high: "high",
-  medium: "medium",
-  single: "single"
-};
+const BATTLE_FESTIVAL_PLAYER_DECK_LIMIT = 5;
 const BATTLE_FESTIVAL_MODES = new Set(["戦祭り", "戦祭", "戰祭", "战祭"]);
 
 function csvParts(row) {
@@ -1818,18 +1814,11 @@ function emptyBattleFestivalMeritSummary() {
   return {
     observedPlayerCount: 0,
     meritPlayerCount: 0,
-    rankedPlayerCount: 0,
-    singleSamplePlayerCount: 0,
     meritSampleCount: 0,
-    maxMeritDelta: 0,
-    topPlayerName: ""
+    highestMerit: 0,
+    topPlayerName: "",
+    observedMatchCount: 0
   };
-}
-
-function battleFestivalMeritConfidence(sampleCount) {
-  if (sampleCount >= 3) return BATTLE_FESTIVAL_MERIT_CONFIDENCE.high;
-  if (sampleCount >= 2) return BATTLE_FESTIVAL_MERIT_CONFIDENCE.medium;
-  return BATTLE_FESTIVAL_MERIT_CONFIDENCE.single;
 }
 
 function mostCommonText(counter) {
@@ -1838,13 +1827,48 @@ function mostCommonText(counter) {
     .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "ja"))[0]?.[0] || "";
 }
 
-function compareMeritSamples(left, right) {
+function compareObservedSamples(left, right) {
   return String(left.playedAt || "").localeCompare(String(right.playedAt || "")) ||
-    toNumber(left.matchId) - toNumber(right.matchId) ||
-    left.merit - right.merit;
+    toNumber(left.matchId) - toNumber(right.matchId);
 }
 
-function buildBattleFestivalMeritAnalysis(sides, matchById) {
+function compareHighestMeritSamples(left, right) {
+  return right.merit - left.merit ||
+    String(right.playedAt || "").localeCompare(String(left.playedAt || "")) ||
+    toNumber(right.matchId) - toNumber(left.matchId);
+}
+
+function addBattleFestivalObservedResult(stats, result) {
+  stats.sampleSize = toNumber(stats.sampleSize) + 1;
+  if (result === "win") stats.winCount += 1;
+  else if (result === "loss") stats.lossCount += 1;
+  else if (result === "draw") stats.drawCount += 1;
+  else stats.unknownCount += 1;
+}
+
+function battleFestivalObservedWinRate(stats) {
+  const denominator = toNumber(stats.winCount) + toNumber(stats.lossCount) + toNumber(stats.drawCount);
+  return denominator ? Number((toNumber(stats.winCount) / denominator * 100).toFixed(1)) : 0;
+}
+
+function battleFestivalMeritDeckView(deckId, stats, tierRowByDeckId, cardCatalog) {
+  const row = tierRowByDeckId.get(deckId);
+  const cards = row?.deckCards || deckCards(deckId, cardCatalog);
+  return {
+    deckId,
+    deckName: row?.deckName || cards[0]?.name || deckId,
+    faction: row?.faction || deckFaction(cards),
+    sampleSize: toNumber(stats.sampleSize),
+    winCount: toNumber(stats.winCount),
+    lossCount: toNumber(stats.lossCount),
+    drawCount: toNumber(stats.drawCount),
+    unknownCount: toNumber(stats.unknownCount),
+    winRate: battleFestivalObservedWinRate(stats),
+    deckCards: cards
+  };
+}
+
+function buildBattleFestivalMeritAnalysis(sides, matchById, deckIdBySideKey, tierRowByDeckId, cardCatalog) {
   const players = new Map();
   for (const side of sides) {
     const playerName = firstText(side?.player_name);
@@ -1860,15 +1884,15 @@ function buildBattleFestivalMeritAnalysis(sides, matchById) {
       lossCount: 0,
       drawCount: 0,
       unknownCount: 0,
-      meritSamples: []
+      observedSamples: [],
+      meritSamples: [],
+      decks: new Map()
     };
 
     current.observedMatchIds.add(matchId);
     const result = normalizedSideResult(side?.result);
-    if (result === "win") current.winCount += 1;
-    else if (result === "loss") current.lossCount += 1;
-    else if (result === "draw") current.drawCount += 1;
-    else current.unknownCount += 1;
+    addBattleFestivalObservedResult(current, result);
+    current.observedSamples.push({ playedAt, matchId });
 
     const camp = battleFestivalCamp(side);
     if (camp) current.camps.set(camp, (current.camps.get(camp) || 0) + 1);
@@ -1877,56 +1901,70 @@ function buildBattleFestivalMeritAnalysis(sides, matchById) {
     if (merit !== null) {
       current.meritSamples.push({ merit, playedAt, matchId });
     }
+    const deckId = deckIdBySideKey.get(matchSideKey(side?.match_id, side?.side_index)) || "";
+    if (deckId) {
+      const deckStats = current.decks.get(deckId) || {
+        sampleSize: 0,
+        winCount: 0,
+        lossCount: 0,
+        drawCount: 0,
+        unknownCount: 0
+      };
+      addBattleFestivalObservedResult(deckStats, result);
+      current.decks.set(deckId, deckStats);
+    }
     players.set(playerName, current);
   }
 
   const meritRows = Array.from(players.values())
     .map((player) => {
-      const meritSamples = player.meritSamples.slice().sort(compareMeritSamples);
+      const meritSamples = player.meritSamples.slice().sort(compareObservedSamples);
       if (!meritSamples.length) return null;
-      const firstSample = meritSamples[0];
-      const lastSample = meritSamples[meritSamples.length - 1];
-      const maxMerit = Math.max(...meritSamples.map((sample) => sample.merit));
-      const meritDelta = meritSamples.length >= 2 ? lastSample.merit - firstSample.merit : 0;
+      const observedSamples = player.observedSamples.slice().sort(compareObservedSamples);
+      const firstObserved = observedSamples[0] || meritSamples[0];
+      const lastObserved = observedSamples[observedSamples.length - 1] || meritSamples[meritSamples.length - 1];
+      const highestSample = meritSamples.slice().sort(compareHighestMeritSamples)[0];
+      const decks = Array.from(player.decks.entries())
+        .map(([deckId, stats]) => battleFestivalMeritDeckView(deckId, stats, tierRowByDeckId, cardCatalog))
+        .sort((left, right) =>
+          right.sampleSize - left.sampleSize ||
+          right.winRate - left.winRate ||
+          left.deckName.localeCompare(right.deckName, "ja")
+        )
+        .slice(0, BATTLE_FESTIVAL_PLAYER_DECK_LIMIT);
       return {
         playerName: player.playerName,
         camp: mostCommonText(player.camps),
-        firstSeenAt: firstSample.playedAt,
-        lastSeenAt: lastSample.playedAt,
-        firstMerit: firstSample.merit,
-        lastMerit: lastSample.merit,
-        maxMerit,
-        meritDelta,
+        firstSeenAt: firstObserved.playedAt,
+        lastSeenAt: lastObserved.playedAt,
+        highestMerit: highestSample.merit,
+        highestMeritSeenAt: highestSample.playedAt,
         meritSampleCount: meritSamples.length,
         observedMatchCount: player.observedMatchIds.size,
         winCount: player.winCount,
         lossCount: player.lossCount,
         drawCount: player.drawCount,
         unknownCount: player.unknownCount,
-        confidence: battleFestivalMeritConfidence(meritSamples.length)
+        winRate: battleFestivalObservedWinRate(player),
+        decks
       };
     })
     .filter(Boolean)
     .sort((left, right) => {
-      const leftRanked = left.meritSampleCount >= 2 ? 1 : 0;
-      const rightRanked = right.meritSampleCount >= 2 ? 1 : 0;
-      return rightRanked - leftRanked ||
-        right.meritDelta - left.meritDelta ||
-        right.maxMerit - left.maxMerit ||
-        right.meritSampleCount - left.meritSampleCount ||
+      return right.highestMerit - left.highestMerit ||
         right.observedMatchCount - left.observedMatchCount ||
+        right.winRate - left.winRate ||
+        right.meritSampleCount - left.meritSampleCount ||
         left.playerName.localeCompare(right.playerName, "ja");
     });
 
-  const rankedRows = meritRows.filter((row) => row.meritSampleCount >= 2);
   const meritSummary = {
     observedPlayerCount: players.size,
     meritPlayerCount: meritRows.length,
-    rankedPlayerCount: rankedRows.length,
-    singleSamplePlayerCount: meritRows.length - rankedRows.length,
     meritSampleCount: meritRows.reduce((sum, row) => sum + row.meritSampleCount, 0),
-    maxMeritDelta: rankedRows[0]?.meritDelta || 0,
-    topPlayerName: rankedRows[0]?.playerName || ""
+    highestMerit: meritRows[0]?.highestMerit || 0,
+    topPlayerName: meritRows[0]?.playerName || "",
+    observedMatchCount: meritRows.reduce((sum, row) => sum + row.observedMatchCount, 0)
   };
   return { meritRows, meritSummary };
 }
@@ -2033,6 +2071,10 @@ async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope =
     if (!unitsByDeckId.has(deckId)) unitsByDeckId.set(deckId, []);
     unitsByDeckId.get(deckId).push(unit);
   }
+  const deckIdBySideKey = new Map(matchDecks.map((deck) => [
+    matchSideKey(deck.match_id, deck.side_index),
+    battleFestivalDeckId(deck, unitsByDeckId)
+  ]));
 
   const sideKeys = new Set(matchDecks.map((deck) => matchSideKey(deck.match_id, deck.side_index)));
   const sides = await readJsonl(
@@ -2040,7 +2082,6 @@ async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope =
     (side) => sideKeys.has(matchSideKey(side.match_id, side.side_index))
   );
   const sideByKey = new Map(sides.map((side) => [matchSideKey(side.match_id, side.side_index), side]));
-  const { meritRows, meritSummary } = buildBattleFestivalMeritAnalysis(sides, matchById);
 
   const statsByDeck = new Map();
   const statsByCamp = new Map();
@@ -2066,6 +2107,14 @@ async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope =
   const cardCatalog = await loadCardCatalog();
   const strategyTypes = await readOptionalJson(resolve(legacyRoot, "cards/card_strategy_types.json"), []);
   const tierRows = buildBattleFestivalTierRows(deckStats, cardCatalog, strategyTypes);
+  const tierRowByDeckId = new Map(tierRows.map((row) => [row.deckId, row]));
+  const { meritRows, meritSummary } = buildBattleFestivalMeritAnalysis(
+    sides,
+    matchById,
+    deckIdBySideKey,
+    tierRowByDeckId,
+    cardCatalog
+  );
   const rowsByCamp = {};
   for (const [camp, campStatsByDeck] of statsByCamp.entries()) {
     const campStats = battleFestivalDeckStats(campStatsByDeck);

@@ -9,7 +9,7 @@ import { dateOnly, integer, percent, sourceLabels } from "./lib/format";
 import { trackPageView, trackSiteEvent } from "./lib/siteAnalytics";
 import { loadTierListDeckConfig, loadTierListSnapshot } from "./lib/tierList";
 import type { TierListPageKind } from "./lib/tierList";
-import type { BattleFestivalMeritRow, CardView, DeckConfigStats, TierListClusterVariant, TierListRow, TierListScope, TierListSnapshot } from "./types";
+import type { BattleFestivalMeritDeck, BattleFestivalMeritRow, CardView, DeckConfigStats, TierListClusterVariant, TierListRow, TierListScope, TierListSnapshot } from "./types";
 
 type SortKey = "rankScore" | "winRate" | "playerAverageWinRate" | "usageRate" | "kabukiPoints" | "sampleSize";
 
@@ -302,30 +302,38 @@ function mobileDeckSubtitle(deck: TierListRow): string {
   return camp ? `${camp} · ${deckSubtitle(deck)}` : deckSubtitle(deck);
 }
 
-function meritDeltaLabel(row: BattleFestivalMeritRow): string {
-  if (row.meritSampleCount < 2) return "单点";
-  const sign = row.meritDelta > 0 ? "+" : "";
-  return `${sign}${integer(row.meritDelta)}`;
+function shortDateTime(value: string): string {
+  return String(value || "").slice(5, 16).replace("T", " ") || "-";
 }
 
-function meritRangeLabel(row: BattleFestivalMeritRow): string {
-  return `${integer(row.firstMerit)} → ${integer(row.lastMerit)}`;
+function meritHighestTimeLabel(row: BattleFestivalMeritRow): string {
+  return shortDateTime(row.highestMeritSeenAt);
 }
 
-function meritPeakLabel(row: BattleFestivalMeritRow): string {
-  return integer(row.maxMerit);
-}
-
-function meritTimeLabel(row: BattleFestivalMeritRow): string {
-  const first = String(row.firstSeenAt || "").slice(5, 16).replace("T", " ") || "-";
-  const last = String(row.lastSeenAt || "").slice(5, 16).replace("T", " ") || "-";
+function meritObservedRangeLabel(row: BattleFestivalMeritRow): string {
+  const first = shortDateTime(row.firstSeenAt);
+  const last = shortDateTime(row.lastSeenAt);
   return first === last ? first : `${first} - ${last}`;
 }
 
-function meritConfidenceLabel(row: BattleFestivalMeritRow): string {
-  if (row.confidence === "high") return "高";
-  if (row.confidence === "medium") return "中";
-  return "单点";
+function meritRecordLabel(row: BattleFestivalMeritRow): string {
+  const parts = [`胜 ${integer(row.winCount)}`, `负 ${integer(row.lossCount)}`];
+  if (row.drawCount) parts.push(`平 ${integer(row.drawCount)}`);
+  if (row.unknownCount) parts.push(`未知 ${integer(row.unknownCount)}`);
+  return parts.join(" / ");
+}
+
+function meritDeckRows(row: BattleFestivalMeritRow): BattleFestivalMeritDeck[] {
+  return (row.decks || []).slice(0, 3);
+}
+
+function meritDeckText(deck: BattleFestivalMeritDeck): string {
+  return `${deck.deckName} · ${integer(deck.sampleSize)}场 · ${percent(deck.winRate)}`;
+}
+
+function meritDeckSummary(row: BattleFestivalMeritRow): string {
+  const deck = row.decks?.[0];
+  return deck ? meritDeckText(deck) : "未识别牌组";
 }
 
 function displayRowKey(deck: TierListRow): string {
@@ -482,36 +490,38 @@ function switchClusterVariant(deck: TierListRow): void {
         <div class="Common_SectionHeading Common_SectionHeading_Compact TierPage_MeritHeading">
           <div>
             <p class="Common_Eyebrow">Merit</p>
-            <h2 id="TierPage_Merit_Title">战功冲刺榜</h2>
+            <h2 id="TierPage_Merit_Title">观察最高战功榜</h2>
           </div>
           <p>采集样本推理榜，不是官方完整战功榜</p>
         </div>
-        <div v-if="battleFestivalMeritSummary" class="TierPage_MeritSummary" aria-label="战功冲刺概览">
-          <span><b>{{ integer(battleFestivalMeritSummary.rankedPlayerCount) }}</b>可计算</span>
+        <div v-if="battleFestivalMeritSummary" class="TierPage_MeritSummary" aria-label="观察最高战功概览">
+          <span><b>{{ integer(battleFestivalMeritSummary.highestMerit) }}</b>最高战功</span>
           <span><b>{{ integer(battleFestivalMeritSummary.meritPlayerCount) }}</b>有战功</span>
+          <span><b>{{ integer(battleFestivalMeritSummary.observedMatchCount) }}</b>观察场数</span>
           <span><b>{{ integer(battleFestivalMeritSummary.meritSampleCount) }}</b>战功样本</span>
-          <span><b>{{ integer(battleFestivalMeritSummary.maxMeritDelta) }}</b>最高涨幅</span>
         </div>
         <section v-if="!filteredBattleFestivalMeritRows.length" class="Common_StatusPanel TierPage_EmptyState">
-          暂无可计算战功涨幅
+          暂无观察战功数据
         </section>
         <table v-else-if="!mobileViewport" class="Common_TableLayout TierPage_MeritTable">
           <colgroup>
             <col class="Common_TableColumn Common_TableColumn_Fixed" style="--Common_TableColumnWidth: 72px">
-            <col class="Common_TableColumn">
+            <col class="Common_TableColumn Common_TableColumn_Fixed" style="--Common_TableColumnWidth: 180px">
             <col class="Common_TableColumn Common_TableColumn_Fixed" style="--Common_TableColumnWidth: 132px">
-            <col class="Common_TableColumn Common_TableColumn_Fixed" style="--Common_TableColumnWidth: 156px">
             <col class="Common_TableColumn Common_TableColumn_Fixed" style="--Common_TableColumnWidth: 112px">
-            <col class="Common_TableColumn Common_TableColumn_Fixed" style="--Common_TableColumnWidth: 172px">
+            <col class="Common_TableColumn Common_TableColumn_Fixed" style="--Common_TableColumnWidth: 128px">
+            <col class="Common_TableColumn">
+            <col class="Common_TableColumn Common_TableColumn_Fixed" style="--Common_TableColumnWidth: 176px">
           </colgroup>
           <thead>
             <tr>
               <th>Rank</th>
               <th>玩家</th>
-              <th>战功涨幅</th>
-              <th>当前 / 最高</th>
-              <th>样本</th>
-              <th>时间范围</th>
+              <th>最高战功</th>
+              <th>观察场数</th>
+              <th>观察胜率</th>
+              <th>使用牌组</th>
+              <th>观察时间</th>
             </tr>
           </thead>
           <tbody>
@@ -521,19 +531,31 @@ function switchClusterVariant(deck: TierListRow): void {
                 <strong>{{ row.playerName }}</strong>
                 <span>
                   <em v-if="row.camp" class="TierPage_CampPill">{{ row.camp }}</em>
-                  <em>{{ meritConfidenceLabel(row) }}</em>
+                  <em>{{ integer(row.meritSampleCount) }} 战功样本</em>
                 </span>
               </td>
-              <td class="TierPage_MeritNumber TierPage_MeritDelta">{{ meritDeltaLabel(row) }}</td>
               <td class="TierPage_MeritNumber">
-                <b>{{ meritRangeLabel(row) }}</b>
-                <small>最高 {{ meritPeakLabel(row) }}</small>
+                <b>{{ integer(row.highestMerit) }}</b>
+                <small>{{ meritHighestTimeLabel(row) }}</small>
               </td>
               <td class="TierPage_MeritNumber">
-                <b>{{ integer(row.meritSampleCount) }}</b>
-                <small>观察 {{ integer(row.observedMatchCount) }}</small>
+                <b>{{ integer(row.observedMatchCount) }}</b>
+                <small>对局样本</small>
               </td>
-              <td class="TierPage_MeritTime">{{ meritTimeLabel(row) }}</td>
+              <td class="TierPage_MeritNumber">
+                <b>{{ percent(row.winRate) }}</b>
+                <small>{{ meritRecordLabel(row) }}</small>
+              </td>
+              <td class="TierPage_MeritDeckCell">
+                <span v-if="!meritDeckRows(row).length">未识别牌组</span>
+                <span v-for="deck in meritDeckRows(row)" v-else :key="`${row.playerName}-${deck.deckId}`">
+                  {{ meritDeckText(deck) }}
+                </span>
+              </td>
+              <td class="TierPage_MeritTime">
+                <b>最高 {{ meritHighestTimeLabel(row) }}</b>
+                <small>{{ meritObservedRangeLabel(row) }}</small>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -545,15 +567,16 @@ function switchClusterVariant(deck: TierListRow): void {
             </div>
             <p>
               <span v-if="row.camp">{{ row.camp }}</span>
-              <span>{{ meritConfidenceLabel(row) }}</span>
-              <span>{{ meritTimeLabel(row) }}</span>
+              <span>{{ integer(row.meritSampleCount) }} 战功样本</span>
+              <span>{{ meritObservedRangeLabel(row) }}</span>
             </p>
             <div class="TierPage_MeritMobileMetrics">
-              <span><b>{{ meritDeltaLabel(row) }}</b>战功涨幅</span>
-              <span><b>{{ integer(row.lastMerit) }}</b>当前战功</span>
-              <span><b>{{ integer(row.maxMerit) }}</b>最高战功</span>
+              <span><b>{{ integer(row.highestMerit) }}</b>最高战功</span>
+              <span><b>{{ integer(row.observedMatchCount) }}</b>观察场数</span>
+              <span><b>{{ percent(row.winRate) }}</b>观察胜率</span>
               <span><b>{{ integer(row.meritSampleCount) }}</b>战功样本</span>
             </div>
+            <p class="TierPage_MeritMobileDeck">{{ meritDeckSummary(row) }}</p>
           </article>
         </div>
         <div v-if="hasMoreBattleFestivalMeritRows" class="TierPage_LoadMore">
@@ -957,6 +980,11 @@ function switchClusterVariant(deck: TierListRow): void {
   text-align: right;
 }
 
+.TierPage_MeritTable th:nth-child(6),
+.TierPage_MeritTable td:nth-child(6) {
+  text-align: left;
+}
+
 .TierPage_MeritPlayerCell {
   min-width: 0;
 }
@@ -1015,6 +1043,30 @@ function switchClusterVariant(deck: TierListRow): void {
   font-family: var(--font-control);
   font-size: 12px;
   font-weight: 700;
+}
+
+.TierPage_MeritDeckCell {
+  min-width: 0;
+  color: var(--color-brown);
+  font-family: var(--font-control);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.TierPage_MeritDeckCell span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.TierPage_MeritDeckCell span + span {
+  margin-top: 4px;
+}
+
+.TierPage_MeritTime b,
+.TierPage_MeritTime small {
+  display: block;
 }
 
 .TierPage_MeritMobileList {
@@ -1081,6 +1133,12 @@ function switchClusterVariant(deck: TierListRow): void {
   font-family: var(--font-number);
   font-size: 20px;
   line-height: 1.05;
+}
+
+.TierPage_MeritMobileDeck {
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-brown);
 }
 
 /* 榜单表格外壳。 */
@@ -1350,7 +1408,7 @@ function switchClusterVariant(deck: TierListRow): void {
   }
 
   .TierPage_MeritTable {
-    min-width: 920px;
+    min-width: 1080px;
   }
 }
 
