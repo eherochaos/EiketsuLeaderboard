@@ -29,8 +29,33 @@ ROUTE_BLOCK = f"""
 
         return (_codex_os.environ.get("EIKETSU_LEADERBOARD_NODE_API_BASE") or "http://eiketsu-leaderboard-api:8001").rstrip("/")
 
+    def _codex_leaderboard_html_response(path):
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="static file not found")
+        return FileResponse(
+            path,
+            media_type="text/html; charset=utf-8",
+            headers={{"Cache-Control": "no-store"}},
+        )
+
     from fastapi import Request as _CodexRequest
     globals()["_CodexRequest"] = _CodexRequest
+
+    @app.middleware("http")
+    async def _codex_leaderboard_html_no_store(request: _CodexRequest, call_next):
+        response = await call_next(request)
+        if request.method == "GET" and request.url.path in {{
+            "/leaderboard-status",
+            "/leaderboard-status/",
+            "/match-search",
+            "/match-search/",
+            "/admin-stats",
+            "/admin-stats/",
+            "/battle-festival",
+            "/battle-festival/",
+        }}:
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.middleware("http")
     async def _codex_default_battle_festival_config(request: _CodexRequest, call_next):
@@ -111,33 +136,25 @@ ROUTE_BLOCK = f"""
     @app.get("/leaderboard-status/")
     def leaderboard_status_page():
         path = _codex_leaderboard_frontend_root() / "leaderboard-status" / "index.html"
-        if not path.is_file():
-            raise HTTPException(status_code=404, detail="static file not found")
-        return FileResponse(path, media_type="text/html; charset=utf-8")
+        return _codex_leaderboard_html_response(path)
 
     @app.get("/match-search")
     @app.get("/match-search/")
     def match_search_page():
         path = _codex_leaderboard_frontend_root() / "match-search" / "index.html"
-        if not path.is_file():
-            raise HTTPException(status_code=404, detail="static file not found")
-        return FileResponse(path, media_type="text/html; charset=utf-8")
+        return _codex_leaderboard_html_response(path)
 
     @app.get("/admin-stats")
     @app.get("/admin-stats/")
     def admin_stats_page():
         path = _codex_leaderboard_frontend_root() / "admin-stats" / "index.html"
-        if not path.is_file():
-            raise HTTPException(status_code=404, detail="static file not found")
-        return FileResponse(path, media_type="text/html; charset=utf-8")
+        return _codex_leaderboard_html_response(path)
 
     @app.get("/battle-festival")
     @app.get("/battle-festival/")
     def battle_festival_page():
         path = _codex_leaderboard_frontend_root() / "battle-festival" / "index.html"
-        if not path.is_file():
-            raise HTTPException(status_code=404, detail="static file not found")
-        return FileResponse(path, media_type="text/html; charset=utf-8")
+        return _codex_leaderboard_html_response(path)
 
     @app.get("/api/leaderboard-refresh-status")
     def api_leaderboard_refresh_status(request: _CodexRequest):

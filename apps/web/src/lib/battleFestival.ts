@@ -1,4 +1,5 @@
-import { loadTierListSnapshot } from "./tierList";
+import type { LeaderboardRefreshUpload } from "../../../../packages/contracts/leaderboard-refresh-status.js";
+import { loadRefreshStatus } from "./refreshStatus";
 
 export interface BattleFestivalPeriod {
   dateFrom: string;
@@ -34,15 +35,22 @@ export function isBattleFestivalActive(period: BattleFestivalPeriod | null, now:
 
 export async function loadBattleFestivalPeriod(): Promise<BattleFestivalPeriod | null> {
   try {
-    const snapshot = await loadTierListSnapshot("battleFestival");
-    const metadata = snapshot.metadata;
-    if (!metadata?.dateFrom || !metadata.dateTo) return null;
+    const status = await loadRefreshStatus();
+    const uploads = [
+      status.latestUpload,
+      ...status.recentUploads
+    ].filter((upload): upload is LeaderboardRefreshUpload => upload?.modeScope === "battle_festival");
+    const upload = uploads[0] ?? null;
+    const dateFrom = upload?.festivalDateFrom || upload?.dateFrom;
+    const dateTo = upload?.festivalDateTo || upload?.dateTo;
+    if (!upload || !dateFrom || !dateTo) return null;
+
     return {
-      dateFrom: metadata.dateFrom,
-      dateTo: metadata.dateTo,
-      targetVersion: metadata.targetVersion || "",
-      sourceRunId: metadata.sourceRunId,
-      sampleSize: metadata.sampleSize
+      dateFrom,
+      dateTo,
+      targetVersion: upload.targetVersion || "",
+      sourceRunId: upload.id,
+      sampleSize: upload.importedMatchCount || upload.matchCount || 0
     };
   } catch {
     return null;
