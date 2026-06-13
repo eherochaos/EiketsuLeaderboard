@@ -3,7 +3,6 @@ from __future__ import annotations
 import copy
 from datetime import datetime
 from pathlib import Path
-from types import SimpleNamespace
 
 from sqlalchemy.orm import Session
 
@@ -12,7 +11,7 @@ from eiketsu_env.db.base import Base
 from eiketsu_env.db.models import CollectionRun, Match, RawSnapshot
 from eiketsu_env.db.session import make_engine
 from eiketsu_env.services.mode_filter import MODE_SCOPE_BATTLE_FESTIVAL
-from eiketsu_env.services import collector
+from eiketsu_env.services import browser_session, collector
 from eiketsu_env.services.collector import _existing_detail_is_complete, _filter_active_players, collect_follow
 from eiketsu_env.services.repository import EnvRepository
 from eiketsu_env.utils import JST
@@ -217,6 +216,11 @@ def test_collect_follow_refetches_battle_festival_detail_missing_player_merit(tm
             return f"<html>{url}</html>", url
 
     monkeypatch.setattr(collector, "create_member_session", lambda *args, **kwargs: FakeMember())
+    monkeypatch.setattr(
+        browser_session,
+        "fetch_live_browser_page",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("collector must not render detail pages")),
+    )
     monkeypatch.setattr(collector, "parse_follow_html", lambda html, url, base_url: [{"follow_id": "586", "name": "A"}])
     monkeypatch.setattr(collector, "parse_follow_api_json", lambda payload, base_url: [])
     monkeypatch.setattr(
@@ -250,22 +254,17 @@ def test_collect_follow_refetches_battle_festival_detail_missing_player_merit(tm
     assert result.counts["battle_festival_player_merit_missing"] == 0
 
 
-def test_collect_follow_uses_rendered_detail_when_http_detail_missing_player_merit(tmp_path, monkeypatch):
+def test_collect_follow_does_not_render_detail_when_http_detail_missing_player_merit(tmp_path, monkeypatch):
     settings = _settings(tmp_path)
     engine = make_engine(settings)
     Base.metadata.create_all(engine)
     stale_detail = copy.deepcopy(_detail())
     stale_detail["mode"] = "戦祭り"
     stale_detail["players"][0]["profile"] = {"戦功オッズ": "×1.1", "戦祭りランキング": "12 位"}
-    rendered_detail = copy.deepcopy(stale_detail)
-    rendered_detail["players"][0]["profile"] = {"戦功": "250123", "戦祭りランキング": "12 位"}
 
     class FakeMember:
         def fetch_text(self, url, referer=None):
             return "<html>http-detail</html>", url
-
-    def fake_parse_detail(html, url, base_url, seed):
-        return rendered_detail if "rendered-detail" in html else stale_detail
 
     monkeypatch.setattr(collector, "create_member_session", lambda *args, **kwargs: FakeMember())
     monkeypatch.setattr(collector, "parse_follow_html", lambda html, url, base_url: [{"follow_id": "586", "name": "A"}])
@@ -281,12 +280,7 @@ def test_collect_follow_uses_rendered_detail_when_http_detail_missing_player_mer
             }
         ],
     )
-    monkeypatch.setattr(collector, "parse_detail_html", fake_parse_detail)
-    monkeypatch.setattr(
-        collector,
-        "fetch_live_browser_page",
-        lambda *args, **kwargs: SimpleNamespace(html="<html>rendered-detail</html>", final_url=args[2]),
-    )
+    monkeypatch.setattr(collector, "parse_detail_html", lambda html, url, base_url, seed: stale_detail)
 
     result = collect_follow(
         settings,
@@ -299,6 +293,6 @@ def test_collect_follow_uses_rendered_detail_when_http_detail_missing_player_mer
     )
 
     assert result.status == "completed"
-    assert result.counts["battle_festival_rendered_detail_pages"] == 1
-    assert result.counts["battle_festival_merit_samples"] == 1
-    assert result.counts["battle_festival_player_merit_missing"] == 0
+    assert "battle_festival_rendered_detail_pages" not in result.counts
+    assert result.counts["battle_festival_merit_samples"] == 0
+    assert result.counts["battle_festival_player_merit_missing"] == 1

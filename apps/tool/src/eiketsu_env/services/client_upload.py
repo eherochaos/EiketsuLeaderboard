@@ -473,7 +473,6 @@ def _battle_festival_collect_summary(counts: dict[str, Any]) -> str:
         f"绝对戦功样本 {int(counts.get('battle_festival_merit_samples') or 0)}，"
         f"player缺戦功 {int(counts.get('battle_festival_player_merit_missing') or 0)}，"
         f"缺戦功重抓 {int(counts.get('battle_festival_existing_merit_missing') or 0)}，"
-        f"rendered {int(counts.get('battle_festival_rendered_detail_pages') or 0)}，"
         f"skipped_by_mode {int(counts.get('skipped_by_mode') or 0)}"
     )
 
