@@ -301,13 +301,18 @@ def test_sync_client_reports_battle_festival_probe_failure(tmp_path, monkeypatch
     monkeypatch.setattr(
         client_upload,
         "probe_battle_festival_period",
-        lambda *args, **kwargs: BattleFestivalProbeResult(None, "auth_failed", "battle festival probe failed"),
+        lambda *args, **kwargs: BattleFestivalProbeResult(
+            None,
+            "auth_failed",
+            "战祭探测失败：当前登录态无效，请保持程序打开的登录窗口",
+        ),
     )
 
     result = sync_client(settings, interactive_auth=False, transport=transport, progress=progress)
 
     assert result.battle_festival_upload is None
-    assert any("battle festival probe failed" in message for message in progress.messages)
+    assert any("登录态无效" in message for message in progress.messages)
+    assert any("保持" in message for message in progress.messages)
     assert len(transport.upload_payloads) == 1
     manifest = json.loads(transport.upload_payloads[0]["package_text"].splitlines()[0])
     assert manifest["mode_scope"] == MODE_SCOPE_TIER_LIST

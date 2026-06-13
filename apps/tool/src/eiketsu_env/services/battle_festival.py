@@ -118,7 +118,11 @@ def probe_battle_festival_period(
         return BattleFestivalProbeResult(
             period=None,
             status="redirected",
-            message="战祭探测失败：会员战祭页跳转到首页或登录页，请重新打开登录页确认会员登录态",
+            message=(
+                "战祭探测失败：会员战祭页跳转到首页或登录页，"
+                "当前登录态无效或不是程序打开的登录窗口。"
+                "请点击“打开登录页”完成会员区登录，并保持该 Chrome/Edge/Brave 窗口打开直到同步完成。"
+            ),
             final_url=final_url_text,
         )
 

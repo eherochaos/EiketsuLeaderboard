@@ -91,7 +91,8 @@ def format_browser_doctor_message(browser: dict[str, Any], selected_label: str) 
     source = str(browser.get("auth_source") or "")
     choice = selected_label or BROWSER_DISPLAY_NAMES.get(source, "所选浏览器")
     candidates = browser.get("candidates") or []
-    checked = _format_candidate_summary_for_user(candidates)
+    invalid_login = _has_invalid_member_login_error(candidates) or "登录态无效" in str(browser.get("message") or "")
+    checked = _format_candidate_summary_for_user(candidates, invalid_login=invalid_login)
     chromium_locked = _has_chromium_lock_error(candidates)
     chromium_protected = _has_chromium_protected_login_error(candidates)
     if chromium_locked:
@@ -112,6 +113,15 @@ def format_browser_doctor_message(browser: dict[str, Any], selected_label: str) 
             "4. 登录完成后不需要关闭网页，直接回到这个窗口等待自动检测。",
         ]
         retry_hint = "反复关闭 Chrome/Edge/Brave 通常不会解决这个提示；请改用“打开登录页”弹出的专用登录窗口。"
+    elif invalid_login:
+        steps = [
+            "请按下面做：",
+            "1. 点击“打开登录页”。",
+            "2. 程序会打开一个专用的 Chrome/Edge/Brave 登录窗口，请在这个窗口完成会员区登录。",
+            "3. 登录完成后不要关闭这个窗口，保持它打开直到同步完成。",
+            "4. 如果之前是在其它浏览器窗口登录，请改到程序打开的窗口里重新登录。",
+        ]
+        retry_hint = "检测到旧登录记录已失效；请以程序打开的专用登录窗口为准。"
     else:
         steps = [
             "请按下面做：",
@@ -138,7 +148,7 @@ def format_browser_doctor_message(browser: dict[str, Any], selected_label: str) 
     )
 
 
-def _format_candidate_summary_for_user(candidates: list[dict[str, Any]]) -> str:
+def _format_candidate_summary_for_user(candidates: list[dict[str, Any]], invalid_login: bool = False) -> str:
     if not candidates:
         return "没有找到可检查的浏览器用户。"
 
@@ -154,9 +164,15 @@ def _format_candidate_summary_for_user(candidates: list[dict[str, Any]]) -> str:
         status = "旧的离线读取方式遇到浏览器占用；请改用“打开登录页”打开的专用登录窗口。"
     elif _has_chromium_protected_login_error(candidates):
         status = "找到登录记录，但 Chrome/Edge/Brave 新版保护了网页登录状态，当前无法直接读取。"
+    elif invalid_login:
+        status = "找到旧登录记录，但会员区校验失败；请改用“打开登录页”打开的专用登录窗口。"
     else:
         status = "找到了疑似登录记录，但读取失败；请关闭浏览器后重试一次。" if readable_login_records else "没有找到会员区登录记录。"
     return "，".join(parts) + f"；{status}"
+
+
+def _has_invalid_member_login_error(candidates: list[dict[str, Any]]) -> bool:
+    return any("登录态无效" in str(item.get("error") or "") for item in candidates)
 
 
 def _has_chromium_lock_error(candidates: list[dict[str, Any]]) -> bool:
@@ -220,6 +236,8 @@ def _messagebox_title_for_error(message: str) -> str:
 
 def _browser_doctor_warning_title(browser: dict[str, Any]) -> str:
     candidates = browser.get("candidates") or []
+    if _has_invalid_member_login_error(candidates) or "登录态无效" in str(browser.get("message") or ""):
+        return "请使用程序打开的登录页"
     if _has_chromium_protected_login_error(candidates):
         return "浏览器登录状态暂不可读取"
     if _has_chromium_lock_error(candidates):
