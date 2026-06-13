@@ -239,6 +239,7 @@ def test_auto_chrome_profile_selects_most_domain_cookies(tmp_path, monkeypatch):
     _create_chromium_profile(user_data, "Profile 1", 2)
     (user_data / "Local State").write_text(json.dumps({"profile": {"last_used": "Default"}}), encoding="utf-8")
     monkeypatch.setenv("LOCALAPPDATA", str(local_app))
+    monkeypatch.setattr(browser_session, "_live_chromium_browser_for_auth_source", lambda _source: "")
     monkeypatch.setattr(browser_session, "_validate_member_login", lambda _settings, _result: "member ok")
 
     result = load_browser_cookiejar(_settings(tmp_path), "chrome", decryptor=lambda _value, _key: "decrypted")
@@ -338,6 +339,14 @@ def test_default_browser_progid_mapping():
 def test_doctor_browser_reports_missing_login(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "empty-local"))
     monkeypatch.setenv("APPDATA", str(tmp_path / "empty-roaming"))
+    monkeypatch.setattr(browser_session, "_live_chromium_browser_for_auth_source", lambda _source: "chrome")
+    monkeypatch.setattr(
+        browser_session,
+        "load_live_browser_cookiejar",
+        lambda _settings, _browser: (_ for _ in ()).throw(
+            BrowserAuthError("请先点击“打开登录页”，在程序打开的 Google Chrome 窗口完成登录后再检查。")
+        ),
+    )
 
     result = doctor_browser(_settings(tmp_path), "chrome")
 

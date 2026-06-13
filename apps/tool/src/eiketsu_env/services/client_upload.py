@@ -9,6 +9,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -105,6 +106,14 @@ class ClientUpdateCheck:
     message: str = ""
 
 
+@dataclass(slots=True)
+class BattleFestivalCollectPlan:
+    config: ShareConfig | None
+    source: str
+    upload_when_empty: bool
+    reason: str
+
+
 class UrllibJsonTransport:
     def __init__(self, timeout_seconds: int = 900) -> None:
         self.timeout_seconds = timeout_seconds
@@ -186,28 +195,52 @@ def sync_client(
     battle_upload = None
     battle_package_path = None
     battle_probe = probe_battle_festival_period(settings, auth_source=auth_source, interactive_auth=interactive_auth)
-    if progress and battle_probe.message:
-        progress.message(battle_probe.message)
-    battle_config = battle_festival_share_config_from_period(share_config, battle_probe.period)
+    if progress:
+        progress.message(f"战祭页探测状态：{battle_probe.status}")
+        if battle_probe.message:
+            progress.message(battle_probe.message)
+    battle_plan = battle_festival_collect_plan(share_config, battle_probe)
+    battle_config = battle_plan.config
     if battle_config is not None:
         if progress:
-            progress.message(f"战祭已开启 {battle_config.festival_date_from} - {battle_config.festival_date_to}，开始独立采集")
-        battle_collect = collect_follow(
-            settings,
-            battle_config.date_from,
-            battle_config.date_to,
-            include_solo=False,
-            include_battle_festival=True,
-            mode_scope=battle_config.mode_scope,
-            auth_source=auth_source,
-            interactive_auth=False,
-            skip_existing=True,
-            skip_inactive=True,
-            concurrency_profile="aggressive",
-            progress=progress,
-            save_raw_snapshots=False,
-        )
-        battle_upload, battle_package_path = _upload_contribution(settings, config, transport, battle_config, progress)
+            progress.message(
+                f"battle_festival 采集启动：{battle_config.date_from} 至 {battle_config.date_to}，来源 {battle_plan.source}"
+            )
+        try:
+            battle_collect = collect_follow(
+                settings,
+                battle_config.date_from,
+                battle_config.date_to,
+                include_solo=False,
+                include_battle_festival=True,
+                mode_scope=battle_config.mode_scope,
+                auth_source=auth_source,
+                interactive_auth=False,
+                skip_existing=True,
+                skip_inactive=True,
+                concurrency_profile="aggressive",
+                progress=progress,
+                save_raw_snapshots=False,
+            )
+            if progress:
+                progress.message(_battle_festival_collect_summary(battle_collect.counts))
+            if battle_plan.upload_when_empty or _battle_festival_collect_has_evidence(battle_collect.counts):
+                battle_upload, battle_package_path, battle_uploaded_matches = _upload_contribution(
+                    settings,
+                    config,
+                    transport,
+                    battle_config,
+                    progress,
+                )
+                if progress:
+                    progress.message(f"battle_festival 上传场数：{battle_uploaded_matches}")
+            elif progress:
+                progress.message("battle_festival 未上传：旧 history 接口未发现 戦祭り seeds/details")
+        except Exception as exc:  # noqa: BLE001 - 战祭补采失败不能阻断普通 TierList 上传。
+            if progress:
+                progress.message(f"battle_festival 采集失败：{exc}")
+    elif progress:
+        progress.message(f"battle_festival 采集未启动：{battle_plan.reason}")
 
     collect_result = collect_follow(
         settings,
@@ -224,7 +257,7 @@ def sync_client(
         progress=progress,
         save_raw_snapshots=False,
     )
-    upload, package_path = _upload_contribution(settings, config, transport, tier_config, progress)
+    upload, package_path, _upload_match_count = _upload_contribution(settings, config, transport, tier_config, progress)
 
     return ClientSyncResult(
         collect_result=collect_result,
@@ -381,13 +414,77 @@ def battle_festival_share_config_from_period(
     return battle_config
 
 
+def battle_festival_collect_plan(
+    base_config: ShareConfig,
+    probe: BattleFestivalProbeResult,
+    current_day: date | None = None,
+) -> BattleFestivalCollectPlan:
+    current_day = current_day or today_jst()
+    official_config = battle_festival_share_config_from_period(base_config, probe.period, current_day=current_day)
+    if official_config is not None:
+        return BattleFestivalCollectPlan(official_config, "official_period", True, "官方战祭周期已开启")
+
+    if probe.period is not None:
+        return BattleFestivalCollectPlan(None, "official_inactive", False, "官方战祭周期当前未开启")
+
+    current = current_day.isoformat()
+    if not (base_config.date_from <= current <= base_config.date_to):
+        return BattleFestivalCollectPlan(None, "outside_sync_window", False, "采集范围未覆盖今天")
+
+    fallback_from = (current_day - timedelta(days=2)).isoformat()
+    date_from = max(base_config.date_from, fallback_from)
+    date_to = min(base_config.date_to, current)
+    fallback_config = ShareConfig(
+        schema_version=base_config.schema_version,
+        target_version=base_config.target_version,
+        date_from=date_from,
+        date_to=date_to,
+        mode_scope=MODE_SCOPE_BATTLE_FESTIVAL,
+        festival_date_from=date_from,
+        festival_date_to=date_to,
+        include_solo=False,
+        include_battle_festival=True,
+        high_ranker_rank=base_config.high_ranker_rank,
+        report_formats=list(base_config.report_formats),
+        reports=list(base_config.reports),
+    )
+    fallback_config.validate()
+    return BattleFestivalCollectPlan(
+        fallback_config,
+        "history_fallback",
+        False,
+        "官方战祭页未给出可用周期，改用旧 history 接口探测 戦祭り",
+    )
+
+
+def _battle_festival_collect_has_evidence(counts: dict[str, Any]) -> bool:
+    return any(
+        int(counts.get(key) or 0) > 0
+        for key in ("detail_candidates", "existing_detail_skipped", "detail_pages", "matches")
+    )
+
+
+def _battle_festival_collect_summary(counts: dict[str, Any]) -> str:
+    return (
+        "battle_festival 采集结果："
+        f"戦祭り seeds {int(counts.get('detail_candidates') or 0)}，"
+        f"details {int(counts.get('detail_pages') or 0)}，"
+        f"matches {int(counts.get('matches') or 0)}，"
+        f"绝对戦功样本 {int(counts.get('battle_festival_merit_samples') or 0)}，"
+        f"player缺戦功 {int(counts.get('battle_festival_player_merit_missing') or 0)}，"
+        f"缺戦功重抓 {int(counts.get('battle_festival_existing_merit_missing') or 0)}，"
+        f"rendered {int(counts.get('battle_festival_rendered_detail_pages') or 0)}，"
+        f"skipped_by_mode {int(counts.get('skipped_by_mode') or 0)}"
+    )
+
+
 def _upload_contribution(
     settings: Settings,
     config: ClientConfig,
     transport: JsonTransport,
     share_config: ShareConfig,
     progress: ProgressReporter | None = None,
-) -> tuple[dict[str, Any], Path]:
+) -> tuple[dict[str, Any], Path, int]:
     if progress:
         progress.message(f"正在打包 {share_config.mode_scope} 标准化贡献数据")
     package_path = (
@@ -409,7 +506,7 @@ def _upload_contribution(
         export_result.path.unlink()
     except OSError:
         pass
-    return upload, export_result.path
+    return upload, export_result.path, export_result.match_count
 
 
 def doctor_client(settings: Settings, transport: JsonTransport | None = None) -> dict[str, Any]:

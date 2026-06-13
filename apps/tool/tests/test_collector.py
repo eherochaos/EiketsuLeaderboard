@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import copy
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from sqlalchemy.orm import Session
 
@@ -91,6 +93,33 @@ def test_existing_detail_is_complete_detects_reusable_follow_detail(tmp_path):
         assert _existing_detail_is_complete(session, seed)
 
 
+def test_battle_festival_existing_detail_without_player_merit_is_not_complete(tmp_path):
+    settings = _settings(tmp_path)
+    engine = make_engine(settings)
+    Base.metadata.create_all(engine)
+    seed = {
+        "detail_url": "https://eiketsu-taisen.net/members/history/detail?t=1773932045&f=586",
+        "follow_id": "586",
+    }
+    stale_detail = copy.deepcopy(_detail())
+    stale_detail["mode"] = "戦祭り"
+    stale_detail["players"][0]["profile"] = {"戦功オッズ": "×1.1", "戦祭りランキング": "12 位"}
+    complete_detail = copy.deepcopy(stale_detail)
+    complete_detail["players"][0]["profile"] = {"戦功": "250123", "戦祭りランキング": "12 位"}
+
+    with Session(engine) as session:
+        repo = EnvRepository(session, settings)
+        repo.upsert_match_detail(stale_detail)
+        session.commit()
+
+        assert not _existing_detail_is_complete(session, seed, mode_scope=MODE_SCOPE_BATTLE_FESTIVAL)
+
+        repo.upsert_match_detail(complete_detail)
+        session.commit()
+
+        assert _existing_detail_is_complete(session, seed, mode_scope=MODE_SCOPE_BATTLE_FESTIVAL)
+
+
 def test_collect_follow_can_skip_raw_html_snapshots(tmp_path, monkeypatch):
     settings = _settings(tmp_path)
     engine = make_engine(settings)
@@ -166,3 +195,110 @@ def test_collect_follow_can_include_battle_festival(tmp_path, monkeypatch):
         run = session.get(CollectionRun, result.run_id)
         assert run.scope_json["include_battle_festival"] is True
         assert run.scope_json["mode_scope"] == MODE_SCOPE_BATTLE_FESTIVAL
+
+
+def test_collect_follow_refetches_battle_festival_detail_missing_player_merit(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    engine = make_engine(settings)
+    Base.metadata.create_all(engine)
+    stale_detail = copy.deepcopy(_detail())
+    stale_detail["mode"] = "戦祭り"
+    stale_detail["players"][0]["profile"] = {"戦功オッズ": "×1.1", "戦祭りランキング": "12 位"}
+    refreshed_detail = copy.deepcopy(stale_detail)
+    refreshed_detail["players"][0]["profile"] = {"戦功": "250123", "戦祭りランキング": "12 位"}
+
+    with Session(engine) as session:
+        repo = EnvRepository(session, settings)
+        repo.upsert_match_detail(stale_detail)
+        session.commit()
+
+    class FakeMember:
+        def fetch_text(self, url, referer=None):
+            return f"<html>{url}</html>", url
+
+    monkeypatch.setattr(collector, "create_member_session", lambda *args, **kwargs: FakeMember())
+    monkeypatch.setattr(collector, "parse_follow_html", lambda html, url, base_url: [{"follow_id": "586", "name": "A"}])
+    monkeypatch.setattr(collector, "parse_follow_api_json", lambda payload, base_url: [])
+    monkeypatch.setattr(
+        collector,
+        "parse_daily_html",
+        lambda html, url, base_url, iso_date, player: [
+            {
+                "detail_url": "https://eiketsu-taisen.net/members/history/detail?t=1773932045&f=586",
+                "follow_id": "586",
+                "mode": "戦祭り",
+            }
+        ],
+    )
+    monkeypatch.setattr(collector, "parse_detail_html", lambda html, url, base_url, seed: refreshed_detail)
+
+    result = collect_follow(
+        settings,
+        "2026-05-10",
+        "2026-05-10",
+        include_battle_festival=True,
+        mode_scope=MODE_SCOPE_BATTLE_FESTIVAL,
+        skip_existing=True,
+        save_raw_snapshots=False,
+    )
+
+    assert result.status == "completed"
+    assert result.counts["existing_detail_skipped"] == 0
+    assert result.counts["battle_festival_existing_merit_missing"] == 1
+    assert result.counts["detail_pages"] == 1
+    assert result.counts["battle_festival_merit_samples"] == 1
+    assert result.counts["battle_festival_player_merit_missing"] == 0
+
+
+def test_collect_follow_uses_rendered_detail_when_http_detail_missing_player_merit(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    engine = make_engine(settings)
+    Base.metadata.create_all(engine)
+    stale_detail = copy.deepcopy(_detail())
+    stale_detail["mode"] = "戦祭り"
+    stale_detail["players"][0]["profile"] = {"戦功オッズ": "×1.1", "戦祭りランキング": "12 位"}
+    rendered_detail = copy.deepcopy(stale_detail)
+    rendered_detail["players"][0]["profile"] = {"戦功": "250123", "戦祭りランキング": "12 位"}
+
+    class FakeMember:
+        def fetch_text(self, url, referer=None):
+            return "<html>http-detail</html>", url
+
+    def fake_parse_detail(html, url, base_url, seed):
+        return rendered_detail if "rendered-detail" in html else stale_detail
+
+    monkeypatch.setattr(collector, "create_member_session", lambda *args, **kwargs: FakeMember())
+    monkeypatch.setattr(collector, "parse_follow_html", lambda html, url, base_url: [{"follow_id": "586", "name": "A"}])
+    monkeypatch.setattr(collector, "parse_follow_api_json", lambda payload, base_url: [])
+    monkeypatch.setattr(
+        collector,
+        "parse_daily_html",
+        lambda html, url, base_url, iso_date, player: [
+            {
+                "detail_url": "https://eiketsu-taisen.net/members/history/detail?t=1773932045&f=586",
+                "follow_id": "586",
+                "mode": "戦祭り",
+            }
+        ],
+    )
+    monkeypatch.setattr(collector, "parse_detail_html", fake_parse_detail)
+    monkeypatch.setattr(
+        collector,
+        "fetch_live_browser_page",
+        lambda *args, **kwargs: SimpleNamespace(html="<html>rendered-detail</html>", final_url=args[2]),
+    )
+
+    result = collect_follow(
+        settings,
+        "2026-05-10",
+        "2026-05-10",
+        include_battle_festival=True,
+        mode_scope=MODE_SCOPE_BATTLE_FESTIVAL,
+        auth_source="chrome",
+        save_raw_snapshots=False,
+    )
+
+    assert result.status == "completed"
+    assert result.counts["battle_festival_rendered_detail_pages"] == 1
+    assert result.counts["battle_festival_merit_samples"] == 1
+    assert result.counts["battle_festival_player_merit_missing"] == 0
