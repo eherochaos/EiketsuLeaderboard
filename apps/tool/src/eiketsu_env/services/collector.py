@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
@@ -14,7 +14,7 @@ from sqlalchemy import select
 from eiketsu_env.config import Settings
 from eiketsu_env.db.models import Match, MatchAlias
 from eiketsu_env.db.session import make_session_factory
-from eiketsu_env.services.browser_session import create_member_session, fetch_live_browser_page
+from eiketsu_env.services.browser_session import create_member_session
 from eiketsu_env.services.mode_filter import (
     MODE_SCOPE_BATTLE_FESTIVAL,
     MODE_SCOPE_TIER_LIST,
@@ -60,13 +60,6 @@ class DetailPageResult:
     html: str
     final_url: str
     detail: dict[str, Any]
-
-
-@dataclass(slots=True)
-class RenderedDetailState:
-    enabled: bool = True
-    disabled_reason: str = ""
-    lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 def _date_range(date_from: str, date_to: str) -> list[str]:
@@ -137,7 +130,6 @@ def collect_follow(
     concurrency_profile: str = "default",
     progress: ProgressReporter | None = None,
     save_raw_snapshots: bool = True,
-    render_battle_festival_details: bool = True,
 ) -> CollectResult:
     dates = _date_range(date_from, date_to)
     normalized_mode_scope = normalize_mode_scope(mode_scope)
@@ -160,10 +152,7 @@ def collect_follow(
         "battle_festival_merit_samples": 0,
         "battle_festival_player_merit_missing": 0,
         "battle_festival_existing_merit_missing": 0,
-        "battle_festival_rendered_detail_pages": 0,
-        "battle_festival_rendered_detail_errors": 0,
     }
-    rendered_detail_state = RenderedDetailState() if render_battle_festival_details else None
 
     with factory() as session:
         repo = EnvRepository(session, settings)
@@ -183,7 +172,6 @@ def collect_follow(
                 "skip_existing": skip_existing,
                 "skip_inactive": skip_inactive,
                 "save_raw_snapshots": save_raw_snapshots,
-                "render_battle_festival_details": render_battle_festival_details,
                 "concurrency_profile": profile.name,
                 "daily_workers": profile.daily_workers,
                 "detail_workers": profile.detail_workers,
@@ -269,7 +257,6 @@ def collect_follow(
                     detail_jobs,
                     progress=progress,
                     label=f"detail {iso_date}",
-                    rendered_detail_state=rendered_detail_state,
                 )
                 errors.extend(detail_errors)
                 for detail_result in detail_results:
@@ -391,13 +378,12 @@ def _fetch_detail_pages(
     jobs: list[tuple[dict[str, str], str, dict[str, Any], str]],
     progress: ProgressReporter | None = None,
     label: str = "detail",
-    rendered_detail_state: RenderedDetailState | None = None,
 ) -> tuple[list[DetailPageResult], list[dict[str, Any]]]:
     if not jobs:
         return [], []
     task = progress.task(label, len(jobs)) if progress else None
     if profile.detail_workers <= 1:
-        results, errors = _run_serial_detail_pages(settings, auth_source, profile, jobs, task, rendered_detail_state=rendered_detail_state)
+        results, errors = _run_serial_detail_pages(settings, auth_source, profile, jobs, task)
         if task:
             task.finish(f"ok={len(results)} err={len(errors)}")
         return results, errors
@@ -406,7 +392,7 @@ def _fetch_detail_pages(
     try:
         with ThreadPoolExecutor(max_workers=profile.detail_workers) as executor:
             futures = {
-                executor.submit(_fetch_detail_page, settings, auth_source, profile, player, iso_date, seed, referer, rendered_detail_state): (player, seed)
+                executor.submit(_fetch_detail_page, settings, auth_source, profile, player, iso_date, seed, referer): (player, seed)
                 for player, iso_date, seed, referer in jobs
             }
             for future in as_completed(futures):
@@ -429,13 +415,12 @@ def _run_serial_detail_pages(
     profile: FollowConcurrencyProfile,
     jobs: list[tuple[dict[str, str], str, dict[str, Any], str]],
     task=None,
-    rendered_detail_state: RenderedDetailState | None = None,
 ) -> tuple[list[DetailPageResult], list[dict[str, Any]]]:
     results: list[DetailPageResult] = []
     errors: list[dict[str, Any]] = []
     for player, iso_date, seed, referer in jobs:
         try:
-            results.append(_fetch_detail_page(settings, auth_source, profile, player, iso_date, seed, referer, rendered_detail_state))
+            results.append(_fetch_detail_page(settings, auth_source, profile, player, iso_date, seed, referer))
         except Exception as exc:  # noqa: BLE001
             errors.append({"stage": "detail", "player": player, "seed": seed, "error": str(exc)})
         if task:
@@ -451,7 +436,6 @@ def _fetch_detail_page(
     iso_date: str,
     seed: dict[str, Any],
     referer: str,
-    rendered_detail_state: RenderedDetailState | None = None,
 ) -> DetailPageResult:
     member = _thread_member_session(settings, auth_source)
     detail_html, final_detail_url = call_with_retries(
@@ -459,7 +443,6 @@ def _fetch_detail_page(
         profile.retry_policy,
     )
     detail = parse_detail_html(detail_html, final_detail_url, settings.base_url, seed)
-    detail = _maybe_use_rendered_battle_festival_detail(settings, auth_source, seed, final_detail_url, detail, rendered_detail_state)
     return DetailPageResult(player=player, iso_date=iso_date, seed=seed, html=detail_html, final_url=final_detail_url, detail=detail)
 
 
@@ -528,17 +511,6 @@ def _battle_festival_match_missing_player_merit(match: Match | None) -> bool:
     return False
 
 
-def _detail_missing_battle_festival_player_merit(detail: dict[str, Any]) -> bool:
-    if not is_battle_festival_mode(str(detail.get("mode") or "")):
-        return False
-    for player in detail.get("players") or []:
-        if str(player.get("role") or "") != "player":
-            continue
-        if _profile_missing_merit_but_has_battle_festival_markers(player.get("profile") or {}):
-            return True
-    return False
-
-
 def _profile_missing_merit_but_has_battle_festival_markers(profile: dict[str, Any]) -> bool:
     if not isinstance(profile, dict):
         return False
@@ -568,44 +540,6 @@ def _add_battle_festival_detail_counts(counts: dict[str, Any], detail: dict[str,
     merit_samples, player_missing = _battle_festival_detail_stats(detail)
     counts["battle_festival_merit_samples"] += merit_samples
     counts["battle_festival_player_merit_missing"] += player_missing
-    meta = detail.get("collector_meta") if isinstance(detail.get("collector_meta"), dict) else {}
-    if meta.get("rendered_detail_used"):
-        counts["battle_festival_rendered_detail_pages"] += 1
-    if meta.get("rendered_detail_error"):
-        counts["battle_festival_rendered_detail_errors"] += 1
-
-
-def _maybe_use_rendered_battle_festival_detail(
-    settings: Settings,
-    auth_source: str,
-    seed: dict[str, Any],
-    final_detail_url: str,
-    detail: dict[str, Any],
-    rendered_detail_state: RenderedDetailState | None,
-) -> dict[str, Any]:
-    if rendered_detail_state is None or not _detail_missing_battle_festival_player_merit(detail):
-        return detail
-    with rendered_detail_state.lock:
-        if not rendered_detail_state.enabled:
-            return detail
-        try:
-            page = fetch_live_browser_page(settings, auth_source, final_detail_url, timeout=20.0)
-            rendered = parse_detail_html(page.html, page.final_url or final_detail_url, settings.base_url, seed)
-        except Exception as exc:  # noqa: BLE001 - 渲染兜底不可用时保留 HTTP 详情，并禁用后续重复尝试。
-            rendered_detail_state.enabled = False
-            rendered_detail_state.disabled_reason = str(exc)
-            return _with_collector_meta(detail, rendered_detail_error=str(exc))
-
-    original_merit, original_missing = _battle_festival_detail_stats(detail)
-    rendered_merit, rendered_missing = _battle_festival_detail_stats(rendered)
-    if rendered_merit > original_merit or rendered_missing < original_missing:
-        return _with_collector_meta(rendered, rendered_detail_used=True)
-    return _with_collector_meta(detail, rendered_detail_attempted=True)
-
-
-def _with_collector_meta(detail: dict[str, Any], **meta: Any) -> dict[str, Any]:
-    current = detail.get("collector_meta") if isinstance(detail.get("collector_meta"), dict) else {}
-    return {**detail, "collector_meta": {**current, **meta}}
 
 
 def parse_collect_dates(date_value: str | None, from_value: str | None, to_value: str | None) -> tuple[str, str]:

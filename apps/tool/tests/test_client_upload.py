@@ -269,7 +269,6 @@ def test_sync_client_collects_and_uploads_active_battle_festival_scope(tmp_path,
                     "battle_festival_merit_samples": 1,
                     "battle_festival_player_merit_missing": 1,
                     "battle_festival_existing_merit_missing": 1,
-                    "battle_festival_rendered_detail_pages": 1,
                     "skipped_by_mode": 0,
                 }
             )
@@ -295,6 +294,7 @@ def test_sync_client_collects_and_uploads_active_battle_festival_scope(tmp_path,
     assert any("绝对戦功样本 1" in message for message in progress.messages)
     assert any("player缺戦功 1" in message for message in progress.messages)
     assert any("缺戦功重抓 1" in message for message in progress.messages)
+    assert not any("rendered" in message for message in progress.messages)
     assert [(date_from, date_to) for date_from, date_to, _ in seen_calls] == [
         ("2026-06-11", "2026-06-12"),
         ("2026-06-10", "2026-06-14"),
