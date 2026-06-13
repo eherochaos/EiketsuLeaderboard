@@ -12,6 +12,7 @@ import socket
 import sqlite3
 import subprocess
 import tempfile
+import time
 import webbrowser
 from configparser import ConfigParser
 from dataclasses import dataclass
@@ -69,6 +70,14 @@ class BrowserCookieResult:
     cookiejar: CookieJar
     cookie_count: int
     message: str
+    is_live: bool = False
+
+
+@dataclass(slots=True)
+class BrowserPageResult:
+    source: str
+    final_url: str
+    html: str
 
 
 @dataclass(slots=True)
@@ -249,12 +258,14 @@ def _doctor_cookiejar_browser(settings: Settings, auth_source: str, live_browser
         actual_source = result.source
         selected_profile = str(result.profile_path)
         cookie_count = result.cookie_count
+        final_urls = _doctor_member_final_urls(settings, result)
     except Exception as exc:  # noqa: BLE001 - doctor 需要返回诊断而不是中断。
         ok = False
         message = str(exc)
         actual_source = live_browser or auth_source
         selected_profile = ""
         cookie_count = 0
+        final_urls = {}
     live_candidate = []
     if live_browser:
         live_candidate.append(
@@ -274,6 +285,8 @@ def _doctor_cookiejar_browser(settings: Settings, auth_source: str, live_browser
         "default_browser": default_kind,
         "selected_profile": selected_profile,
         "loaded_cookie_count": cookie_count,
+        "member_final_url": final_urls.get("member_final_url", ""),
+        "festival_final_url": final_urls.get("festival_final_url", ""),
         "login_url": settings.login_url,
         "candidates": live_candidate
         + [
@@ -333,12 +346,14 @@ def _doctor_live_chromium_browser(settings: Settings, browser: str) -> dict[str,
         selected_profile = str(result.profile_path)
         cookie_count = result.cookie_count
         error = ""
+        final_urls = _doctor_member_final_urls(settings, result)
     except Exception as exc:  # noqa: BLE001 - doctor 只负责把用户可操作的信息带回 GUI。
         ok = False
         message = str(exc)
         selected_profile = ""
         cookie_count = 0
         error = message
+        final_urls = {}
     return {
         "ok": ok,
         "auth_source": browser,
@@ -346,6 +361,8 @@ def _doctor_live_chromium_browser(settings: Settings, browser: str) -> dict[str,
         "default_browser": default_kind,
         "selected_profile": selected_profile,
         "loaded_cookie_count": cookie_count,
+        "member_final_url": final_urls.get("member_final_url", ""),
+        "festival_final_url": final_urls.get("festival_final_url", ""),
         "login_url": settings.login_url,
         "candidates": [
             {
@@ -383,9 +400,25 @@ def load_live_browser_cookiejar(settings: Settings, browser: str) -> BrowserCook
         raise BrowserAuthError(
             f"程序打开的 {BROWSER_NAME_FOR_USER.get(browser, browser)} 窗口里还没有会员区登录状态。请在该窗口完成登录后再检查。"
         )
-    result = BrowserCookieResult(browser, _live_browser_user_data_dir(settings, browser), jar, count, "浏览器内登录态待确认")
+    result = BrowserCookieResult(browser, _live_browser_user_data_dir(settings, browser), jar, count, "浏览器内登录态待确认", is_live=True)
     message = _validate_member_login(settings, result)
-    return BrowserCookieResult(browser, result.profile_path, jar, count, message)
+    return BrowserCookieResult(browser, result.profile_path, jar, count, message, is_live=True)
+
+
+def fetch_live_browser_page(settings: Settings, auth_source: str | None, url: str, timeout: float = 20.0) -> BrowserPageResult:
+    selected_source = _normalize_auth_source(auth_source or settings.auth_source)
+    browser = _live_chromium_browser_for_auth_source(selected_source)
+    if browser not in LIVE_CHROMIUM_BROWSERS:
+        raise BrowserAuthError("浏览器上下文读取只支持程序打开的 Chrome、Edge 或 Brave 窗口")
+    try:
+        websocket_url = _devtools_page_websocket_url(_live_browser_port(browser), settings.login_url)
+    except BrowserAuthError as exc:
+        raise BrowserAuthError(
+            f"请先点击“打开登录页”，并保持程序打开的 {BROWSER_NAME_FOR_USER.get(browser, browser)} 窗口打开。"
+        ) from exc
+    with _DevToolsConnection(websocket_url) as devtools:
+        html, final_url = _devtools_fetch_page(devtools, url, timeout=timeout)
+    return BrowserPageResult(browser, final_url, html)
 
 
 def _validate_member_login(settings: Settings, cookie_result: BrowserCookieResult) -> str:
@@ -410,8 +443,35 @@ def _validate_member_login(settings: Settings, cookie_result: BrowserCookieResul
     except json.JSONDecodeError as exc:
         raise BrowserAuthError(f"还没有确认会员区登录。{LOGIN_WINDOW_KEEP_OPEN_HINT}") from exc
     if isinstance(parsed, dict) and isinstance(parsed.get("follow"), list):
+        _validate_members_home(settings, session)
         return "会员区登录已确认，可以同步"
     raise BrowserAuthError(f"会员区登录确认失败。{LOGIN_WINDOW_KEEP_OPEN_HINT}")
+
+
+def _validate_members_home(settings: Settings, session: BrowserMemberSession) -> str:
+    try:
+        _payload, final_url = session.fetch_text(f"{settings.base_url}/members/", timeout=8)
+    except (HTTPError, TimeoutError, OSError, http.cookiejar.LoadError, URLError) as exc:
+        raise BrowserAuthError(f"无法确认会员首页登录态。{LOGIN_WINDOW_KEEP_OPEN_HINT}") from exc
+    final_path = urlparse(str(final_url or "")).path.rstrip("/").lower()
+    if not final_path.startswith("/members"):
+        raise BrowserAuthError(MEMBER_LOGIN_INVALID_MESSAGE)
+    return str(final_url or "")
+
+
+def _doctor_member_final_urls(settings: Settings, cookie_result: BrowserCookieResult) -> dict[str, str]:
+    session = BrowserMemberSession(settings, cookie_result)
+    result: dict[str, str] = {}
+    for key, url in (
+        ("member_final_url", f"{settings.base_url}/members/"),
+        ("festival_final_url", f"{settings.base_url}/members/festival/"),
+    ):
+        try:
+            _payload, final_url = session.fetch_text(url, timeout=8)
+        except Exception:  # noqa: BLE001 - doctor 字段只做辅助诊断，不影响登录状态。
+            final_url = ""
+        result[key] = str(final_url or "")
+    return result
 
 
 def doctor_firefox(settings: Settings) -> FirefoxDoctorResult:
@@ -952,6 +1012,40 @@ def _devtools_cookies(devtools: "_DevToolsConnection") -> list[dict[str, Any]]:
         payload = devtools.call("Storage.getCookies")
         cookies = payload.get("cookies") if isinstance(payload, dict) else None
     return [item for item in cookies or [] if isinstance(item, dict)]
+
+
+def _devtools_fetch_page(devtools: "_DevToolsConnection", url: str, timeout: float = 20.0) -> tuple[str, str]:
+    devtools.call("Page.enable")
+    devtools.call("Runtime.enable")
+    devtools.call("Page.navigate", {"url": url})
+    deadline = time.monotonic() + max(1.0, timeout)
+    final_url = ""
+    while time.monotonic() < deadline:
+        final_url = _devtools_evaluate_string(devtools, "location.href")
+        ready_state = _devtools_evaluate_string(devtools, "document.readyState")
+        if final_url and ready_state in {"interactive", "complete"}:
+            break
+        time.sleep(0.25)
+    html = _devtools_evaluate_string(
+        devtools,
+        "document.documentElement ? document.documentElement.outerHTML : ''",
+    )
+    return html, final_url
+
+
+def _devtools_evaluate_string(devtools: "_DevToolsConnection", expression: str) -> str:
+    payload = devtools.call(
+        "Runtime.evaluate",
+        {
+            "expression": expression,
+            "returnByValue": True,
+        },
+    )
+    result = payload.get("result") if isinstance(payload, dict) else None
+    if not isinstance(result, dict):
+        return ""
+    value = result.get("value")
+    return "" if value is None else str(value)
 
 
 def _cookie_from_devtools(item: dict[str, Any]) -> Cookie:

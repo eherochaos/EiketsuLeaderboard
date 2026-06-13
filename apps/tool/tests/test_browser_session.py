@@ -18,6 +18,7 @@ from eiketsu_env.services.browser_session import (
     discover_chromium_profiles,
     discover_firefox_profiles,
     doctor_browser,
+    fetch_live_browser_page,
     load_browser_cookiejar,
     load_chromium_cookiejar,
     open_login_url,
@@ -71,6 +72,33 @@ class _FakeDevToolsConnection:
 
     def __exit__(self, exc_type, exc, traceback):
         return False
+
+
+class _FakePageDevToolsConnection:
+    def __init__(self, websocket_url: str):
+        self.websocket_url = websocket_url
+        self.current_url = ""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def call(self, method: str, params=None):
+        params = params or {}
+        if method == "Page.navigate":
+            self.current_url = str(params.get("url") or "")
+            return {}
+        if method == "Runtime.evaluate":
+            expression = str(params.get("expression") or "")
+            if expression == "location.href":
+                return {"result": {"value": self.current_url}}
+            if expression == "document.readyState":
+                return {"result": {"value": "complete"}}
+            if "outerHTML" in expression:
+                return {"result": {"value": "<html><body>戦祭り 開催期間 2026年6月11日 ～ 6月13日</body></html>"}}
+        return {}
 
 
 def _create_firefox_profile(profile: Path, cookie_count: int = 1) -> None:
@@ -511,16 +539,49 @@ def test_live_browser_cookiejar_accepts_confirmed_member_api(tmp_path, monkeypat
     monkeypatch.setattr(browser_session, "_devtools_page_websocket_url", lambda _port, _url: "ws://test")
     monkeypatch.setattr(browser_session, "_DevToolsConnection", _FakeDevToolsConnection)
     monkeypatch.setattr(browser_session, "_devtools_cookies", lambda _devtools: [_make_devtools_cookie()])
-    monkeypatch.setattr(
-        browser_session.BrowserMemberSession,
-        "fetch_text",
-        lambda self, url, referer=None, timeout=30: (
-            json.dumps({"follow": []}),
-            "https://eiketsu-taisen.net/members/follow/api/followlist",
-        ),
-    )
+
+    def fake_fetch_text(self, url, referer=None, timeout=30):
+        if "/members/follow/api/followlist" in url:
+            return json.dumps({"follow": []}), "https://eiketsu-taisen.net/members/follow/api/followlist"
+        return "<html>members</html>", "https://eiketsu-taisen.net/members/"
+
+    monkeypatch.setattr(browser_session.BrowserMemberSession, "fetch_text", fake_fetch_text)
 
     result = browser_session.load_live_browser_cookiejar(_settings(tmp_path), "edge")
 
     assert result.cookie_count == 1
     assert result.message == "会员区登录已确认，可以同步"
+    assert result.is_live is True
+
+
+def test_member_api_success_still_requires_members_home(tmp_path, monkeypatch):
+    monkeypatch.setattr(browser_session, "_devtools_page_websocket_url", lambda _port, _url: "ws://test")
+    monkeypatch.setattr(browser_session, "_DevToolsConnection", _FakeDevToolsConnection)
+    monkeypatch.setattr(browser_session, "_devtools_cookies", lambda _devtools: [_make_devtools_cookie()])
+
+    def fake_fetch_text(self, url, referer=None, timeout=30):
+        if "/members/follow/api/followlist" in url:
+            return json.dumps({"follow": []}), "https://eiketsu-taisen.net/members/follow/api/followlist"
+        return "<html>home</html>", "https://eiketsu-taisen.net/"
+
+    monkeypatch.setattr(browser_session.BrowserMemberSession, "fetch_text", fake_fetch_text)
+
+    with pytest.raises(BrowserAuthError) as exc_info:
+        browser_session.load_live_browser_cookiejar(_settings(tmp_path), "edge")
+
+    assert "登录态无效" in str(exc_info.value)
+
+
+def test_fetch_live_browser_page_returns_final_url_and_html(tmp_path, monkeypatch):
+    monkeypatch.setattr(browser_session, "_devtools_page_websocket_url", lambda _port, _url: "ws://test")
+    monkeypatch.setattr(browser_session, "_DevToolsConnection", _FakePageDevToolsConnection)
+
+    result = fetch_live_browser_page(
+        _settings(tmp_path),
+        "edge",
+        "https://eiketsu-taisen.net/members/festival/",
+    )
+
+    assert result.source == "edge"
+    assert result.final_url == "https://eiketsu-taisen.net/members/festival/"
+    assert "戦祭り" in result.html
