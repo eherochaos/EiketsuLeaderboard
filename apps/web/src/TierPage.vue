@@ -5,11 +5,12 @@ import CommonDeckRail from "./components/Common_DeckRail.vue";
 import CommonImageFrame from "./components/Common_ImageFrame.vue";
 import CommonMetricTags from "./components/Common_MetricTags.vue";
 import TierPageDeckConfigPanel from "./components/TierPage_DeckConfigPanel.vue";
-import { dateOnly, integer, percent, sourceLabels } from "./lib/format";
+import { dateOnly, dateTime, integer, percent, sourceLabels } from "./lib/format";
+import { loadRefreshStatus } from "./lib/refreshStatus";
 import { trackPageView, trackSiteEvent } from "./lib/siteAnalytics";
 import { loadTierListDeckConfig, loadTierListSnapshot } from "./lib/tierList";
 import type { TierListPageKind } from "./lib/tierList";
-import type { BattleFestivalMeritDeck, BattleFestivalMeritRow, CardView, DeckConfigStats, TierListClusterVariant, TierListRow, TierListScope, TierListSnapshot } from "./types";
+import type { BattleFestivalMeritDeck, BattleFestivalMeritRow, CardView, DeckConfigStats, LeaderboardRefreshStatus, LeaderboardRefreshUpload, TierListClusterVariant, TierListRow, TierListScope, TierListSnapshot } from "./types";
 
 type SortKey = "rankScore" | "winRate" | "playerAverageWinRate" | "usageRate" | "kabukiPoints" | "sampleSize";
 
@@ -23,10 +24,16 @@ const INITIAL_VISIBLE_ROWS = 100;
 const VISIBLE_ROWS_STEP = 100;
 const INITIAL_VISIBLE_MERIT_ROWS = 50;
 const VISIBLE_MERIT_ROWS_STEP = 50;
+const BATTLE_FESTIVAL_STATUS_POLL_MS = 15000;
 
 const snapshot = ref<TierListSnapshot | null>(null);
 const loading = ref(true);
 const error = ref("");
+const snapshotRefreshing = ref(false);
+const snapshotRefreshError = ref("");
+const refreshStatus = ref<LeaderboardRefreshStatus | null>(null);
+const refreshStatusLoading = ref(false);
+const refreshStatusError = ref("");
 const battleCampFilter = ref("all");
 const factionFilter = ref("all");
 const sourceFilter = ref("all");
@@ -44,6 +51,9 @@ const deckConfigLoadingIds = ref(new Set<string>());
 const deckConfigErrors = ref<Record<string, string>>({});
 let mobileMediaQuery: MediaQueryList | null = null;
 let compactMobileMediaQuery: MediaQueryList | null = null;
+let battleFestivalStatusTimer: number | null = null;
+const lastBattleFestivalUploadId = ref<number | null>(null);
+const lastRefreshStatus = ref("");
 const emptyDeckConfig: DeckConfigStats = {
   weapons: [],
   styles: [],
@@ -91,6 +101,87 @@ function updateViewportMode(): void {
   compactMobileViewport.value = Boolean(compactMobileMediaQuery?.matches);
 }
 
+function latestBattleFestivalUploadFromStatus(status: LeaderboardRefreshStatus | null): LeaderboardRefreshUpload | null {
+  if (!status) return null;
+  return status.recentUploads.find((upload) => upload.modeScope === "battle_festival")
+    ?? (status.latestUpload?.modeScope === "battle_festival" ? status.latestUpload : null);
+}
+
+async function refreshSnapshot(): Promise<void> {
+  if (snapshotRefreshing.value) return;
+  snapshotRefreshing.value = true;
+  try {
+    snapshot.value = await loadTierListSnapshot(props.pageKind);
+    error.value = "";
+    snapshotRefreshError.value = "";
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : "快照读取失败";
+    if (snapshot.value) {
+      snapshotRefreshError.value = message;
+    } else {
+      error.value = message;
+    }
+  } finally {
+    loading.value = false;
+    snapshotRefreshing.value = false;
+  }
+}
+
+async function refreshBattleFestivalStatus(refreshSnapshotOnChange = false): Promise<boolean> {
+  if (props.pageKind !== "battleFestival" || refreshStatusLoading.value) return false;
+  refreshStatusLoading.value = true;
+  try {
+    const nextStatus = await loadRefreshStatus();
+    const latestUpload = latestBattleFestivalUploadFromStatus(nextStatus);
+    const nextUploadId = latestUpload?.id ?? null;
+    const nextRefreshStatus = nextStatus.refresh?.status || "";
+    const uploadChanged = lastBattleFestivalUploadId.value !== null && nextUploadId !== null && nextUploadId !== lastBattleFestivalUploadId.value;
+    const refreshCompleted = lastRefreshStatus.value === "running" && nextRefreshStatus === "completed";
+
+    refreshStatus.value = nextStatus;
+    refreshStatusError.value = "";
+    lastBattleFestivalUploadId.value = nextUploadId;
+    lastRefreshStatus.value = nextRefreshStatus;
+
+    if (refreshSnapshotOnChange && (uploadChanged || refreshCompleted)) {
+      await refreshSnapshot();
+      return true;
+    }
+  } catch (caught) {
+    refreshStatusError.value = caught instanceof Error ? caught.message : "刷新状态读取失败";
+  } finally {
+    refreshStatusLoading.value = false;
+  }
+  return false;
+}
+
+function startBattleFestivalStatusPolling(): void {
+  if (props.pageKind !== "battleFestival") return;
+  if (battleFestivalStatusTimer !== null) window.clearInterval(battleFestivalStatusTimer);
+  battleFestivalStatusTimer = window.setInterval(() => {
+    void refreshBattleFestivalStatus(true);
+  }, BATTLE_FESTIVAL_STATUS_POLL_MS);
+}
+
+function stopBattleFestivalStatusPolling(): void {
+  if (battleFestivalStatusTimer === null) return;
+  window.clearInterval(battleFestivalStatusTimer);
+  battleFestivalStatusTimer = null;
+}
+
+function handleVisibilityChange(): void {
+  if (props.pageKind !== "battleFestival" || document.visibilityState !== "visible") return;
+  void (async () => {
+    const refreshed = await refreshBattleFestivalStatus(true);
+    if (!refreshed) await refreshSnapshot();
+  })();
+}
+
+function manualRefreshSnapshot(): void {
+  void refreshSnapshot();
+  if (props.pageKind === "battleFestival") void refreshBattleFestivalStatus(false);
+}
+
 onMounted(async () => {
   trackPageView(pageCopy.value.analyticsPage);
   mobileMediaQuery = window.matchMedia("(max-width: 760px)");
@@ -98,24 +189,35 @@ onMounted(async () => {
   updateViewportMode();
   mobileMediaQuery.addEventListener("change", updateViewportMode);
   compactMobileMediaQuery.addEventListener("change", updateViewportMode);
-  try {
-    snapshot.value = await loadTierListSnapshot(props.pageKind);
-  } catch (caught) {
-    error.value = caught instanceof Error ? caught.message : "快照读取失败";
-  } finally {
-    loading.value = false;
+  await refreshSnapshot();
+  if (props.pageKind === "battleFestival") {
+    await refreshBattleFestivalStatus(false);
+    startBattleFestivalStatusPolling();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
   }
 });
 
 onBeforeUnmount(() => {
   mobileMediaQuery?.removeEventListener("change", updateViewportMode);
   compactMobileMediaQuery?.removeEventListener("change", updateViewportMode);
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
+  stopBattleFestivalStatusPolling();
   mobileMediaQuery = null;
   compactMobileMediaQuery = null;
 });
 
 const metadata = computed(() => snapshot.value?.metadata ?? null);
 const battleFestivalData = computed(() => props.pageKind === "battleFestival" ? snapshot.value?.battleFestival ?? null : null);
+const showBattleFestivalRefreshPanel = computed(() => props.pageKind === "battleFestival");
+const latestBattleFestivalUpload = computed(() => latestBattleFestivalUploadFromStatus(refreshStatus.value));
+const battleFestivalRefreshRunning = computed(() => refreshStatus.value?.refresh?.status === "running");
+const snapshotUpdatedLabel = computed(() => metadata.value?.updatedAt ? `快照更新 ${dateTime(metadata.value.updatedAt)}` : "");
+const latestBattleFestivalUploadLabel = computed(() => {
+  const upload = latestBattleFestivalUpload.value;
+  if (!upload) return "";
+  const matchCount = upload.importedMatchCount ?? upload.matchCount;
+  return `#${upload.id} battle_festival / ${integer(matchCount)} 场 / ${upload.status || "-"}`;
+});
 const battleCampOptions = computed(() => battleFestivalData.value?.campShare ?? []);
 const battleFestivalMeritSummary = computed(() => battleFestivalData.value?.meritSummary ?? null);
 const battleFestivalMeritRows = computed(() => battleFestivalData.value?.meritRows ?? []);
@@ -423,6 +525,15 @@ function switchClusterVariant(deck: TierListRow): void {
             <span>{{ dateOnly(metadata.dateFrom) }} - {{ dateOnly(metadata.dateTo) }}</span>
             <span>样本 {{ integer(metadata.sampleSize) }}</span>
           </p>
+          <div v-if="showBattleFestivalRefreshPanel" class="TierPage_RefreshPanel" aria-label="战祭数据刷新状态">
+            <span v-if="snapshotUpdatedLabel">{{ snapshotUpdatedLabel }}</span>
+            <span v-if="latestBattleFestivalUploadLabel">{{ latestBattleFestivalUploadLabel }}</span>
+            <span v-if="battleFestivalRefreshRunning" data-tone="warn">数据刷新中</span>
+            <span v-if="snapshotRefreshError || refreshStatusError" data-tone="error">{{ snapshotRefreshError || refreshStatusError }}</span>
+            <button class="TierPage_RefreshButton" type="button" :disabled="snapshotRefreshing" @click="manualRefreshSnapshot">
+              {{ snapshotRefreshing ? "刷新中" : "刷新" }}
+            </button>
+          </div>
         </div>
         <div v-if="topDeck" class="TierPage_Leader">
           <span>当前筛选第一</span>
@@ -797,6 +908,59 @@ function switchClusterVariant(deck: TierListRow): void {
   font-family: var(--font-control);
   font-size: 14px;
   font-weight: 700;
+}
+
+.TierPage_RefreshPanel {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-muted);
+  font-family: var(--font-control);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.TierPage_RefreshPanel span {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-panel);
+}
+
+.TierPage_RefreshPanel span[data-tone="warn"] {
+  color: var(--color-primary);
+  border-color: color-mix(in srgb, var(--color-primary) 48%, var(--color-border));
+}
+
+.TierPage_RefreshPanel span[data-tone="error"] {
+  color: var(--color-red);
+  border-color: color-mix(in srgb, var(--color-red) 46%, var(--color-border));
+}
+
+.TierPage_RefreshButton {
+  min-height: 28px;
+  padding: 0 12px;
+  border: 1px solid rgba(185, 133, 36, 0.58);
+  color: #76521c;
+  background: #fff4d9;
+  font-family: var(--font-control);
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.TierPage_RefreshButton:hover {
+  border-color: rgba(185, 133, 36, 0.78);
+  background: #fff4d9;
+}
+
+.TierPage_RefreshButton:disabled {
+  cursor: wait;
+  opacity: 0.62;
 }
 
 /* 当前筛选第一提示卡。 */

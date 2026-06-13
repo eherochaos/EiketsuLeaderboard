@@ -19,8 +19,14 @@ function pageErrorLabel(pageKind: TierListPageKind): string {
   return pageKind === "battleFestival" ? "战祭数据" : "TierList 数据";
 }
 
+function freshUrl(value: string): string {
+  const url = new URL(value, window.location.origin);
+  url.searchParams.set("_ts", String(Date.now()));
+  return url.toString();
+}
+
 export async function loadTierListSnapshot(pageKind: TierListPageKind = "tierList"): Promise<TierListSnapshot> {
-  const response = await fetch(pageSnapshotUrl(pageKind));
+  const response = await fetch(freshUrl(pageSnapshotUrl(pageKind)), { cache: "no-store" });
 
   if (!response.ok) {
     throw new Error(`${pageErrorLabel(pageKind)}读取失败：${response.status}`);
@@ -37,7 +43,8 @@ export async function loadTierListDeckConfig(
   const url = new URL(pageDeckConfigUrl(pageKind), window.location.origin);
   url.searchParams.set("scope", scope);
   url.searchParams.set("deckId", deckId);
-  const response = await fetch(url.toString());
+  url.searchParams.set("_ts", String(Date.now()));
+  const response = await fetch(url.toString(), { cache: "no-store" });
 
   if (!response.ok) {
     throw new Error(`配置情报读取失败：${response.status}`);
