@@ -10,9 +10,10 @@ from sqlalchemy.orm import Session
 
 from eiketsu_env.config import Settings
 from eiketsu_env.db.base import Base
-from eiketsu_env.db.models import RawSnapshot
+from eiketsu_env.db.models import CollectionRun, Match, RawSnapshot
 from eiketsu_env.db.session import make_engine
 from eiketsu_env.services import client_upload
+from eiketsu_env.services import collector
 from eiketsu_env.services.battle_festival import BattleFestivalPeriod, BattleFestivalProbeResult
 from eiketsu_env.services.client_upload import (
     apply_client_date_override,
@@ -66,6 +67,24 @@ def _detail() -> dict:
             }
         ],
     }
+
+
+def _detail_for(
+    mode: str,
+    version: str,
+    detail_url: str,
+    replay_id: str,
+    played_at: str = "2026-05-11 12:34",
+) -> dict:
+    detail = json.loads(json.dumps(_detail()))
+    detail["mode"] = mode
+    detail["version"] = version
+    detail["detail_url"] = detail_url
+    detail["url"] = detail_url
+    detail["replay_id"] = replay_id
+    detail["played_at"] = played_at
+    detail["date"] = played_at
+    return detail
 
 
 @pytest.fixture(autouse=True)
@@ -276,6 +295,7 @@ def test_sync_client_collects_and_uploads_active_battle_festival_scope(tmp_path,
     assert manifests[0]["mode_scope"] == MODE_SCOPE_BATTLE_FESTIVAL
     assert manifests[0]["festival_date_from"] == "2026-06-11"
     assert manifests[0]["festival_date_to"] == "2026-06-13"
+    assert manifests[0]["match_count"] == 0
     assert manifests[1]["mode_scope"] == MODE_SCOPE_TIER_LIST
 
 
@@ -315,6 +335,159 @@ def test_sync_client_reports_battle_festival_probe_failure(tmp_path, monkeypatch
     assert result.battle_festival_upload is None
     assert any("登录态无效" in message for message in progress.messages)
     assert any("保持" in message for message in progress.messages)
+    assert any("battle_festival 采集未启动" in message for message in progress.messages)
+    assert len(transport.upload_payloads) == 1
+    manifest = json.loads(transport.upload_payloads[0]["package_text"].splitlines()[0])
+    assert manifest["mode_scope"] == MODE_SCOPE_TIER_LIST
+
+
+def test_sync_client_fallback_uses_history_daily_when_festival_probe_redirects(tmp_path, monkeypatch):
+    monkeypatch.setenv("EIKETSU_CLIENT_CONFIG_DIR", str(tmp_path / "client-config"))
+    settings = _settings(tmp_path)
+    save_client_config(
+        settings,
+        client_upload.ClientConfig(
+            server_url="http://127.0.0.1:8000",
+            api_token="token-secret",
+            contributor="alice",
+            user_public_id="u_test",
+        ),
+    )
+    transport = _FakeTransport()
+    progress = _FakeProgress()
+    battle_mode = "\u6226\u796d\u308a"
+    tier_mode = "\u5168\u56fd\u5bfe\u6226"
+
+    class FakeMember:
+        def fetch_text(self, url, referer=None):
+            return f"<html>{url}</html>", url
+
+    def fake_daily(html, url, base_url, iso_date, player):
+        day_key = iso_date.replace("-", "")
+        return [
+            {
+                "detail_url": f"https://eiketsu-taisen.net/members/history/detail?f=586&d={day_key}01",
+                "follow_id": "586",
+                "mode": tier_mode,
+                "played_at": f"{iso_date} 10:00",
+            },
+            {
+                "detail_url": f"https://eiketsu-taisen.net/members/history/detail?f=586&d={day_key}02",
+                "follow_id": "586",
+                "mode": battle_mode,
+                "played_at": f"{iso_date} 11:00",
+            },
+        ]
+
+    def fake_detail(html, url, base_url, seed):
+        mode = str(seed["mode"])
+        replay_prefix = "battle" if mode == battle_mode else "tier"
+        return _detail_for(
+            mode,
+            "Ver.battle",
+            str(seed["detail_url"]),
+            f"{replay_prefix}-{seed['played_at']}",
+            str(seed["played_at"]),
+        )
+
+    monkeypatch.setattr(
+        client_upload,
+        "probe_battle_festival_period",
+        lambda *args, **kwargs: BattleFestivalProbeResult(None, "redirected", "festival probe redirected"),
+    )
+    monkeypatch.setattr(client_upload, "today_jst", lambda: date(2026, 6, 13))
+    monkeypatch.setattr(collector, "create_member_session", lambda *args, **kwargs: FakeMember())
+    monkeypatch.setattr(collector, "parse_follow_html", lambda html, url, base_url: [{"follow_id": "586", "name": "A"}])
+    monkeypatch.setattr(collector, "parse_follow_api_json", lambda payload, base_url: [])
+    monkeypatch.setattr(collector, "parse_daily_html", fake_daily)
+    monkeypatch.setattr(collector, "parse_detail_html", fake_detail)
+
+    result = sync_client(
+        settings,
+        interactive_auth=False,
+        transport=transport,
+        target_version="Ver.battle",
+        progress=progress,
+    )
+
+    assert result.battle_festival_upload is not None
+    assert len(transport.upload_payloads) == 2
+    battle_lines = [json.loads(line) for line in transport.upload_payloads[0]["package_text"].splitlines()]
+    tier_lines = [json.loads(line) for line in transport.upload_payloads[1]["package_text"].splitlines()]
+    assert battle_lines[0]["mode_scope"] == MODE_SCOPE_BATTLE_FESTIVAL
+    assert battle_lines[0]["festival_date_from"] == "2026-06-11"
+    assert battle_lines[0]["festival_date_to"] == "2026-06-13"
+    assert battle_lines[0]["match_count"] == 3
+    assert all(record["mode"] == battle_mode for record in battle_lines[1:])
+    assert tier_lines[0]["mode_scope"] == MODE_SCOPE_TIER_LIST
+    assert all(record["mode"] == tier_mode for record in tier_lines[1:])
+    assert any("history_fallback" in message for message in progress.messages)
+    assert any("戦祭り seeds 3" in message for message in progress.messages)
+    assert any("battle_festival 上传场数：3" in message for message in progress.messages)
+
+    engine = make_engine(settings)
+    with Session(engine) as session:
+        runs = session.query(CollectionRun).order_by(CollectionRun.id).all()
+        assert any(run.scope_json.get("mode_scope") == MODE_SCOPE_BATTLE_FESTIVAL for run in runs)
+        assert session.query(Match).filter_by(mode=battle_mode).count() == 3
+
+
+def test_sync_client_continues_tier_list_when_battle_festival_collect_fails(tmp_path, monkeypatch):
+    monkeypatch.setenv("EIKETSU_CLIENT_CONFIG_DIR", str(tmp_path / "client-config"))
+    settings = _settings(tmp_path)
+    save_client_config(
+        settings,
+        client_upload.ClientConfig(
+            server_url="http://127.0.0.1:8000",
+            api_token="token-secret",
+            contributor="alice",
+            user_public_id="u_test",
+        ),
+    )
+    transport = _FakeTransport()
+    progress = _FakeProgress()
+    tier_mode = "\u5168\u56fd\u5bfe\u6226"
+    calls = 0
+
+    def fake_collect(settings, date_from, date_to, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("battle collect failed")
+        engine = make_engine(settings)
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            repo = EnvRepository(session, settings)
+            repo.upsert_match_detail(
+                _detail_for(
+                    tier_mode,
+                    "Ver.battle",
+                    "https://eiketsu-taisen.net/members/history/detail?f=586&d=tier",
+                    "tier-after-battle-failure",
+                    "2026-06-12 10:00",
+                )
+            )
+            session.commit()
+        return CollectResult(2, "completed", {"matches": 1}, [])
+
+    monkeypatch.setattr(client_upload, "collect_follow", fake_collect)
+    monkeypatch.setattr(
+        client_upload,
+        "probe_battle_festival_period",
+        lambda *args, **kwargs: BattleFestivalProbeResult(
+            BattleFestivalPeriod("2026-06-11", "2026-06-13"),
+            "active",
+            "festival active",
+        ),
+    )
+    monkeypatch.setattr(client_upload, "today_jst", lambda: date(2026, 6, 12))
+
+    result = sync_client(settings, interactive_auth=False, transport=transport, target_version="Ver.battle", progress=progress)
+
+    assert result.battle_festival_upload is None
+    assert result.upload["status"] == "completed"
+    assert calls == 2
+    assert any("battle_festival 采集失败" in message for message in progress.messages)
     assert len(transport.upload_payloads) == 1
     manifest = json.loads(transport.upload_payloads[0]["package_text"].splitlines()[0])
     assert manifest["mode_scope"] == MODE_SCOPE_TIER_LIST
@@ -435,6 +608,22 @@ class _FakeProgress:
 
     def message(self, text: str) -> None:
         self.messages.append(text)
+
+    def task(self, label: str, total: int):
+        return _FakeTask(label, total)
+
+
+class _FakeTask:
+    def __init__(self, label: str, total: int) -> None:
+        self.label = label
+        self.total = total
+        self.advanced = 0
+
+    def advance(self, suffix: str = "") -> None:
+        self.advanced += 1
+
+    def finish(self, suffix: str = "") -> None:
+        return None
 
 
 class _FakeTransport:
