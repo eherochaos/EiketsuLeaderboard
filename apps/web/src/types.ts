@@ -36,6 +36,7 @@ export type {
 } from "../../../packages/contracts/match-search.js";
 
 export type {
+  BattleFestivalMeritDeck,
   BattleFestivalMeritRow,
   BattleFestivalMeritSummary,
   TierListClusterVariant,

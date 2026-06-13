@@ -85,11 +85,10 @@ function emptyBattleFestivalSnapshot(fallbackSnapshot) {
       meritSummary: {
         observedPlayerCount: 0,
         meritPlayerCount: 0,
-        rankedPlayerCount: 0,
-        singleSamplePlayerCount: 0,
         meritSampleCount: 0,
-        maxMeritDelta: 0,
-        topPlayerName: ""
+        highestMerit: 0,
+        topPlayerName: "",
+        observedMatchCount: 0
       }
     }
   };

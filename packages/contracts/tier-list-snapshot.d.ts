@@ -20,34 +20,43 @@ export interface BattleFestivalCampRows {
   clusterRows: TierListRow[];
 }
 
-export type BattleFestivalMeritConfidence = "high" | "medium" | "single";
+export interface BattleFestivalMeritDeck {
+  deckId: string;
+  deckName: string;
+  faction: string;
+  sampleSize: number;
+  winCount: number;
+  lossCount: number;
+  drawCount: number;
+  unknownCount: number;
+  winRate: number;
+  deckCards: CardView[];
+}
 
 export interface BattleFestivalMeritRow {
   playerName: string;
   camp: string;
   firstSeenAt: string;
   lastSeenAt: string;
-  firstMerit: number;
-  lastMerit: number;
-  maxMerit: number;
-  meritDelta: number;
+  highestMerit: number;
+  highestMeritSeenAt: string;
   meritSampleCount: number;
   observedMatchCount: number;
   winCount: number;
   lossCount: number;
   drawCount: number;
   unknownCount: number;
-  confidence: BattleFestivalMeritConfidence;
+  winRate: number;
+  decks: BattleFestivalMeritDeck[];
 }
 
 export interface BattleFestivalMeritSummary {
   observedPlayerCount: number;
   meritPlayerCount: number;
-  rankedPlayerCount: number;
-  singleSamplePlayerCount: number;
   meritSampleCount: number;
-  maxMeritDelta: number;
+  highestMerit: number;
   topPlayerName: string;
+  observedMatchCount: number;
 }
 
 export interface BattleFestivalSnapshotData {
