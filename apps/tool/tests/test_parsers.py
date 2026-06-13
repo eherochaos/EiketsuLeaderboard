@@ -236,6 +236,48 @@ def test_parse_battle_festival_detail_keeps_merit_separate_from_odds():
     assert detail["players"][1]["profile"]["戦功オッズ"] == "×1.0"
 
 
+def test_parse_battle_festival_detail_reads_player_merit_from_heading_dd():
+    seed = {
+        "detail_url": "https://eiketsu-taisen.net/members/history/detail?t=1773932045&f=586",
+        "played_at": "2026-06-13 22:10",
+        "mode": "戦祭り",
+        "result": "win",
+        "follow_id": "586",
+        "player_name": "模範証言",
+        "opponent_name": "咳しても一人",
+        "castle_rates": ["82.00%", "0.00%"],
+    }
+    html = DETAIL_HTML.replace("全国対戦 Ver.3.1.0H", "戦祭り Ver.3.5.0B").replace(
+        '<div class="p-detail__score-box"><dt>証</dt><dd>十二</dd></div>',
+        (
+            '<div class="p-detail__score-box">'
+            '<dd class="heading_3 mincho">戦功</dd>'
+            '<div class="ta_r"><span class="p-detail__number--lg p-detail__number--pl">287963</span></div>'
+            '</div>'
+            '<div class="p-detail__score-box p-detail__score-box--dbl odds full">'
+            '<dt class="heading_3 mincho">戦功オッズ</dt>'
+            '<dd class="ta_r"><span class="p-detail__number--lg p-detail__number--pl">×1.1</span></dd>'
+            '</div>'
+        ),
+    ).replace(
+        '<section class="p-detail--enemy"></section>',
+        (
+            '<section class="p-detail--enemy">'
+            '<div class="p-detail__score-box">'
+            '<dt class="heading_3 mincho">戦功</dt>'
+            '<dd class="ta_r"><span class="p-detail__number--lg">28920</span></dd>'
+            '</div>'
+            '</section>'
+        ),
+    )
+
+    detail = parse_detail_html(html, seed["detail_url"], "https://eiketsu-taisen.net", seed)
+
+    assert detail["players"][0]["profile"]["戦功"] == "287963"
+    assert detail["players"][0]["profile"]["戦功オッズ"] == "×1.1"
+    assert detail["players"][1]["profile"]["戦功"] == "28920"
+
+
 def test_parse_replay_html_extracts_replay_id_and_decks():
     parsed = parse_replay_html(REPLAY_HTML, "https://example.test/local.html", "https://eiketsu-taisen.net")
 
