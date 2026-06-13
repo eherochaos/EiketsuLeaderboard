@@ -315,6 +315,50 @@ def test_sync_client_collects_and_uploads_active_battle_festival_scope(tmp_path,
     assert manifests[1]["mode_scope"] == MODE_SCOPE_TIER_LIST
 
 
+def test_battle_festival_plan_collects_past_official_period_when_range_intersects():
+    config = client_upload.ShareConfig(target_version="Ver.3.5.0B", date_from="2026-06-13", date_to="2026-06-13")
+    probe = BattleFestivalProbeResult(
+        BattleFestivalPeriod("2026-06-11", "2026-06-13"),
+        "inactive",
+        "festival ended",
+    )
+
+    plan = client_upload.battle_festival_collect_plan(config, probe, current_day=date(2026, 6, 14))
+
+    assert plan.config is not None
+    assert plan.source == "official_period"
+    assert plan.upload_when_empty is True
+    assert plan.config.mode_scope == MODE_SCOPE_BATTLE_FESTIVAL
+    assert plan.config.date_from == "2026-06-13"
+    assert plan.config.date_to == "2026-06-13"
+    assert plan.config.festival_date_from == "2026-06-11"
+    assert plan.config.festival_date_to == "2026-06-13"
+
+
+def test_battle_festival_plan_fallback_collects_recent_past_range_after_probe_failure():
+    config = client_upload.ShareConfig(target_version="Ver.3.5.0B", date_from="2026-06-13", date_to="2026-06-13")
+    probe = BattleFestivalProbeResult(None, "redirected", "festival probe redirected")
+
+    plan = client_upload.battle_festival_collect_plan(config, probe, current_day=date(2026, 6, 14))
+
+    assert plan.config is not None
+    assert plan.source == "history_fallback"
+    assert plan.upload_when_empty is False
+    assert plan.config.mode_scope == MODE_SCOPE_BATTLE_FESTIVAL
+    assert plan.config.date_from == "2026-06-13"
+    assert plan.config.date_to == "2026-06-13"
+
+
+def test_battle_festival_plan_fallback_skips_outside_recent_range_after_probe_failure():
+    config = client_upload.ShareConfig(target_version="Ver.3.5.0B", date_from="2026-06-10", date_to="2026-06-11")
+    probe = BattleFestivalProbeResult(None, "redirected", "festival probe redirected")
+
+    plan = client_upload.battle_festival_collect_plan(config, probe, current_day=date(2026, 6, 14))
+
+    assert plan.config is None
+    assert plan.source == "outside_sync_window"
+
+
 def test_sync_client_reports_battle_festival_probe_failure(tmp_path, monkeypatch):
     monkeypatch.setenv("EIKETSU_CLIENT_CONFIG_DIR", str(tmp_path / "client-config"))
     settings = _settings(tmp_path)

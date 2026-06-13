@@ -396,14 +396,30 @@ def battle_festival_share_config_from_period(
         return None
     assert period is not None
     collect_to = min(period.date_to, current_day.isoformat())
+    return _battle_festival_share_config_for_window(
+        base_config,
+        date_from=period.date_from,
+        date_to=collect_to,
+        festival_date_from=period.date_from,
+        festival_date_to=period.date_to,
+    )
+
+
+def _battle_festival_share_config_for_window(
+    base_config: ShareConfig,
+    date_from: str,
+    date_to: str,
+    festival_date_from: str,
+    festival_date_to: str,
+) -> ShareConfig:
     battle_config = ShareConfig(
         schema_version=base_config.schema_version,
         target_version=base_config.target_version,
-        date_from=period.date_from,
-        date_to=collect_to,
+        date_from=date_from,
+        date_to=date_to,
         mode_scope=MODE_SCOPE_BATTLE_FESTIVAL,
-        festival_date_from=period.date_from,
-        festival_date_to=period.date_to,
+        festival_date_from=festival_date_from,
+        festival_date_to=festival_date_to,
         include_solo=False,
         include_battle_festival=True,
         high_ranker_rank=base_config.high_ranker_rank,
@@ -420,35 +436,34 @@ def battle_festival_collect_plan(
     current_day: date | None = None,
 ) -> BattleFestivalCollectPlan:
     current_day = current_day or today_jst()
-    official_config = battle_festival_share_config_from_period(base_config, probe.period, current_day=current_day)
-    if official_config is not None:
-        return BattleFestivalCollectPlan(official_config, "official_period", True, "官方战祭周期已开启")
-
-    if probe.period is not None:
-        return BattleFestivalCollectPlan(None, "official_inactive", False, "官方战祭周期当前未开启")
-
     current = current_day.isoformat()
-    if not (base_config.date_from <= current <= base_config.date_to):
-        return BattleFestivalCollectPlan(None, "outside_sync_window", False, "采集范围未覆盖今天")
+    if probe.period is not None:
+        date_from = max(base_config.date_from, probe.period.date_from)
+        date_to = min(base_config.date_to, probe.period.date_to, current)
+        if date_from <= date_to:
+            official_config = _battle_festival_share_config_for_window(
+                base_config,
+                date_from=date_from,
+                date_to=date_to,
+                festival_date_from=probe.period.date_from,
+                festival_date_to=probe.period.date_to,
+            )
+            return BattleFestivalCollectPlan(official_config, "official_period", True, "官方战祭周期已匹配采集范围")
+        return BattleFestivalCollectPlan(None, "official_inactive", False, "官方战祭周期未覆盖采集范围")
 
     fallback_from = (current_day - timedelta(days=2)).isoformat()
     date_from = max(base_config.date_from, fallback_from)
     date_to = min(base_config.date_to, current)
-    fallback_config = ShareConfig(
-        schema_version=base_config.schema_version,
-        target_version=base_config.target_version,
+    if date_from > date_to:
+        return BattleFestivalCollectPlan(None, "outside_sync_window", False, "采集范围未覆盖战祭补采窗口")
+
+    fallback_config = _battle_festival_share_config_for_window(
+        base_config,
         date_from=date_from,
         date_to=date_to,
-        mode_scope=MODE_SCOPE_BATTLE_FESTIVAL,
         festival_date_from=date_from,
         festival_date_to=date_to,
-        include_solo=False,
-        include_battle_festival=True,
-        high_ranker_rank=base_config.high_ranker_rank,
-        report_formats=list(base_config.report_formats),
-        reports=list(base_config.reports),
     )
-    fallback_config.validate()
     return BattleFestivalCollectPlan(
         fallback_config,
         "history_fallback",

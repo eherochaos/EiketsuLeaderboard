@@ -207,8 +207,12 @@ def _parse_score_box(scope: Tag | None) -> dict[str, str]:
     result: dict[str, str] = {}
     selectors = ".p-detail__score-box, .p-detail__score-box--dbl, .p-detail__score-box--3prts, .p-detail-skill"
     for box in scope.select(selectors):
-        label = _text(box.select_one("dt"))
-        value = _text(box.select_one("dd")) or _text(box)
+        label_node = box.select_one("dt") or box.select_one("dd.heading_3.mincho")
+        label = _text(label_node)
+        value_node = box.select_one(".ta_r")
+        if value_node is None and label_node is not None and label_node.name != "dd":
+            value_node = box.select_one("dd")
+        value = _text(value_node) or _text(box)
         if label and value.startswith(label):
             value = value[len(label) :].strip()
         if label:
