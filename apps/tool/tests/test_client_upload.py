@@ -234,6 +234,7 @@ def test_sync_client_collects_and_uploads_active_battle_festival_scope(tmp_path,
         ),
     )
     transport = _FakeTransport()
+    progress = _FakeProgress()
     seen_calls: list[tuple[str, str, dict[str, Any]]] = []
 
     def fake_collect(settings, date_from, date_to, **kwargs):
@@ -249,15 +250,16 @@ def test_sync_client_collects_and_uploads_active_battle_festival_scope(tmp_path,
         lambda *args, **kwargs: BattleFestivalProbeResult(
             BattleFestivalPeriod("2026-06-11", "2026-06-13"),
             "active",
-            "active battle festival",
+            "检测到战祭周期 2026-06-11 - 2026-06-13（浏览器上下文）",
         ),
     )
     monkeypatch.setattr(client_upload, "today_jst", lambda: date(2026, 6, 12))
 
-    result = sync_client(settings, interactive_auth=False, transport=transport, target_version="Ver.battle")
+    result = sync_client(settings, interactive_auth=False, transport=transport, target_version="Ver.battle", progress=progress)
 
     assert result.battle_festival_collect_result is not None
     assert result.battle_festival_upload is not None
+    assert any("浏览器上下文" in message for message in progress.messages)
     assert [(date_from, date_to) for date_from, date_to, _ in seen_calls] == [
         ("2026-06-11", "2026-06-12"),
         ("2026-06-10", "2026-06-14"),

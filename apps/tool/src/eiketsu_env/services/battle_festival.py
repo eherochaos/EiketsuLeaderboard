@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
 from eiketsu_env.config import Settings
-from eiketsu_env.services.browser_session import create_member_session
+from eiketsu_env.services.browser_session import BrowserPageResult, create_member_session, fetch_live_browser_page
 from eiketsu_env.utils import JST
 
 
@@ -103,29 +103,54 @@ def probe_battle_festival_period(
             message=f"战祭探测失败：无法读取会员登录态（{exc}）",
         )
 
+    festival_url = f"{settings.base_url}/members/festival/"
+    page_source = "http"
     try:
-        html, final_url = member.fetch_text(f"{settings.base_url}/members/festival/", timeout=20)
+        html, final_url = member.fetch_text(festival_url, timeout=20)
     except Exception as exc:  # noqa: BLE001
-        return BattleFestivalProbeResult(
-            period=None,
-            status="fetch_failed",
-            message=f"战祭探测失败：无法读取战祭页面（{exc}）",
-        )
+        live_page, live_error = _try_live_browser_festival_page(settings, member, auth_source, festival_url)
+        if live_page is None:
+            suffix = f"；浏览器上下文读取也失败：{live_error}" if live_error else ""
+            return BattleFestivalProbeResult(
+                period=None,
+                status="fetch_failed",
+                message=f"战祭探测失败：无法读取战祭页面（{exc}）{suffix}",
+            )
+        html = live_page.html
+        final_url = live_page.final_url
+        page_source = "browser"
 
     final_url_text = str(final_url or "")
     final_path = urlparse(final_url_text).path.rstrip("/").lower()
     if final_path != "/members/festival":
+        live_error = ""
+        if page_source != "browser":
+            live_page, live_error = _try_live_browser_festival_page(settings, member, auth_source, festival_url)
+            if live_page is not None:
+                html = live_page.html
+                final_url_text = live_page.final_url
+                final_path = urlparse(final_url_text).path.rstrip("/").lower()
+                page_source = "browser"
+        if final_path == "/members/festival":
+            return _probe_battle_festival_html(html, final_url_text, page_source)
+        live_suffix = f" 浏览器上下文也失败：{live_error}" if live_error else ""
         return BattleFestivalProbeResult(
             period=None,
             status="redirected",
             message=(
                 "战祭探测失败：会员战祭页跳转到首页或登录页，"
                 "当前登录态无效或不是程序打开的登录窗口。"
+                f"最终 URL：{final_url_text}。"
+                f"{live_suffix}"
                 "请点击“打开登录页”完成会员区登录，并保持该 Chrome/Edge/Brave 窗口打开直到同步完成。"
             ),
             final_url=final_url_text,
         )
 
+    return _probe_battle_festival_html(html, final_url_text, page_source)
+
+
+def _probe_battle_festival_html(html: str, final_url_text: str, page_source: str = "http") -> BattleFestivalProbeResult:
     period = parse_battle_festival_period(html)
     if period is None:
         status = _classify_missing_period_status(html)
@@ -152,9 +177,25 @@ def probe_battle_festival_period(
     return BattleFestivalProbeResult(
         period=period,
         status="active",
-        message=f"检测到战祭周期 {period.date_from} - {period.date_to}",
+        message=f"检测到战祭周期 {period.date_from} - {period.date_to}" + ("（浏览器上下文）" if page_source == "browser" else ""),
         final_url=final_url_text,
     )
+
+
+def _try_live_browser_festival_page(
+    settings: Settings,
+    member: Any,
+    auth_source: str,
+    festival_url: str,
+) -> tuple[BrowserPageResult | None, str]:
+    cookie_result = getattr(member, "cookie_result", None)
+    if not bool(getattr(cookie_result, "is_live", False)):
+        return None, ""
+    source = str(getattr(cookie_result, "source", "") or auth_source or "")
+    try:
+        return fetch_live_browser_page(settings, source, festival_url), ""
+    except Exception as exc:  # noqa: BLE001 - HTTP 路径失败后保留可读诊断。
+        return None, str(exc)
 
 
 def is_battle_festival_active(period: BattleFestivalPeriod | None, today: date | None = None) -> bool:

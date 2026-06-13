@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from datetime import date
+from http.cookiejar import CookieJar
 from pathlib import Path
 
 from eiketsu_env.config import Settings
+from eiketsu_env.services import battle_festival
 from eiketsu_env.services.battle_festival import (
     BattleFestivalPeriod,
     detect_battle_festival_period,
@@ -11,6 +13,7 @@ from eiketsu_env.services.battle_festival import (
     parse_battle_festival_period,
     probe_battle_festival_period,
 )
+from eiketsu_env.services.browser_session import BrowserCookieResult, BrowserPageResult
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -77,6 +80,53 @@ def test_probe_battle_festival_period_reports_active(tmp_path, monkeypatch):
 
     assert result.period == BattleFestivalPeriod("2026-06-11", "2026-06-13")
     assert result.status == "active"
+
+
+def test_probe_battle_festival_period_uses_live_browser_when_http_redirects(tmp_path, monkeypatch):
+    class FakeMember:
+        cookie_result = BrowserCookieResult("chrome", tmp_path / "profile", CookieJar(), 1, "ok", is_live=True)
+
+        def fetch_text(self, url, timeout=20):
+            return "<html>home</html>", "https://eiketsu-taisen.net/"
+
+    monkeypatch.setattr(
+        battle_festival,
+        "fetch_live_browser_page",
+        lambda _settings, _source, _url: BrowserPageResult(
+            "chrome",
+            "https://eiketsu-taisen.net/members/festival/",
+            "<html><body><p>戦祭り 開催期間 2026年6月11日 ～ 6月13日</p></body></html>",
+        ),
+    )
+    monkeypatch.setattr("eiketsu_env.services.battle_festival.today_jst", lambda: date(2026, 6, 12))
+
+    result = probe_battle_festival_period(_settings(tmp_path), auth_source="chrome", member_session=FakeMember())
+
+    assert result.period == BattleFestivalPeriod("2026-06-11", "2026-06-13")
+    assert result.status == "active"
+    assert result.final_url == "https://eiketsu-taisen.net/members/festival/"
+    assert "浏览器上下文" in result.message
+
+
+def test_probe_battle_festival_period_reports_live_browser_redirect(tmp_path, monkeypatch):
+    class FakeMember:
+        cookie_result = BrowserCookieResult("chrome", tmp_path / "profile", CookieJar(), 1, "ok", is_live=True)
+
+        def fetch_text(self, url, timeout=20):
+            return "<html>home</html>", "https://eiketsu-taisen.net/"
+
+    monkeypatch.setattr(
+        battle_festival,
+        "fetch_live_browser_page",
+        lambda _settings, _source, _url: BrowserPageResult("chrome", "https://eiketsu-taisen.net/", "<html>home</html>"),
+    )
+
+    result = probe_battle_festival_period(_settings(tmp_path), auth_source="chrome", member_session=FakeMember())
+
+    assert result.period is None
+    assert result.status == "redirected"
+    assert result.final_url == "https://eiketsu-taisen.net/"
+    assert "最终 URL：https://eiketsu-taisen.net/" in result.message
 
 
 def test_probe_battle_festival_period_reports_no_period(tmp_path):
