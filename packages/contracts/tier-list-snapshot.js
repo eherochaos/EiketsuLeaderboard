@@ -8,6 +8,7 @@ const TIER_LIST_SNAPSHOT_ROOT_FIELDS = Object.freeze([
   "metadata",
   "tierRows",
   "clusterRows",
+  "battleFestival",
 ]);
 
 const TIER_LIST_DECK_CONFIG_FIELDS = Object.freeze([

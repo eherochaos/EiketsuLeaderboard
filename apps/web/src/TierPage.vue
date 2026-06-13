@@ -25,6 +25,7 @@ const VISIBLE_ROWS_STEP = 100;
 const snapshot = ref<TierListSnapshot | null>(null);
 const loading = ref(true);
 const error = ref("");
+const battleCampFilter = ref("all");
 const factionFilter = ref("all");
 const sourceFilter = ref("all");
 const sortKey = ref<SortKey>("rankScore");
@@ -110,12 +111,24 @@ onBeforeUnmount(() => {
   compactMobileMediaQuery = null;
 });
 
-const rows = computed(() => snapshot.value?.tierRows ?? []);
-const clusterRows = computed(() => snapshot.value?.clusterRows ?? []);
 const metadata = computed(() => snapshot.value?.metadata ?? null);
+const battleFestivalData = computed(() => props.pageKind === "battleFestival" ? snapshot.value?.battleFestival ?? null : null);
+const battleCampOptions = computed(() => battleFestivalData.value?.campShare ?? []);
+const showBattleCampFilter = computed(() => props.pageKind === "battleFestival" && battleCampOptions.value.length > 0);
+const battleCampRows = computed(() => {
+  if (battleCampFilter.value === "all") return null;
+  return battleFestivalData.value?.rowsByCamp?.[battleCampFilter.value] ?? { tierRows: [], clusterRows: [] };
+});
+const rows = computed(() => battleCampRows.value?.tierRows ?? snapshot.value?.tierRows ?? []);
+const clusterRows = computed(() => battleCampRows.value?.clusterRows ?? snapshot.value?.clusterRows ?? []);
 const factions = computed(() => {
   const values = new Set([...rows.value, ...clusterRows.value].map((row) => row.faction).filter(Boolean));
   return Array.from(values).sort((left, right) => left.localeCompare(right, "ja"));
+});
+
+watch(battleCampOptions, (options) => {
+  if (battleCampFilter.value === "all") return;
+  if (!options.some((option) => option.camp === battleCampFilter.value)) battleCampFilter.value = "all";
 });
 
 function compareRows(left: TierListRow, right: TierListRow): number {
@@ -158,9 +171,10 @@ const filterCountLabel = computed(() => {
 
 const topDeck = computed(() => visibleRows.value[0] ?? null);
 
-watch([factionFilter, sourceFilter, sortKey, clusterSameName], () => {
+watch([battleCampFilter, factionFilter, sourceFilter, sortKey, clusterSameName], () => {
   visibleRowLimit.value = INITIAL_VISIBLE_ROWS;
   trackSiteEvent("filter_change", pageCopy.value.analyticsPage, {
+    battleCamp: battleCampFilter.value,
     faction: factionFilter.value,
     source: sourceFilter.value,
     sortKey: sortKey.value,
@@ -256,10 +270,19 @@ function factionLabel(value: string): string {
   return value === "unknown" ? "未识别" : value;
 }
 
+function battleCampLabel(deck: TierListRow): string {
+  return activeClusterVariant(deck)?.battleCamp || deck.battleCamp || "";
+}
+
 function deckSubtitle(deck: TierListRow): string {
   const parts = [factionLabel(deck.faction)];
   if (deck.categoryName && deck.categoryName !== deck.deckName) parts.push(deck.categoryName);
   return parts.join(" · ");
+}
+
+function mobileDeckSubtitle(deck: TierListRow): string {
+  const camp = battleCampLabel(deck);
+  return camp ? `${camp} · ${deckSubtitle(deck)}` : deckSubtitle(deck);
 }
 
 function displayRowKey(deck: TierListRow): string {
@@ -369,6 +392,15 @@ function switchClusterVariant(deck: TierListRow): void {
           <strong>{{ filterCountLabel }}</strong>
         </button>
         <div id="TierPage_FilterControls" class="TierPage_FilterControls">
+          <label v-if="showBattleCampFilter">
+            阵营
+            <select v-model="battleCampFilter">
+              <option value="all">全部阵营</option>
+              <option v-for="camp in battleCampOptions" :key="camp.camp" :value="camp.camp">
+                {{ camp.camp }}（{{ integer(camp.sampleSize) }}）
+              </option>
+            </select>
+          </label>
           <label>
             势力
             <select v-model="factionFilter">
@@ -433,6 +465,7 @@ function switchClusterVariant(deck: TierListRow): void {
               <td class="Common_RankCell">{{ index + 1 }}</td>
               <td class="TierPage_DeckCell">
                 <div class="TierPage_DeckCellInner">
+                  <span v-if="battleCampLabel(deck)" class="TierPage_CampPill">{{ battleCampLabel(deck) }}</span>
                   <span class="Common_FactionPill">{{ deckSubtitle(deck) }}</span>
                   <div class="TierPage_DeckTitleLine">
                     <strong>{{ deck.deckName }}</strong>
@@ -517,7 +550,7 @@ function switchClusterVariant(deck: TierListRow): void {
                     {{ clusterVariantLabel(deck) }}
                   </button>
                 </div>
-                <p>{{ deckSubtitle(deck) }}</p>
+                <p>{{ mobileDeckSubtitle(deck) }}</p>
                 <small>{{ sourceLabels[deck.namingSource] }}</small>
               </div>
             </div>
@@ -787,11 +820,29 @@ function switchClusterVariant(deck: TierListRow): void {
 /* 卡组文字容器允许省略。 */
 .TierPage_DeckCellInner {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   min-width: 0;
 }
 
 /* 卡组标题行：名称和式样切换按钮同排。 */
+.TierPage_CampPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  height: 28px;
+  margin-bottom: var(--space-xs);
+  padding: 0 var(--space-sm);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 68%, var(--color-border));
+  border-radius: 999px;
+  color: var(--color-surface);
+  background: var(--color-primary);
+  font-family: var(--font-control);
+  font-size: var(--font-size-sm);
+  font-weight: 900;
+}
+
 .TierPage_DeckTitleLine,
 .TierPage_MobileTitleLine {
   display: flex;

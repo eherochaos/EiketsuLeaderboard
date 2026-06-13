@@ -40,7 +40,8 @@ function slimVariant(row) {
     sampleSize: row.sampleSize,
     imageUrl: row.imageUrl,
     imageAlt: row.imageAlt,
-    deckCards: row.deckCards || []
+    deckCards: row.deckCards || [],
+    battleCamp: row.battleCamp
   };
 }
 
@@ -74,6 +75,23 @@ function metadataForConfigs(metadata) {
   };
 }
 
+function slimBattleFestival(value) {
+  if (!value || typeof value !== "object") return undefined;
+  const rowsByCamp = {};
+  const sourceRowsByCamp = value.rowsByCamp && typeof value.rowsByCamp === "object" ? value.rowsByCamp : {};
+  for (const [camp, rows] of Object.entries(sourceRowsByCamp)) {
+    rowsByCamp[camp] = {
+      tierRows: Array.isArray(rows?.tierRows) ? rows.tierRows.map(slimRow) : [],
+      clusterRows: Array.isArray(rows?.clusterRows) ? rows.clusterRows.map(slimRow) : []
+    };
+  }
+  return {
+    camps: Array.isArray(value.camps) ? value.camps : [],
+    campShare: Array.isArray(value.campShare) ? value.campShare : [],
+    rowsByCamp
+  };
+}
+
 export function buildTierListSnapshotFiles(snapshot) {
   if (!snapshot || typeof snapshot !== "object") {
     throw new Error("leaderboard snapshot must be an object");
@@ -88,7 +106,8 @@ export function buildTierListSnapshotFiles(snapshot) {
       schemaVersion: TIER_LIST_SCHEMA_VERSION,
       metadata,
       tierRows: tierRows.map(slimRow),
-      clusterRows: clusterRows.map(slimRow)
+      clusterRows: clusterRows.map(slimRow),
+      battleFestival: slimBattleFestival(snapshot.battleFestival)
     },
     tierListConfigs: {
       schemaVersion: TIER_LIST_SCHEMA_VERSION,

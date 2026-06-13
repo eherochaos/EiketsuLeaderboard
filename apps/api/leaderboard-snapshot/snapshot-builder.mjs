@@ -38,6 +38,8 @@ const CARD_UNIT_TYPE_REPAIRS = {
 };
 
 const OFFICIAL_CARD_TYPE_PREFIXES = new Set(["ST", "EX", "PL"]);
+const OFFICIAL_ASSET_BASE_URL = "https://image.eiketsu-taisen.net/";
+const BATTLE_FESTIVAL_CAMP_KEYS = ["\u6240\u5c5e\u9663\u55b6", "\u6240\u5c5e\u9635\u8425"];
 const BATTLE_FESTIVAL_MODES = new Set(["戦祭り", "戦祭", "戰祭", "战祭"]);
 
 function csvParts(row) {
@@ -254,11 +256,15 @@ function repairCardUnitType(value) {
   return repaired;
 }
 
-function cardImageUrl(card) {
-  // No stable public image template is defined in this repo. Keep URL empty so
-  // the UI uses its fixed text fallback instead of guessing fake card art.
+function fallbackCardSmallUrl(cardId) {
+  const value = String(cardId || "").trim();
+  if (!/^[a-f0-9]{32}$/i.test(value)) return "";
+  return `${OFFICIAL_ASSET_BASE_URL}general/card_small/${encodeURIComponent(value)}.jpg`;
+}
+
+function cardImageUrl(card, cardId = "") {
   void card;
-  return "";
+  return fallbackCardSmallUrl(cardId);
 }
 
 function cardSkillList(card) {
@@ -304,7 +310,7 @@ function cardView(cardId, cardCatalog) {
     name,
     faction: normalizeFaction(card.faction || card.card_code),
     ...cardViewMetadata(card),
-    imageUrl: cardImageUrl(card),
+    imageUrl: cardImageUrl(card, cardId),
     imageAlt: name
   };
 }
@@ -548,7 +554,12 @@ function emptyBattleFestivalSnapshot(shareConfig, uploadScope = null) {
       tierRows: []
     },
     clusterRows: [],
-    tierRows: []
+    tierRows: [],
+    battleFestival: {
+      camps: [],
+      campShare: [],
+      rowsByCamp: {}
+    }
   };
 }
 
@@ -1761,6 +1772,95 @@ function battleFestivalDeckId(deck, unitsByDeckId) {
     .join(",");
 }
 
+function jsonObject(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function battleFestivalCamp(side) {
+  const profile = jsonObject(side?.profile_json);
+  for (const key of BATTLE_FESTIVAL_CAMP_KEYS) {
+    const value = String(profile[key] || "").trim();
+    if (value) return value;
+  }
+  return "";
+}
+
+function addBattleFestivalDeckResult(statsByDeck, deckId, result) {
+  const current = statsByDeck.get(deckId) || {
+    deck_fingerprint: deckId,
+    sample_count: 0,
+    win_count: 0,
+    loss_count: 0,
+    draw_count: 0
+  };
+  current.sample_count += 1;
+  if (result === "win") current.win_count += 1;
+  if (result === "loss") current.loss_count += 1;
+  if (result === "draw") current.draw_count += 1;
+  current.win_rate = current.sample_count ? current.win_count / current.sample_count : 0;
+  statsByDeck.set(deckId, current);
+}
+
+function battleFestivalDeckStats(statsByDeck) {
+  return Array.from(statsByDeck.values());
+}
+
+function battleFestivalClassifierDecks(deckStats) {
+  return deckStats.map((row) => ({
+    deckId: row.deck_fingerprint,
+    deckName: row.deck_fingerprint,
+    cards: String(row.deck_fingerprint).split(",").filter(Boolean),
+    sampleCount: toNumber(row.sample_count),
+    winCount: toNumber(row.win_count),
+    lossCount: toNumber(row.loss_count),
+    drawCount: toNumber(row.draw_count)
+  }));
+}
+
+function buildBattleFestivalTierRows(deckStats, cardCatalog, strategyTypes, options = {}) {
+  const classification = classifyAnalysisDecks(battleFestivalClassifierDecks(deckStats), cardCatalog, {
+    now: new Date().toISOString(),
+    strategyTypes
+  });
+  const rows = buildTierRows(deckStats, classification, cardCatalog);
+  const camp = String(options.camp || "").trim();
+  return camp ? rows.map((row) => ({ ...row, battleCamp: camp })) : rows;
+}
+
+function buildBattleFestivalCampShare(statsByCamp, rowsByCamp) {
+  const entries = Array.from(statsByCamp.entries())
+    .map(([camp, statsByDeck]) => {
+      const stats = battleFestivalDeckStats(statsByDeck);
+      const sampleSize = stats.reduce((sum, row) => sum + toNumber(row.sample_count), 0);
+      const winCount = stats.reduce((sum, row) => sum + toNumber(row.win_count), 0);
+      const rows = rowsByCamp[camp]?.tierRows || [];
+      return {
+        camp,
+        sampleSize,
+        winRate: sampleSize ? Number((winCount / sampleSize * 100).toFixed(1)) : 0,
+        representatives: rows.slice(0, 2).map((row) => row.deckName)
+      };
+    })
+    .filter((entry) => entry.camp && entry.sampleSize > 0)
+    .sort((left, right) => right.sampleSize - left.sampleSize || left.camp.localeCompare(right.camp, "ja"));
+
+  const total = entries.reduce((sum, entry) => sum + entry.sampleSize, 0);
+  const rounded = entries.map((entry) => ({
+    ...entry,
+    share: total ? Math.round(entry.sampleSize / total * 100) : 0
+  }));
+  const diff = 100 - rounded.reduce((sum, entry) => sum + entry.share, 0);
+  if (rounded.length && Math.abs(diff) <= rounded.length) rounded[0].share += diff;
+  return rounded;
+}
+
 async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope = null) {
   const scope = battleFestivalMetadataScope(shareConfig, uploadScope);
   const filterScope = {
@@ -1802,27 +1902,21 @@ async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope =
   const sideByKey = new Map(sides.map((side) => [matchSideKey(side.match_id, side.side_index), side]));
 
   const statsByDeck = new Map();
+  const statsByCamp = new Map();
   for (const deck of matchDecks) {
     const deckId = battleFestivalDeckId(deck, unitsByDeckId);
     if (!deckId) continue;
-    const result = normalizedSideResult(sideByKey.get(matchSideKey(deck.match_id, deck.side_index))?.result);
+    const side = sideByKey.get(matchSideKey(deck.match_id, deck.side_index));
+    const result = normalizedSideResult(side?.result);
     if (!result) continue;
-    const current = statsByDeck.get(deckId) || {
-      deck_fingerprint: deckId,
-      sample_count: 0,
-      win_count: 0,
-      loss_count: 0,
-      draw_count: 0
-    };
-    current.sample_count += 1;
-    if (result === "win") current.win_count += 1;
-    if (result === "loss") current.loss_count += 1;
-    if (result === "draw") current.draw_count += 1;
-    current.win_rate = current.sample_count ? current.win_count / current.sample_count : 0;
-    statsByDeck.set(deckId, current);
+    addBattleFestivalDeckResult(statsByDeck, deckId, result);
+    const camp = battleFestivalCamp(side);
+    if (!camp) continue;
+    if (!statsByCamp.has(camp)) statsByCamp.set(camp, new Map());
+    addBattleFestivalDeckResult(statsByCamp.get(camp), deckId, result);
   }
 
-  const deckStats = Array.from(statsByDeck.values());
+  const deckStats = battleFestivalDeckStats(statsByDeck);
   if (!deckStats.length) {
     if (uploadScope) return emptyBattleFestivalSnapshot(shareConfig, uploadScope);
     throw new Error("No ready battle festival leaderboard run.");
@@ -1830,20 +1924,18 @@ async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope =
 
   const cardCatalog = await loadCardCatalog();
   const strategyTypes = await readOptionalJson(resolve(legacyRoot, "cards/card_strategy_types.json"), []);
-  const classifierDecks = deckStats.map((row) => ({
-    deckId: row.deck_fingerprint,
-    deckName: row.deck_fingerprint,
-    cards: String(row.deck_fingerprint).split(",").filter(Boolean),
-    sampleCount: toNumber(row.sample_count),
-    winCount: toNumber(row.win_count),
-    lossCount: toNumber(row.loss_count),
-    drawCount: toNumber(row.draw_count)
-  }));
-  const classification = classifyAnalysisDecks(classifierDecks, cardCatalog, {
-    now: new Date().toISOString(),
-    strategyTypes
-  });
-  const tierRows = buildTierRows(deckStats, classification, cardCatalog);
+  const tierRows = buildBattleFestivalTierRows(deckStats, cardCatalog, strategyTypes);
+  const rowsByCamp = {};
+  for (const [camp, campStatsByDeck] of statsByCamp.entries()) {
+    const campStats = battleFestivalDeckStats(campStatsByDeck);
+    if (!campStats.length) continue;
+    const campRows = buildBattleFestivalTierRows(campStats, cardCatalog, strategyTypes, { camp });
+    rowsByCamp[camp] = {
+      tierRows: campRows,
+      clusterRows: campRows
+    };
+  }
+  const campShare = buildBattleFestivalCampShare(statsByCamp, rowsByCamp);
   const representativeDecks = balancedUsageWinRows(tierRows, 4, {
     minWinRate: 54,
     minUsageRate: 0.6,
@@ -1873,7 +1965,12 @@ async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope =
       tierRows
     },
     clusterRows: tierRows,
-    tierRows
+    tierRows,
+    battleFestival: {
+      camps: campShare.map((item) => item.camp),
+      campShare,
+      rowsByCamp
+    }
   };
 }
 
