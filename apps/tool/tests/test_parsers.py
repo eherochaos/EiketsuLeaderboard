@@ -199,6 +199,43 @@ def test_parse_detail_html_extracts_match_fields_and_decks():
     assert detail["timeline_data"]["castle"]["enemy"] == [10000, 0]
 
 
+def test_parse_battle_festival_detail_keeps_merit_separate_from_odds():
+    seed = {
+        "detail_url": "https://eiketsu-taisen.net/members/history/detail?t=1773932045&f=586",
+        "played_at": "2026-06-13 19:34",
+        "mode": "戦祭り",
+        "result": "win",
+        "follow_id": "586",
+        "player_name": "模範証言",
+        "opponent_name": "天からお塩",
+        "castle_rates": ["82.00%", "0.00%"],
+    }
+    html = DETAIL_HTML.replace("全国対戦 Ver.3.1.0H", "戦祭り Ver.3.5.0B").replace(
+        '<div class="p-detail__score-box"><dt>証</dt><dd>十二</dd></div>',
+        (
+            '<div class="p-detail__score-box"><dt>戦功</dt><dd>250,123</dd></div>'
+            '<div class="p-detail__score-box"><dt>戦功オッズ</dt><dd>×1.1</dd></div>'
+            '<div class="p-detail__score-box"><dt>戦祭りランキング</dt><dd>12 位</dd></div>'
+        ),
+    ).replace(
+        '<section class="p-detail--enemy"></section>',
+        (
+            '<section class="p-detail--enemy">'
+            '<div class="p-detail__score-box"><dt>戦功オッズ</dt><dd>×1.0</dd></div>'
+            '</section>'
+        ),
+    )
+
+    detail = parse_detail_html(html, seed["detail_url"], "https://eiketsu-taisen.net", seed)
+
+    assert detail["mode"] == "戦祭り"
+    assert detail["players"][0]["profile"]["戦功"] == "250,123"
+    assert detail["players"][0]["profile"]["戦功オッズ"] == "×1.1"
+    assert detail["players"][0]["profile"]["戦祭りランキング"] == "12 位"
+    assert "戦功" not in detail["players"][1]["profile"]
+    assert detail["players"][1]["profile"]["戦功オッズ"] == "×1.0"
+
+
 def test_parse_replay_html_extracts_replay_id_and_decks():
     parsed = parse_replay_html(REPLAY_HTML, "https://example.test/local.html", "https://eiketsu-taisen.net")
 

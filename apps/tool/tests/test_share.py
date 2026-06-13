@@ -132,6 +132,41 @@ def test_export_contribution_can_include_battle_festival(tmp_path):
     assert all(record.get("mode") == "戦祭り" for record in battle_lines[1:])
 
 
+def test_import_contribution_preserves_battle_festival_manifest_scope(tmp_path):
+    source_settings = _settings(tmp_path / "source")
+    source_engine = _init_db(source_settings)
+    with Session(source_engine) as session:
+        repo = EnvRepository(session, source_settings)
+        repo.upsert_match_detail(_detail("battle-festival-replay", mode="戦祭り"))
+        session.commit()
+    package = export_contribution(
+        source_settings,
+        ShareConfig(
+            target_version="Ver.share",
+            date_from="2026-06-13",
+            date_to="2026-06-13",
+            mode_scope=MODE_SCOPE_BATTLE_FESTIVAL,
+            festival_date_from="2026-06-11",
+            festival_date_to="2026-06-13",
+            include_battle_festival=True,
+        ),
+        "alice",
+    )
+
+    dest_settings = _settings(tmp_path / "dest")
+    dest_engine = _init_db(dest_settings)
+
+    result = import_contributions(dest_settings, [package.path])
+
+    assert result.packages_imported == 1
+    with Session(dest_engine) as session:
+        imported = session.scalar(select(SharedContributionPackage))
+        assert imported is not None
+        assert imported.mode_scope == MODE_SCOPE_BATTLE_FESTIVAL
+        assert imported.festival_date_from == "2026-06-11"
+        assert imported.festival_date_to == "2026-06-13"
+
+
 def test_import_contributions_is_idempotent_and_dedupes_replay(tmp_path):
     source_settings = _settings(tmp_path / "source")
     source_engine = _init_db(source_settings)

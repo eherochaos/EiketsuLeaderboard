@@ -260,7 +260,20 @@ def test_sync_client_collects_and_uploads_active_battle_festival_scope(tmp_path,
         seen_calls.append((date_from, date_to, dict(kwargs)))
         engine = make_engine(settings)
         Base.metadata.create_all(engine)
-        return CollectResult(1, "completed", {"matches": 0}, [])
+        counts = {"matches": 0}
+        if kwargs.get("mode_scope") == MODE_SCOPE_BATTLE_FESTIVAL:
+            counts.update(
+                {
+                    "detail_candidates": 2,
+                    "detail_pages": 1,
+                    "battle_festival_merit_samples": 1,
+                    "battle_festival_player_merit_missing": 1,
+                    "battle_festival_existing_merit_missing": 1,
+                    "battle_festival_rendered_detail_pages": 1,
+                    "skipped_by_mode": 0,
+                }
+            )
+        return CollectResult(1, "completed", counts, [])
 
     monkeypatch.setattr(client_upload, "collect_follow", fake_collect)
     monkeypatch.setattr(
@@ -279,6 +292,9 @@ def test_sync_client_collects_and_uploads_active_battle_festival_scope(tmp_path,
     assert result.battle_festival_collect_result is not None
     assert result.battle_festival_upload is not None
     assert any("浏览器上下文" in message for message in progress.messages)
+    assert any("绝对戦功样本 1" in message for message in progress.messages)
+    assert any("player缺戦功 1" in message for message in progress.messages)
+    assert any("缺戦功重抓 1" in message for message in progress.messages)
     assert [(date_from, date_to) for date_from, date_to, _ in seen_calls] == [
         ("2026-06-11", "2026-06-12"),
         ("2026-06-10", "2026-06-14"),
