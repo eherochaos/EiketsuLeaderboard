@@ -58,7 +58,9 @@ def test_probe_battle_festival_period_reports_redirect(tmp_path):
 
     assert result.period is None
     assert result.status == "redirected"
-    assert result.message
+    assert result.final_url == "https://eiketsu-taisen.net/"
+    assert "登录态无效" in result.message
+    assert "保持" in result.message
 
 
 def test_probe_battle_festival_period_reports_active(tmp_path, monkeypatch):

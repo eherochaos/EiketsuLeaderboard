@@ -5,6 +5,8 @@ import sqlite3
 from http.cookiejar import Cookie, CookieJar
 from pathlib import Path
 
+import pytest
+
 from eiketsu_env.config import Settings
 from eiketsu_env.services import browser_session
 from eiketsu_env.services.browser_session import (
@@ -209,12 +211,80 @@ def test_auto_chrome_profile_selects_most_domain_cookies(tmp_path, monkeypatch):
     _create_chromium_profile(user_data, "Profile 1", 2)
     (user_data / "Local State").write_text(json.dumps({"profile": {"last_used": "Default"}}), encoding="utf-8")
     monkeypatch.setenv("LOCALAPPDATA", str(local_app))
+    monkeypatch.setattr(browser_session, "_validate_member_login", lambda _settings, _result: "member ok")
 
     result = load_browser_cookiejar(_settings(tmp_path), "chrome", decryptor=lambda _value, _key: "decrypted")
 
     assert result.source == "chrome"
     assert result.profile_path.name == "Profile 1"
     assert result.cookie_count == 2
+
+
+def test_firefox_cookiejar_requires_member_api_confirmation(tmp_path, monkeypatch):
+    profile = tmp_path / "ff"
+    _create_firefox_profile(profile)
+    settings = Settings(root_dir=tmp_path, db_url="sqlite:///:memory:", firefox_profile=profile)
+
+    def reject_member_login(_settings, _result):
+        raise BrowserAuthError("登录态无效：会员区跳转到首页")
+
+    monkeypatch.setattr(browser_session, "_validate_member_login", reject_member_login)
+
+    with pytest.raises(BrowserAuthError) as exc_info:
+        load_browser_cookiejar(settings, "firefox")
+
+    assert "登录态无效" in str(exc_info.value)
+
+
+def test_auto_does_not_return_invalid_firefox_after_live_browser_failure(tmp_path, monkeypatch):
+    jar = CookieJar()
+    jar.set_cookie(_make_cookie())
+    candidate = BrowserProfileCandidate("firefox", tmp_path / "ff", tmp_path / "ff" / "cookies.sqlite", cookie_count=1)
+
+    def reject_member_login(_settings, _result):
+        raise BrowserAuthError("登录态无效：会员区跳转到首页")
+
+    monkeypatch.setattr(browser_session, "_live_chromium_browser_for_auth_source", lambda source: "chrome" if source == "auto" else "")
+    monkeypatch.setattr(
+        browser_session,
+        "load_live_browser_cookiejar",
+        lambda _settings, _browser: (_ for _ in ()).throw(BrowserAuthError("请先点击“打开登录页”")),
+    )
+    monkeypatch.setattr(browser_session, "_candidate_profiles", lambda _settings, _source: [candidate])
+    monkeypatch.setattr(browser_session, "_score_candidates", lambda _settings, candidates: None)
+    monkeypatch.setattr(browser_session, "load_firefox_cookiejar", lambda _settings, _profile: jar)
+    monkeypatch.setattr(browser_session, "_validate_member_login", reject_member_login)
+
+    with pytest.raises(BrowserAuthError) as exc_info:
+        load_browser_cookiejar(_settings(tmp_path), "auto")
+
+    message = str(exc_info.value)
+    assert "chrome:live" in message
+    assert "登录态无效" in message
+
+
+def test_doctor_browser_auto_reports_actual_valid_auth_source(tmp_path, monkeypatch):
+    jar = CookieJar()
+    jar.set_cookie(_make_cookie())
+    candidate = BrowserProfileCandidate("firefox", tmp_path / "ff", tmp_path / "ff" / "cookies.sqlite", cookie_count=1)
+
+    monkeypatch.setattr(browser_session, "_live_chromium_browser_for_auth_source", lambda source: "chrome" if source == "auto" else "")
+    monkeypatch.setattr(
+        browser_session,
+        "load_live_browser_cookiejar",
+        lambda _settings, _browser: (_ for _ in ()).throw(BrowserAuthError("请先点击“打开登录页”")),
+    )
+    monkeypatch.setattr(browser_session, "_candidate_profiles", lambda _settings, _source: [candidate])
+    monkeypatch.setattr(browser_session, "_score_candidates", lambda _settings, candidates: None)
+    monkeypatch.setattr(browser_session, "load_firefox_cookiejar", lambda _settings, _profile: jar)
+    monkeypatch.setattr(browser_session, "_validate_member_login", lambda _settings, _result: "member ok")
+
+    result = doctor_browser(_settings(tmp_path), "auto")
+
+    assert result["ok"] is True
+    assert result["auth_source"] == "firefox"
+    assert result["requested_auth_source"] == "auto"
+    assert result["message"] == "member ok"
 
 
 def test_custom_chromium_profile_uses_parent_local_state(tmp_path):

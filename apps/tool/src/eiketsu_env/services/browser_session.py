@@ -39,6 +39,11 @@ LIVE_CHROMIUM_BROWSERS = ("edge", "chrome", "brave")
 LIVE_BROWSER_PORTS = {"edge": 49381, "chrome": 49382, "brave": 49383}
 LIVE_BROWSER_TIMEOUT_SECONDS = 2.0
 BROWSER_NAME_FOR_USER = {"edge": "Microsoft Edge", "chrome": "Google Chrome", "brave": "Brave"}
+LOGIN_WINDOW_KEEP_OPEN_HINT = (
+    "请点击“打开登录页”，在程序打开的 Chrome/Edge/Brave 窗口完成会员区登录，"
+    "并保持该窗口打开直到同步完成。"
+)
+MEMBER_LOGIN_INVALID_MESSAGE = f"还没有完成会员区登录，或当前登录态无效。{LOGIN_WINDOW_KEEP_OPEN_HINT}"
 
 
 class BrowserAuthError(RuntimeError):
@@ -182,17 +187,18 @@ def load_browser_cookiejar(
     decryptor: Callable[[bytes, bytes | None], str] | None = None,
 ) -> BrowserCookieResult:
     selected_source = _normalize_auth_source(auth_source or settings.auth_source)
+    errors: list[str] = []
     live_browser = _live_chromium_browser_for_auth_source(selected_source)
     if live_browser:
         try:
             return load_live_browser_cookiejar(settings, live_browser)
-        except BrowserAuthError:
-            pass
+        except BrowserAuthError as exc:
+            errors.append(f"{live_browser}:live -> {exc}")
     candidates = _candidate_profiles(settings, selected_source)
     if not candidates:
-        raise BrowserAuthError(f"没有发现可用浏览器 profile：auth_source={selected_source}")
+        detail = "；".join(errors) if errors else f"auth_source={selected_source}"
+        raise BrowserAuthError(f"没有发现可用浏览器 profile：{detail}")
     _score_candidates(settings, candidates)
-    errors: list[str] = []
     for candidate in sorted(candidates, key=lambda item: (item.cookie_count, item.order_score), reverse=True):
         if candidate.cookie_count <= 0:
             continue
@@ -207,7 +213,14 @@ def load_browser_cookiejar(
             continue
         count = len(list(jar))
         if count > 0:
-            return BrowserCookieResult(candidate.browser, candidate.profile_path, jar, count, "浏览器 cookies 可读取")
+            result = BrowserCookieResult(candidate.browser, candidate.profile_path, jar, count, "浏览器 cookies 可读取，等待会员区校验")
+            try:
+                message = _validate_member_login(settings, result)
+            except BrowserAuthError as exc:
+                candidate.error = str(exc)
+                errors.append(f"{candidate.browser}:{candidate.profile_path} -> {exc}")
+                continue
+            return BrowserCookieResult(candidate.browser, candidate.profile_path, jar, count, message)
     detail = "；".join(errors) if errors else "目标域 cookies 不存在"
     raise BrowserAuthError(f"没有发现英杰大战登录态：{detail}")
 
@@ -215,32 +228,55 @@ def load_browser_cookiejar(
 def doctor_browser(settings: Settings, auth_source: str | None = None) -> dict[str, Any]:
     selected_source = _normalize_auth_source(auth_source or settings.auth_source)
     live_browser = _live_chromium_browser_for_auth_source(selected_source)
-    if live_browser:
+    if live_browser and selected_source not in {"auto", "default-browser"}:
         return _doctor_live_chromium_browser(settings, live_browser)
     if selected_source in {"auto", "default-browser"}:
-        return _doctor_missing_live_browser(settings, selected_source)
-    candidates = _candidate_profiles(settings, selected_source)
+        candidates = _candidate_profiles(settings, selected_source)
+        if not live_browser and not candidates:
+            return _doctor_missing_live_browser(settings, selected_source)
+        return _doctor_cookiejar_browser(settings, selected_source, live_browser)
+    return _doctor_cookiejar_browser(settings, selected_source, live_browser)
+
+
+def _doctor_cookiejar_browser(settings: Settings, auth_source: str, live_browser: str = "") -> dict[str, Any]:
+    candidates = _candidate_profiles(settings, auth_source)
     _score_candidates(settings, candidates)
     default_kind = detect_default_browser_kind()
     try:
-        result = load_browser_cookiejar(settings, selected_source)
+        result = load_browser_cookiejar(settings, auth_source)
         ok = True
         message = result.message
+        actual_source = result.source
         selected_profile = str(result.profile_path)
         cookie_count = result.cookie_count
     except Exception as exc:  # noqa: BLE001 - doctor 需要返回诊断而不是中断。
         ok = False
         message = str(exc)
+        actual_source = live_browser or auth_source
         selected_profile = ""
         cookie_count = 0
+    live_candidate = []
+    if live_browser:
+        live_candidate.append(
+            {
+                "browser": live_browser,
+                "profile": str(_live_browser_user_data_dir(settings, live_browser)),
+                "cookie_db_exists": True,
+                "domain_cookie_count": cookie_count if ok and actual_source == live_browser else 0,
+                "is_default": True,
+                "error": "" if ok else message,
+            }
+        )
     return {
         "ok": ok,
-        "auth_source": selected_source,
+        "auth_source": actual_source,
+        "requested_auth_source": auth_source,
         "default_browser": default_kind,
         "selected_profile": selected_profile,
         "loaded_cookie_count": cookie_count,
         "login_url": settings.login_url,
-        "candidates": [
+        "candidates": live_candidate
+        + [
             {
                 "browser": item.browser,
                 "profile": str(item.profile_path),
@@ -267,6 +303,7 @@ def _doctor_missing_live_browser(settings: Settings, auth_source: str) -> dict[s
     return {
         "ok": False,
         "auth_source": auth_source,
+        "requested_auth_source": auth_source,
         "default_browser": default_kind,
         "selected_profile": "",
         "loaded_cookie_count": 0,
@@ -305,6 +342,7 @@ def _doctor_live_chromium_browser(settings: Settings, browser: str) -> dict[str,
     return {
         "ok": ok,
         "auth_source": browser,
+        "requested_auth_source": browser,
         "default_browser": default_kind,
         "selected_profile": selected_profile,
         "loaded_cookie_count": cookie_count,
@@ -359,21 +397,21 @@ def _validate_member_login(settings: Settings, cookie_result: BrowserCookieResul
         payload, final_url = session.fetch_text(api_url, referer=referer, timeout=8)
     except HTTPError as exc:
         if exc.code in {401, 403}:
-            raise BrowserAuthError("还没有完成会员区登录。请在程序打开的登录窗口登录后等待自动检测。") from exc
+            raise BrowserAuthError(MEMBER_LOGIN_INVALID_MESSAGE) from exc
         raise BrowserAuthError(f"无法确认会员区登录：HTTP {exc.code}") from exc
     except (TimeoutError, OSError, http.cookiejar.LoadError, URLError) as exc:
         raise BrowserAuthError(f"无法确认会员区登录：{exc}") from exc
 
     final_path = urlparse(final_url).path.lower()
     if "/members/follow/api/followlist" not in final_path:
-        raise BrowserAuthError("还没有完成会员区登录。请在程序打开的登录窗口登录后等待自动检测。")
+        raise BrowserAuthError(MEMBER_LOGIN_INVALID_MESSAGE)
     try:
         parsed = json.loads(payload)
     except json.JSONDecodeError as exc:
-        raise BrowserAuthError("还没有确认会员区登录；请确认网页登录完成后稍等几秒。") from exc
+        raise BrowserAuthError(f"还没有确认会员区登录。{LOGIN_WINDOW_KEEP_OPEN_HINT}") from exc
     if isinstance(parsed, dict) and isinstance(parsed.get("follow"), list):
         return "会员区登录已确认，可以同步"
-    raise BrowserAuthError("会员区登录确认失败；请重新打开登录页并完成登录。")
+    raise BrowserAuthError(f"会员区登录确认失败。{LOGIN_WINDOW_KEEP_OPEN_HINT}")
 
 
 def doctor_firefox(settings: Settings) -> FirefoxDoctorResult:

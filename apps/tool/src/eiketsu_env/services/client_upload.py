@@ -181,6 +181,7 @@ def sync_client(
     _ensure_client_database(settings)
     if progress:
         progress.message("快速同步模式：并发采集详情，自动跳过已完整采集的旧详情")
+        progress.message("战祭检测需要会员登录态：请保持“打开登录页”弹出的 Chrome/Edge/Brave 窗口打开直到同步完成")
     battle_collect = None
     battle_upload = None
     battle_package_path = None

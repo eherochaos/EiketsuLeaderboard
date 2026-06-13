@@ -127,6 +127,41 @@ def test_browser_doctor_message_explains_chromium_protected_login_data():
     assert r"C:\Users" not in message
 
 
+def test_browser_doctor_message_explains_invalid_member_login_without_paths():
+    browser = {
+        "ok": False,
+        "auth_source": "chrome",
+        "message": (
+            r"没有发现英杰大战登录态：firefox:C:\Users\alice\AppData\Roaming\Mozilla\Firefox\Profiles\default "
+            "-> 还没有完成会员区登录，或当前登录态无效。"
+        ),
+        "candidates": [
+            {
+                "browser": "chrome",
+                "profile": r"C:\Users\alice\AppData\Local\Google\Chrome\User Data\Default",
+                "cookie_db_exists": True,
+                "domain_cookie_count": 0,
+                "error": "请先点击“打开登录页”",
+            },
+            {
+                "browser": "firefox",
+                "profile": r"C:\Users\alice\AppData\Roaming\Mozilla\Firefox\Profiles\default",
+                "cookie_db_exists": True,
+                "domain_cookie_count": 1,
+            },
+        ],
+    }
+
+    message = format_browser_doctor_message(browser, "自动检测（默认浏览器优先）")
+
+    assert "会员区校验失败" in message
+    assert "保持它打开直到同步完成" in message
+    assert "旧登录记录已失效" in message
+    assert "请关闭浏览器" not in message
+    assert r"C:\Users" not in message
+    assert _browser_doctor_warning_title(browser) == "请使用程序打开的登录页"
+
+
 def test_browser_doctor_message_reports_success_profile():
     message = format_browser_doctor_message(
         {
