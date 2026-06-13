@@ -78,6 +78,7 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             self.assertEqual(live_status["snapshot"]["sourceRunId"], 7)
             self.assertNotIn(str(repo_root), json.dumps(status, ensure_ascii=False))
             self.assertEqual(len(calls), 3)
+            self.assertEqual(calls[1][1]["NODE_OPTIONS"], "--max-old-space-size=4096")
             self.assertTrue(calls[1][1]["LEADERBOARD_TIER_LIST_SNAPSHOT_FILE"].endswith("tier-list-snapshot.json"))
             self.assertTrue(calls[1][1]["LEADERBOARD_TIER_LIST_CONFIGS_FILE"].endswith("tier-list-configs.json"))
             self.assertTrue(calls[1][1]["LEADERBOARD_BATTLE_FESTIVAL_SNAPSHOT_FILE"].endswith("battle-festival-snapshot.json"))

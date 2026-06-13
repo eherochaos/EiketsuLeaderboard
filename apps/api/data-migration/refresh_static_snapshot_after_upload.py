@@ -24,6 +24,7 @@ DEFAULT_BATTLE_FESTIVAL_SNAPSHOT_FILE = Path("apps/api/data/battle-festival-snap
 DEFAULT_BATTLE_FESTIVAL_CONFIGS_FILE = Path("apps/api/data/battle-festival-configs.json")
 STATUS_SCHEMA_VERSION = 1
 RECENT_STATUS_LIMIT = 20
+DEFAULT_NODE_OPTIONS = "--max-old-space-size=4096"
 
 
 CommandRunner = Callable[[list[str], dict[str, str]], subprocess.CompletedProcess[str]]
@@ -573,6 +574,7 @@ def _snapshot_env(
     battle_festival_configs_file: Path | None = None,
 ) -> dict[str, str]:
     env = dict(os.environ)
+    env.setdefault("NODE_OPTIONS", DEFAULT_NODE_OPTIONS)
     env["LEADERBOARD_LEGACY_ROOT"] = str(legacy_root)
     if snapshot_file is not None:
         env["LEADERBOARD_SNAPSHOT_FILE"] = str(snapshot_file)

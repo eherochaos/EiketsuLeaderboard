@@ -45,6 +45,7 @@ to_work_path() {
 
 run_node() {
   if command -v node >/dev/null 2>&1; then
+    NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}" \
     LEADERBOARD_LEGACY_ROOT="${LEADERBOARD_LEGACY_ROOT:-}" \
     LEADERBOARD_SNAPSHOT_FILE="${LEADERBOARD_SNAPSHOT_FILE:-}" \
     LEADERBOARD_REFRESH_STATUS_FILE="${LEADERBOARD_REFRESH_STATUS_FILE:-}" \
@@ -90,6 +91,7 @@ run_node() {
       -e "LEADERBOARD_TIER_LIST_CONFIGS_FILE=$docker_tier_list_configs_file" \
       -e "LEADERBOARD_BATTLE_FESTIVAL_SNAPSHOT_FILE=$docker_battle_festival_snapshot_file" \
       -e "LEADERBOARD_BATTLE_FESTIVAL_CONFIGS_FILE=$docker_battle_festival_configs_file" \
+      -e "NODE_OPTIONS=${NODE_OPTIONS:---max-old-space-size=4096}" \
       node:22-alpine node "${docker_args[@]}"
     return
   fi
@@ -231,6 +233,7 @@ install_upload_refresh_worker() {
     printf '  --battle-festival-configs-file %s\n' "$(shell_quote "$BATTLE_FESTIVAL_CONFIGS_FILE")"
     printf '  --status-file %s\n' "$(shell_quote "$STATUS_FILE")"
     printf '  --node-bin node\n'
+    printf '  --node-container %s\n' "$(shell_quote "$DEPLOY_NODE_API_CONTAINER")"
     printf '  --postgres-container %s\n' "$(shell_quote "$DEPLOY_EXPORT_CONTAINER")"
     printf '  --export-container %s\n' "$(shell_quote "$DEPLOY_EXPORT_CONTAINER")"
     printf '  --refresh-reason %s\n' "$(shell_quote 'upload refresh completed')"
@@ -613,8 +616,6 @@ log 'publish live snapshot'
 publish_live_snapshot
 log 'publish live status'
 publish_live_status
-log 'install upload refresh worker'
-install_upload_refresh_worker
 log 'stop leaderboard node api before restart'
 stop_leaderboard_node_api
 log 'restart service before route install'
@@ -627,6 +628,8 @@ log 'start leaderboard node api'
 start_leaderboard_node_api
 log 'smoke check api routes'
 smoke_check_api_routes
+log 'install upload refresh worker'
+install_upload_refresh_worker
 log 'publish live frontend'
 publish_live_frontend
 log 'publish frontend status asset'

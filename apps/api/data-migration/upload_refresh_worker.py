@@ -84,6 +84,7 @@ class UploadRefreshConfig:
     live_snapshot_file: Path | None = None
     live_status_file: Path | None = None
     node_bin: str = "node"
+    node_container: str = ""
     postgres_container: str = ""
     export_container: str = ""
     export_asset_root: Path | None = None
@@ -133,7 +134,23 @@ def read_upload_watermark(status_file: Path) -> int:
         payload = json.loads(status_file.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return 0
-    latest_upload = payload.get("latestUpload") if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        return 0
+    latest_run = payload.get("latestRun")
+    snapshot = payload.get("snapshot")
+    if isinstance(latest_run, dict) and isinstance(snapshot, dict):
+        latest_run_id = _to_int(latest_run.get("id"))
+        snapshot_run_id = _to_int(snapshot.get("sourceRunId"))
+        if latest_run_id and snapshot_run_id:
+            if latest_run_id != snapshot_run_id:
+                return 0
+            run_watermark = _to_int(latest_run.get("uploadWatermark"))
+            if run_watermark:
+                return run_watermark
+    refresh = payload.get("refresh")
+    if isinstance(refresh, dict) and str(refresh.get("status") or "") != "completed":
+        return 0
+    latest_upload = payload.get("latestUpload")
     if not isinstance(latest_upload, dict):
         return 0
     return _to_int(latest_upload.get("id"))
@@ -163,7 +180,7 @@ def read_latest_upload_from_local_postgres() -> dict[str, Any] | None:
 def build_snapshot_refresher(config: UploadRefreshConfig) -> SnapshotRefresher:
     exporter = build_docker_exporter(config) if config.export_container else None
     run_refresher = build_docker_run_refresher(config) if config.export_container else None
-    runner = DockerNodeRunner(config.repo_root)
+    runner = DockerNodeRunner(config.repo_root, node_container=config.node_container)
 
     def refresh() -> dict[str, Any]:
         return refresh_static_snapshot_after_upload(
@@ -248,19 +265,30 @@ def build_docker_run_refresher(config: UploadRefreshConfig) -> Callable[[], dict
 
 
 class DockerNodeRunner:
-    def __init__(self, repo_root: Path) -> None:
+    def __init__(self, repo_root: Path, node_container: str = "") -> None:
         self.repo_root = repo_root.resolve()
+        self.node_container = node_container
 
     def __call__(self, command: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         if shutil.which(command[0]):
-            return subprocess.run(command, check=True, env=env, text=True, capture_output=True)
+            completed = subprocess.run(command, check=False, env=env, text=True, capture_output=True)
+            if completed.returncode != 0:
+                raise RuntimeError(_format_command_failure(command, completed))
+            return completed
 
         docker_args = [self._to_work_path(value) for value in command[1:]]
         docker_env = {
             key: self._to_work_path(value)
             for key, value in env.items()
-            if key.startswith("LEADERBOARD_")
+            if key == "NODE_OPTIONS" or key.startswith("LEADERBOARD_")
         }
+        if self.node_container:
+            docker_command = ["docker", "exec", "-w", "/work"]
+            for key, value in docker_env.items():
+                docker_command.extend(["-e", f"{key}={value}"])
+            docker_command.extend([self.node_container, command[0], *docker_args])
+            return _run_checked(docker_command)
+
         docker_command = [
             "docker",
             "run",
@@ -331,7 +359,24 @@ def _parse_json_object(text: str) -> dict[str, Any]:
 
 
 def _run_checked(command: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, check=check, text=True, capture_output=True)
+    completed = subprocess.run(command, check=False, text=True, capture_output=True)
+    if check and completed.returncode != 0:
+        raise RuntimeError(_format_command_failure(command, completed))
+    return completed
+
+
+def _format_command_failure(command: list[str], completed: subprocess.CompletedProcess[str]) -> str:
+    return (
+        f"command failed with exit code {completed.returncode}; "
+        f"stderr: {_tail_text(completed.stderr)}; "
+        f"stdout: {_tail_text(completed.stdout)}; "
+        f"command: {command}"
+    )
+
+
+def _tail_text(value: str, limit: int = 240) -> str:
+    text = str(value or "").strip()
+    return text[-limit:] if len(text) > limit else text
 
 
 def _json_default(value: Any) -> str:
@@ -354,6 +399,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--live-snapshot-file", type=Path, default=None)
     parser.add_argument("--live-status-file", type=Path, default=None)
     parser.add_argument("--node-bin", default="node")
+    parser.add_argument("--node-container", default="")
     parser.add_argument("--postgres-container", default="")
     parser.add_argument("--export-container", default="")
     parser.add_argument("--export-asset-root", type=Path, default=None)
@@ -379,6 +425,7 @@ def config_from_args(args: argparse.Namespace) -> UploadRefreshConfig:
         live_snapshot_file=_resolve(repo_root, args.live_snapshot_file) if args.live_snapshot_file else None,
         live_status_file=_resolve(repo_root, args.live_status_file) if args.live_status_file else None,
         node_bin=args.node_bin,
+        node_container=args.node_container,
         postgres_container=args.postgres_container,
         export_container=export_container,
         export_asset_root=args.export_asset_root,
