@@ -76,7 +76,12 @@ function emptyBattleFestivalSnapshot(fallbackSnapshot) {
       tierRows: []
     },
     clusterRows: [],
-    tierRows: []
+    tierRows: [],
+    battleFestival: {
+      camps: [],
+      campShare: [],
+      rowsByCamp: {}
+    }
   };
 }
 

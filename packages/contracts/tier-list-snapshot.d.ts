@@ -7,6 +7,25 @@ import type {
 
 export type TierListScope = "deck" | "cluster";
 
+export interface BattleFestivalCampShare {
+  camp: string;
+  sampleSize: number;
+  winRate: number;
+  share: number;
+  representatives: string[];
+}
+
+export interface BattleFestivalCampRows {
+  tierRows: TierListRow[];
+  clusterRows: TierListRow[];
+}
+
+export interface BattleFestivalSnapshotData {
+  camps: string[];
+  campShare: BattleFestivalCampShare[];
+  rowsByCamp: Record<string, BattleFestivalCampRows>;
+}
+
 export interface TierListClusterVariant {
   deckId: string;
   deckName: string;
@@ -24,6 +43,7 @@ export interface TierListClusterVariant {
   imageUrl: string;
   imageAlt: string;
   deckCards: CardView[];
+  battleCamp?: string;
 }
 
 export interface TierListRow extends TierListClusterVariant {
@@ -36,6 +56,7 @@ export interface TierListSnapshot {
   metadata: LeaderboardSnapshot["metadata"];
   tierRows: TierListRow[];
   clusterRows: TierListRow[];
+  battleFestival?: BattleFestivalSnapshotData;
 }
 
 export interface TierListDeckConfigResponse {

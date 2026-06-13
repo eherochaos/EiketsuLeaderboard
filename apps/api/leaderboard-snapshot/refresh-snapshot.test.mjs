@@ -6,6 +6,13 @@ import { refreshLeaderboardSnapshot } from "./refresh-snapshot.mjs";
 
 const deckA = "legacy-card-a1,card-a2";
 const deckB = "card-b1,card-b2";
+const battleCardA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const battleCardB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const battleCardC = "cccccccccccccccccccccccccccccccc";
+const battleCardD = "dddddddddddddddddddddddddddddddd";
+const battleDeckA = `${battleCardA},${battleCardB}`;
+const battleDeckB = `${battleCardC},${battleCardD}`;
+const battleCampKey = "\u6240\u5c5e\u9663\u55b6";
 
 async function writeJson(path, payload) {
   await writeFile(path, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
@@ -130,7 +137,7 @@ function archetypeRow(id, title, cards, rank, winCount, lossCount, representativ
   };
 }
 
-function matchSide(id, matchId, sideIndex, result, playerName) {
+function matchSide(id, matchId, sideIndex, result, playerName, profile = {}) {
   return {
     id,
     match_id: matchId,
@@ -140,6 +147,7 @@ function matchSide(id, matchId, sideIndex, result, playerName) {
     follow_id: String(id),
     result,
     profile_json: {
+      ...profile,
       battle_stats: {
         strategy_count: {
           by_slot: [3, 1]
@@ -155,11 +163,24 @@ function matchSide(id, matchId, sideIndex, result, playerName) {
   };
 }
 
+function deckUnitRows(startId, deckId, deckFingerprint) {
+  return String(deckFingerprint || "")
+    .split(",")
+    .filter(Boolean)
+    .map((cardHash, index) => ({
+      id: startId + index,
+      deck_id: deckId,
+      slot: index + 1,
+      card_hash: cardHash
+    }));
+}
+
 async function createLegacyFixture(root, options = {}) {
   const tableRoot = join(root, "tables");
   const cardRoot = join(root, "cards");
   const includeBattleFestival = Boolean(options.includeBattleFestival);
   const includeBattleFestivalMatches = Boolean(options.includeBattleFestivalMatches);
+  const includeBattleFestivalCamp = options.includeBattleFestivalCamp !== false;
   const battleFestivalUploadScope = options.battleFestivalUploadScope || null;
   await mkdir(tableRoot, { recursive: true });
   await mkdir(cardRoot, { recursive: true });
@@ -266,8 +287,8 @@ async function createLegacyFixture(root, options = {}) {
   ];
   if (includeBattleFestivalMatches) {
     matchDecks.push(
-      { id: 3, match_id: 2, side_index: 0, deck_fingerprint: deckA },
-      { id: 4, match_id: 2, side_index: 1, deck_fingerprint: deckB }
+      { id: 3, match_id: 2, side_index: 0, deck_fingerprint: battleDeckA },
+      { id: 4, match_id: 2, side_index: 1, deck_fingerprint: battleDeckB }
     );
   }
   await writeJsonl(join(tableRoot, "match_decks.jsonl"), matchDecks);
@@ -276,9 +297,12 @@ async function createLegacyFixture(root, options = {}) {
     matchSide(2, 1, 1, "win", "bob")
   ];
   if (includeBattleFestivalMatches) {
+    const campProfiles = includeBattleFestivalCamp
+      ? [{ [battleCampKey]: "\u6bb7\u8ecd" }, { [battleCampKey]: "\u5468\u8ecd" }]
+      : [{}, {}];
     matchSides.push(
-      matchSide(3, 2, 0, "win", "carol"),
-      matchSide(4, 2, 1, "loss", "dave")
+      matchSide(3, 2, 0, "win", "carol", campProfiles[0]),
+      matchSide(4, 2, 1, "loss", "dave", campProfiles[1])
     );
   }
   await writeJsonl(join(tableRoot, "match_sides.jsonl"), matchSides);
@@ -290,15 +314,17 @@ async function createLegacyFixture(root, options = {}) {
   ];
   if (includeBattleFestivalMatches) {
     matchDeckUnits.push(
-      { id: 5, deck_id: 3, slot: 1, card_hash: "card-a1" },
-      { id: 6, deck_id: 3, slot: 2, card_hash: "card-a2" },
-      { id: 7, deck_id: 4, slot: 1, card_hash: "card-b1" },
-      { id: 8, deck_id: 4, slot: 2, card_hash: "card-b2" }
+      ...deckUnitRows(5, 3, battleDeckA),
+      ...deckUnitRows(7, 4, battleDeckB)
     );
   }
   await writeJsonl(join(tableRoot, "match_deck_units.jsonl"), matchDeckUnits);
   await writeJson(join(cardRoot, "card_catalog.json"), {
     cards: [
+      { hash_id: battleCardA, card_code: "BA001", name: "Battle Alpha", faction: "\u84bc", cost: "1.0", unitType: "\u69cd\u5175" },
+      { hash_id: battleCardB, card_code: "BA002", name: "Battle Beta", faction: "\u84bc", cost: "1.0", unitType: "\u69cd\u5175" },
+      { hash_id: battleCardC, card_code: "BB001", name: "Battle Gamma", faction: "\u7dcb", cost: "1.0", unitType: "\u5f13\u5175" },
+      { hash_id: battleCardD, card_code: "BB002", name: "Battle Delta", faction: "\u7dcb", cost: "1.0", unitType: "\u5f13\u5175" },
       { hash_id: "card-a1", card_code: "蒼001", name: "Alpha", faction: "蒼", cost: "1.0", unitType: "妲嶅叺" },
       { hash_id: "card-a2", card_code: "蒼002", name: "Beta", faction: "蒼", cost: "1.0", unitType: "妲嶅叺" },
       { hash_id: "card-b1", card_code: "緋001", name: "Gamma", faction: "緋", cost: "1.0", unitType: "妲嶅叺" },
@@ -463,8 +489,56 @@ async function testRefreshBuildsBattleFestivalSnapshotFromMatches() {
     assert.equal(battleFestivalSnapshot.metadata.sourceKind, "battle_festival");
     assert.equal(battleFestivalSnapshot.metadata.sampleSize, 2);
     assert.equal(battleFestivalSnapshot.tierRows.length, 2);
-    assert.ok(battleFestivalSnapshot.tierRows.some((row) => row.deckId === deckA));
-    assert.ok(battleFestivalSnapshot.tierRows.some((row) => row.deckId === deckB));
+    assert.ok(battleFestivalSnapshot.tierRows.some((row) => row.deckId === battleDeckA));
+    assert.ok(battleFestivalSnapshot.tierRows.some((row) => row.deckId === battleDeckB));
+    const battleDeckRow = battleFestivalSnapshot.tierRows.find((row) => row.deckId === battleDeckA);
+    assert.equal(battleDeckRow.imageUrl, `https://image.eiketsu-taisen.net/general/card_small/${battleCardA}.jpg`);
+    assert.equal(battleDeckRow.deckCards[0].imageUrl, `https://image.eiketsu-taisen.net/general/card_small/${battleCardA}.jpg`);
+    assert.deepEqual(
+      battleFestivalSnapshot.battleFestival.campShare.map((item) => item.camp).sort(),
+      ["\u5468\u8ecd", "\u6bb7\u8ecd"].sort()
+    );
+    const yinCamp = battleFestivalSnapshot.battleFestival.campShare.find((item) => item.camp === "\u6bb7\u8ecd");
+    const zhouCamp = battleFestivalSnapshot.battleFestival.campShare.find((item) => item.camp === "\u5468\u8ecd");
+    assert.equal(yinCamp.sampleSize, 1);
+    assert.equal(yinCamp.winRate, 100);
+    assert.equal(zhouCamp.sampleSize, 1);
+    assert.equal(zhouCamp.winRate, 0);
+    const yinRows = battleFestivalSnapshot.battleFestival.rowsByCamp["\u6bb7\u8ecd"].tierRows;
+    const zhouRows = battleFestivalSnapshot.battleFestival.rowsByCamp["\u5468\u8ecd"].tierRows;
+    assert.equal(yinRows.length, 1);
+    assert.equal(zhouRows.length, 1);
+    assert.equal(yinRows[0].deckId, battleDeckA);
+    assert.equal(yinRows[0].battleCamp, "\u6bb7\u8ecd");
+    assert.equal(yinRows[0].winRate, 100);
+    assert.equal(zhouRows[0].deckId, battleDeckB);
+    assert.equal(zhouRows[0].battleCamp, "\u5468\u8ecd");
+    assert.equal(zhouRows[0].winRate, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testRefreshBuildsBattleFestivalSnapshotWithoutCampField() {
+  const root = await mkdtemp(join(tmpdir(), "battle-festival-no-camp-refresh-"));
+  const legacyRoot = join(root, "legacy-service");
+  const outputPath = join(root, "published", "leaderboard-snapshot.json");
+
+  try {
+    await createLegacyFixture(legacyRoot, {
+      includeBattleFestivalMatches: true,
+      includeBattleFestivalCamp: false
+    });
+    const { battleFestival } = await refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: false });
+    const battleFestivalText = await readFile(join(root, "published", "battle-festival-snapshot.json"), "utf8");
+    const battleFestivalSnapshot = JSON.parse(battleFestivalText);
+
+    assert.equal(battleFestival.status, "completed");
+    assert.equal(battleFestivalSnapshot.metadata.sourceKind, "battle_festival");
+    assert.equal(battleFestivalSnapshot.metadata.sampleSize, 2);
+    assert.equal(battleFestivalSnapshot.tierRows.length, 2);
+    assert.deepEqual(battleFestivalSnapshot.battleFestival.campShare, []);
+    assert.deepEqual(battleFestivalSnapshot.battleFestival.rowsByCamp, {});
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -497,6 +571,8 @@ async function testRefreshWritesManifestOnlyBattleFestivalSnapshot() {
     assert.equal(battleFestivalSnapshot.metadata.dateTo, "2026-06-13");
     assert.equal(battleFestivalSnapshot.metadata.sampleSize, 0);
     assert.equal(battleFestivalSnapshot.tierRows.length, 0);
+    assert.deepEqual(battleFestivalSnapshot.battleFestival.campShare, []);
+    assert.deepEqual(battleFestivalSnapshot.battleFestival.rowsByCamp, {});
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -505,6 +581,7 @@ async function testRefreshWritesManifestOnlyBattleFestivalSnapshot() {
 await testRefreshWritesAtomicSnapshot();
 await testRefreshWritesBattleFestivalSnapshot();
 await testRefreshBuildsBattleFestivalSnapshotFromMatches();
+await testRefreshBuildsBattleFestivalSnapshotWithoutCampField();
 await testRefreshWritesManifestOnlyBattleFestivalSnapshot();
 
 console.log("leaderboard snapshot refresh tests passed");
