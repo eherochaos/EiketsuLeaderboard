@@ -657,6 +657,49 @@ async function testRefreshBuildsBattleFestivalSnapshotFromMatches() {
   }
 }
 
+async function testRefreshExpandsSingleDayBattleFestivalDisplayPeriod() {
+  const root = await mkdtemp(join(tmpdir(), "battle-festival-single-day-refresh-"));
+  const legacyRoot = join(root, "legacy-service");
+  const outputPath = join(root, "published", "leaderboard-snapshot.json");
+
+  try {
+    await createLegacyFixture(legacyRoot, {
+      includeBattleFestivalMatches: true,
+      battleFestivalUploadScope: {
+        upload: {
+          id: 76,
+          package_id: "pkg-battle-single-day",
+          match_count: 2,
+          imported_match_count: 2,
+          date_from: "2026-05-24",
+          date_to: "2026-05-24",
+          festival_date_from: "2026-05-24",
+          festival_date_to: "2026-05-24",
+          created_at: "2026-05-24T06:19:12Z"
+        },
+        package: {
+          package_id: "pkg-battle-single-day",
+          mode_scope: "battle_festival",
+          festival_date_from: "2026-05-24",
+          festival_date_to: "2026-05-24"
+        }
+      }
+    });
+    const { battleFestival } = await refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: false });
+    const battleFestivalText = await readFile(join(root, "published", "battle-festival-snapshot.json"), "utf8");
+    const battleFestivalSnapshot = JSON.parse(battleFestivalText);
+
+    assert.equal(battleFestival.status, "completed");
+    assert.equal(battleFestivalSnapshot.metadata.sourceUploadId, 76);
+    assert.equal(battleFestivalSnapshot.metadata.dateFrom, "2026-05-22");
+    assert.equal(battleFestivalSnapshot.metadata.dateTo, "2026-05-24");
+    assert.equal(battleFestivalSnapshot.metadata.sampleSize, 2);
+    assert.equal(battleFestivalSnapshot.tierRows.length, 2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 async function testRefreshBuildsBattleFestivalMeritRows() {
   const root = await mkdtemp(join(tmpdir(), "battle-festival-merit-refresh-"));
   const legacyRoot = join(root, "legacy-service");
@@ -815,6 +858,7 @@ async function testRefreshWritesManifestOnlyBattleFestivalSnapshot() {
 await testRefreshWritesAtomicSnapshot();
 await testRefreshWritesBattleFestivalSnapshot();
 await testRefreshBuildsBattleFestivalSnapshotFromMatches();
+await testRefreshExpandsSingleDayBattleFestivalDisplayPeriod();
 await testRefreshBuildsBattleFestivalMeritRows();
 await testRefreshBuildsBattleFestivalSnapshotWithoutCampField();
 await testRefreshWritesManifestOnlyBattleFestivalSnapshot();
