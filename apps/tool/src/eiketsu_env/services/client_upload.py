@@ -9,7 +9,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -462,24 +461,11 @@ def battle_festival_collect_plan(
             return BattleFestivalCollectPlan(official_config, "official_period", True, "官方战祭周期已匹配采集范围")
         return BattleFestivalCollectPlan(None, "official_inactive", False, "官方战祭周期未覆盖采集范围")
 
-    fallback_from = (current_day - timedelta(days=2)).isoformat()
-    date_from = max(base_config.date_from, fallback_from)
-    date_to = min(base_config.date_to, current)
-    if date_from > date_to:
-        return BattleFestivalCollectPlan(None, "outside_sync_window", False, "采集范围未覆盖战祭补采窗口")
-
-    fallback_config = _battle_festival_share_config_for_window(
-        base_config,
-        date_from=date_from,
-        date_to=date_to,
-        festival_date_from=date_from,
-        festival_date_to=date_to,
-    )
     return BattleFestivalCollectPlan(
-        fallback_config,
-        "history_fallback",
+        None,
+        "missing_official_period",
         False,
-        "官方战祭页未给出可用周期，改用旧 history 接口探测 戦祭り",
+        f"missing_official_period: 未检测到官方战祭开放期，跳过战祭采集（probe_status={probe.status or 'unknown'}）",
     )
 
 

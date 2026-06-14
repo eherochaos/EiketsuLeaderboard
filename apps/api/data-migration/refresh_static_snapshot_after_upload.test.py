@@ -47,6 +47,7 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
                         json.dumps({"metadata": {"sourceRunId": 7}, "deckConfigs": {}, "clusterConfigs": {}}),
                         encoding="utf-8",
                     )
+                    return subprocess.CompletedProcess(command, 0, "battleFestival=skipped_missing_official_period\n", "")
                 if command[-1].endswith("match-search-index.mjs"):
                     Path(env["LEADERBOARD_MATCH_SEARCH_INDEX_FILE"]).write_text(
                         json.dumps({"metadata": {"sourceRunId": 7}, "matches": []}),
@@ -70,6 +71,7 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             self.assertEqual(result["status"], "completed")
             self.assertEqual(result["run"]["run_id"], 6)
             self.assertEqual(result["export"]["tables"]["server_leaderboard_rows"], 1)
+            self.assertEqual(result["snapshot"]["battleFestivalSnapshot"], "skipped_missing_official_period")
             self.assertTrue((legacy_root / "tables" / "server_leaderboard_rows.jsonl").is_file())
             self.assertTrue((legacy_root.with_name("legacy-service.prev") / "tables" / "old.jsonl").is_file())
             self.assertEqual(json.loads(live_snapshot_file.read_text(encoding="utf-8"))["metadata"]["sourceRunId"], 7)
@@ -79,6 +81,7 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             self.assertEqual(status["refresh"]["reason"], "upload refresh completed")
             self.assertEqual(status["runRefresh"]["run_id"], 6)
             self.assertEqual(status["snapshot"]["sourceRunId"], 7)
+            self.assertEqual(status["battleFestivalSnapshot"]["refreshStatus"], "skipped_missing_official_period")
             self.assertEqual(live_status["snapshot"]["sourceRunId"], 7)
             self.assertNotIn(str(repo_root), json.dumps(status, ensure_ascii=False))
             self.assertEqual(len(calls), 3)
@@ -307,6 +310,9 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
                             "sourceUploadCreatedAt": "2026-06-01T12:00:00",
                             "dateFrom": "2026-06-11",
                             "dateTo": "2026-06-13",
+                            "periodSourceUploadId": 21,
+                            "periodSourcePackageId": "pkg-battle",
+                            "periodStatus": "official",
                             "updatedAt": "2026-06-01T12:02:00Z",
                             "sampleSize": 10,
                         },
@@ -389,6 +395,9 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             self.assertEqual(upload["userPublicId"], "u_public")
             self.assertEqual(status["battleFestivalSnapshot"]["sourceUploadId"], 21)
             self.assertEqual(status["battleFestivalSnapshot"]["sourcePackageId"], "pkg-battle")
+            self.assertEqual(status["battleFestivalSnapshot"]["periodSourceUploadId"], 21)
+            self.assertEqual(status["battleFestivalSnapshot"]["periodSourcePackageId"], "pkg-battle")
+            self.assertEqual(status["battleFestivalSnapshot"]["periodStatus"], "official")
             self.assertEqual(status["battleFestivalSnapshot"]["sampleSize"], 10)
             self.assertEqual(status["battleFestivalSnapshot"]["tierRows"], 1)
             self.assertEqual(status["battleFestivalSnapshot"]["meritRows"], 1)

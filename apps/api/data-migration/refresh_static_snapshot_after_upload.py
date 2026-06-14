@@ -226,7 +226,7 @@ def _refresh_snapshot(
     runner: CommandRunner,
 ) -> dict[str, Any]:
     command = [node_bin, str(repo_root / "apps/api/leaderboard-snapshot/refresh-snapshot.mjs")]
-    runner(
+    completed = runner(
         command,
         _snapshot_env(
             legacy_root,
@@ -238,13 +238,23 @@ def _refresh_snapshot(
             battle_festival_configs_file,
         ),
     )
+    battle_festival_status = _parse_battle_festival_refresh_status(completed)
     return {
         "status": "completed",
         "tierListSnapshot": "completed",
         "tierListConfigs": "completed",
-        "battleFestivalSnapshot": "completed",
-        "battleFestivalConfigs": "completed",
+        "battleFestivalSnapshot": battle_festival_status,
+        "battleFestivalConfigs": "completed" if battle_festival_status == "completed" else battle_festival_status,
     }
+
+
+def _parse_battle_festival_refresh_status(completed: subprocess.CompletedProcess[str] | None) -> str:
+    stdout = str(getattr(completed, "stdout", "") or "")
+    for line in stdout.splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip() == "battleFestival":
+            return value.strip() or "completed"
+    return "completed"
 
 
 def _refresh_match_search_index(
@@ -371,13 +381,19 @@ def _build_refresh_status(
         legacy_root / "tables" / "shared_contribution_packages.jsonl",
     )
     manifest = export_manifest if export_manifest is not None else _read_export_manifest(legacy_root)
+    battle_festival_snapshot = _read_battle_festival_snapshot_summary(battle_festival_snapshot_file)
+    snapshot_refresh = safe_refresh.get("snapshot") if isinstance(safe_refresh.get("snapshot"), dict) else {}
+    battle_festival_refresh_status = snapshot_refresh.get("battleFestivalSnapshot")
+    if battle_festival_refresh_status:
+        battle_festival_snapshot["refreshStatus"] = battle_festival_refresh_status
+
     return {
         "schemaVersion": STATUS_SCHEMA_VERSION,
         "generatedAt": generated_at,
         "refresh": refresh,
         "runRefresh": _sanitize_json(run_result or safe_refresh.get("run") or {}),
         "snapshot": _read_snapshot_summary(snapshot_file),
-        "battleFestivalSnapshot": _read_battle_festival_snapshot_summary(battle_festival_snapshot_file),
+        "battleFestivalSnapshot": battle_festival_snapshot,
         "export": _sanitize_export_manifest(manifest),
         "latestRun": recent_runs[0] if recent_runs else None,
         "recentRuns": recent_runs,
@@ -432,6 +448,9 @@ def _read_battle_festival_snapshot_summary(snapshot_file: Path | None) -> dict[s
         "targetVersion": metadata.get("targetVersion"),
         "dateFrom": metadata.get("dateFrom"),
         "dateTo": metadata.get("dateTo"),
+        "periodSourceUploadId": metadata.get("periodSourceUploadId"),
+        "periodSourcePackageId": metadata.get("periodSourcePackageId"),
+        "periodStatus": metadata.get("periodStatus"),
         "updatedAt": metadata.get("updatedAt"),
         "sampleSize": metadata.get("sampleSize"),
         "tierRows": len(payload.get("tierRows") or []) if isinstance(payload, dict) else 0,

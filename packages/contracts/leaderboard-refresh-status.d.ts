@@ -70,6 +70,10 @@ export interface LeaderboardRefreshStatus {
     sourceImportedMatchCount?: number;
     sourceMatchCount?: number;
     sourceUploadCreatedAt?: string;
+    periodSourceUploadId?: number;
+    periodSourcePackageId?: string;
+    periodStatus?: string;
+    refreshStatus?: string;
     sourceKind?: string;
     targetVersion?: string;
     dateFrom?: string;
