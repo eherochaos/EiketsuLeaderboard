@@ -67,7 +67,7 @@ def refresh_static_snapshot_after_upload(
     lock_handle = _acquire_lock(lock_path)
     if lock_handle is None:
         result = {"status": "skipped", "reason": "refresh already running"}
-        _write_refresh_status(status_path, live_status, legacy, snapshot, result)
+        _write_refresh_status(status_path, live_status, legacy, snapshot, battle_festival_snapshot, result)
         return result
 
     started_at = _utc_now()
@@ -77,6 +77,7 @@ def refresh_static_snapshot_after_upload(
         live_status,
         legacy,
         snapshot,
+        battle_festival_snapshot,
         {"status": "running", "startedAt": started_at},
         started_at=started_at,
     )
@@ -119,6 +120,7 @@ def refresh_static_snapshot_after_upload(
             live_status,
             legacy,
             snapshot,
+            battle_festival_snapshot,
             result,
             started_at=started_at,
             finished_at=_utc_now(),
@@ -140,6 +142,7 @@ def refresh_static_snapshot_after_upload(
             live_status,
             legacy,
             snapshot,
+            battle_festival_snapshot,
             result,
             started_at=started_at,
             finished_at=_utc_now(),
@@ -154,6 +157,7 @@ def write_refresh_status_only(
     repo_root: Path | None = None,
     legacy_root: Path | None = None,
     snapshot_file: Path | None = None,
+    battle_festival_snapshot_file: Path | None = None,
     status_file: Path | None = None,
     live_status_file: Path | None = None,
     refresh_status: str = "completed",
@@ -162,10 +166,11 @@ def write_refresh_status_only(
     root = (repo_root or Path.cwd()).resolve()
     legacy = _resolve(root, legacy_root or DEFAULT_LEGACY_ROOT)
     snapshot = _resolve(root, snapshot_file or DEFAULT_SNAPSHOT_FILE)
+    battle_festival_snapshot = _resolve(root, battle_festival_snapshot_file or DEFAULT_BATTLE_FESTIVAL_SNAPSHOT_FILE)
     status_path = _resolve(root, status_file or DEFAULT_STATUS_FILE)
     live_status = _resolve(root, live_status_file) if live_status_file else None
     result = {"status": refresh_status, "reason": _sanitize_text(refresh_reason)}
-    _write_refresh_status(status_path, live_status, legacy, snapshot, result, finished_at=_utc_now())
+    _write_refresh_status(status_path, live_status, legacy, snapshot, battle_festival_snapshot, result, finished_at=_utc_now())
     return result
 
 
@@ -314,6 +319,7 @@ def _write_refresh_status(
     live_status_file: Path | None,
     legacy_root: Path,
     snapshot_file: Path,
+    battle_festival_snapshot_file: Path | None,
     refresh_result: dict[str, Any],
     *,
     started_at: str = "",
@@ -324,6 +330,7 @@ def _write_refresh_status(
     payload = _build_refresh_status(
         legacy_root,
         snapshot_file,
+        battle_festival_snapshot_file,
         refresh_result,
         started_at=started_at,
         finished_at=finished_at,
@@ -338,6 +345,7 @@ def _write_refresh_status(
 def _build_refresh_status(
     legacy_root: Path,
     snapshot_file: Path,
+    battle_festival_snapshot_file: Path | None,
     refresh_result: dict[str, Any],
     *,
     started_at: str = "",
@@ -368,6 +376,7 @@ def _build_refresh_status(
         "refresh": refresh,
         "runRefresh": _sanitize_json(run_result or safe_refresh.get("run") or {}),
         "snapshot": _read_snapshot_summary(snapshot_file),
+        "battleFestivalSnapshot": _read_battle_festival_snapshot_summary(battle_festival_snapshot_file),
         "export": _sanitize_export_manifest(manifest),
         "latestRun": recent_runs[0] if recent_runs else None,
         "recentRuns": recent_runs,
@@ -396,6 +405,38 @@ def _read_snapshot_summary(snapshot_file: Path) -> dict[str, Any]:
         "clusterRows": len(payload.get("clusterRows") or []) if isinstance(payload, dict) else 0,
         "tierRows": len(payload.get("tierRows") or []) if isinstance(payload, dict) else 0,
         "homeTierRows": len(home.get("tierRows") or []),
+    }
+
+
+def _read_battle_festival_snapshot_summary(snapshot_file: Path | None) -> dict[str, Any]:
+    if snapshot_file is None:
+        return {}
+    try:
+        payload = json.loads(snapshot_file.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+    metadata = payload.get("metadata") if isinstance(payload, dict) else {}
+    metadata = metadata if isinstance(metadata, dict) else {}
+    battle_festival = payload.get("battleFestival") if isinstance(payload, dict) else {}
+    battle_festival = battle_festival if isinstance(battle_festival, dict) else {}
+    merit_summary = battle_festival.get("meritSummary") if isinstance(battle_festival, dict) else {}
+    merit_summary = merit_summary if isinstance(merit_summary, dict) else {}
+    return {
+        "sourceUploadId": metadata.get("sourceUploadId"),
+        "sourcePackageId": metadata.get("sourcePackageId"),
+        "sourceImportedMatchCount": metadata.get("sourceImportedMatchCount"),
+        "sourceMatchCount": metadata.get("sourceMatchCount"),
+        "sourceUploadCreatedAt": metadata.get("sourceUploadCreatedAt"),
+        "sourceKind": metadata.get("sourceKind"),
+        "targetVersion": metadata.get("targetVersion"),
+        "dateFrom": metadata.get("dateFrom"),
+        "dateTo": metadata.get("dateTo"),
+        "updatedAt": metadata.get("updatedAt"),
+        "sampleSize": metadata.get("sampleSize"),
+        "tierRows": len(payload.get("tierRows") or []) if isinstance(payload, dict) else 0,
+        "meritRows": len(battle_festival.get("meritRows") or []),
+        "meritPlayerCount": merit_summary.get("meritPlayerCount"),
+        "meritSampleCount": merit_summary.get("meritSampleCount"),
     }
 
 
@@ -671,6 +712,7 @@ def main() -> int:
             repo_root=args.repo_root,
             legacy_root=args.legacy_root,
             snapshot_file=args.snapshot_file,
+            battle_festival_snapshot_file=args.battle_festival_snapshot_file,
             status_file=args.status_file,
             live_status_file=args.live_status_file,
             refresh_status=args.refresh_status,

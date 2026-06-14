@@ -132,6 +132,11 @@ export interface LeaderboardSnapshot {
     dateTo: string;
     updatedAt: string;
     sampleSize: number;
+    sourceUploadId?: number;
+    sourcePackageId?: string;
+    sourceImportedMatchCount?: number;
+    sourceMatchCount?: number;
+    sourceUploadCreatedAt?: string;
     excludedInvalidDeckRows?: number;
     excludedInvalidDeckSampleSize?: number;
   };

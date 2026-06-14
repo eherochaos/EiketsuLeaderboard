@@ -537,6 +537,16 @@ function battleFestivalMetadataScope(shareConfig, uploadScope = null) {
   };
 }
 
+function battleFestivalSourceUploadMetadata(uploadScope = null) {
+  return {
+    sourceUploadId: toNumber(uploadScope?.id),
+    sourcePackageId: String(uploadScope?.package_id || ""),
+    sourceImportedMatchCount: toNumber(uploadScope?.imported_match_count),
+    sourceMatchCount: toNumber(uploadScope?.match_count),
+    sourceUploadCreatedAt: String(uploadScope?.created_at || "")
+  };
+}
+
 function emptyBattleFestivalSnapshot(shareConfig, uploadScope = null) {
   const scope = battleFestivalMetadataScope(shareConfig, uploadScope);
   return {
@@ -547,7 +557,8 @@ function emptyBattleFestivalSnapshot(shareConfig, uploadScope = null) {
       dateFrom: scope.dateFrom,
       dateTo: scope.dateTo,
       updatedAt: new Date().toISOString(),
-      sampleSize: 0
+      sampleSize: 0,
+      ...battleFestivalSourceUploadMetadata(uploadScope)
     },
     home: {
       factionShare: [],
@@ -2292,7 +2303,8 @@ async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope =
       dateFrom: scope.dateFrom,
       dateTo: scope.dateTo,
       updatedAt: new Date().toISOString(),
-      sampleSize: deckStats.reduce((sum, row) => sum + toNumber(row.sample_count), 0)
+      sampleSize: deckStats.reduce((sum, row) => sum + toNumber(row.sample_count), 0),
+      ...battleFestivalSourceUploadMetadata(uploadScope)
     },
     home: {
       factionShare: buildFactionShare(tierRows),

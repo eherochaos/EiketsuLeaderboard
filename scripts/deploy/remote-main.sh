@@ -296,6 +296,22 @@ install_upload_refresh_worker() {
     printf '#!/usr/bin/env bash\n'
     printf 'set -euo pipefail\n'
     printf 'cd %s\n' "$(shell_quote "$DEPLOY_PATH")"
+    printf 'node_api_container=%s\n' "$(shell_quote "$DEPLOY_NODE_API_CONTAINER")"
+    printf 'export_container=%s\n' "$(shell_quote "$DEPLOY_EXPORT_CONTAINER")"
+    printf 'wait_for_container() {\n'
+    printf '  local container="$1"\n'
+    printf '  local wait_seconds="${UPLOAD_REFRESH_CONTAINER_WAIT_SECONDS:-120}"\n'
+    printf '  local deadline=$((SECONDS + wait_seconds))\n'
+    printf '  [ -n "$container" ] || return 0\n'
+    printf '  while [ "$SECONDS" -lt "$deadline" ]; do\n'
+    printf '    if [ "$(docker inspect -f "{{.State.Running}}" "$container" 2>/dev/null || true)" = "true" ]; then\n'
+    printf '      return 0\n'
+    printf '    fi\n'
+    printf '    sleep 2\n'
+    printf '  done\n'
+    printf '  printf "container %%s is not running after %%ss\\n" "$container" "$wait_seconds" >&2\n'
+    printf '  return 1\n'
+    printf '}\n'
     printf 'args=(\n'
     printf '  --repo-root %s\n' "$(shell_quote "$DEPLOY_PATH")"
     printf '  --legacy-root %s\n' "$(shell_quote "$LEGACY_ROOT")"
@@ -321,6 +337,8 @@ install_upload_refresh_worker() {
     if [ -n "$DEPLOY_LIVE_STATUS_FILE" ]; then
       printf 'args+=(--live-status-file %s)\n' "$(shell_quote "$DEPLOY_LIVE_STATUS_FILE")"
     fi
+    printf 'wait_for_container "$node_api_container"\n'
+    printf 'wait_for_container "$export_container"\n'
     printf 'python3 apps/api/data-migration/upload_refresh_worker.py "${args[@]}"\n'
   } > "$worker_script"
   chmod +x "$worker_script"

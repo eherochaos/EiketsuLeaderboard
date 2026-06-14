@@ -44,29 +44,56 @@ def json_default(value):
 
 settings = load_settings()
 with make_session_factory(settings)() as session:
-    row = session.execute(
+    rows = session.execute(
         text(
             '''
-            SELECT u.id, u.status, u.imported_match_count, u.match_count, u.target_version,
-                   u.date_from, u.date_to,
-                   COALESCE(NULLIF(p.mode_scope, ''), u.mode_scope, '') AS mode_scope,
-                   COALESCE(NULLIF(p.festival_date_from, ''), u.festival_date_from, '') AS festival_date_from,
-                   COALESCE(NULLIF(p.festival_date_to, ''), u.festival_date_to, '') AS festival_date_to,
-                   u.created_at, u.updated_at
-            FROM server_uploads u
-            LEFT JOIN shared_contribution_packages p ON p.package_id = u.package_id
-            WHERE u.status = 'completed'
-              AND (
-                COALESCE(u.imported_match_count, 0) > 0
-                OR COALESCE(NULLIF(p.mode_scope, ''), u.mode_scope, '') = 'battle_festival'
-              )
-            ORDER BY u.id DESC
-            LIMIT 1
+            WITH upload_scope AS (
+                SELECT u.id, u.package_id, u.status, u.imported_match_count, u.match_count, u.target_version,
+                       u.date_from, u.date_to,
+                       COALESCE(NULLIF(p.mode_scope, ''), u.mode_scope, '') AS mode_scope,
+                       COALESCE(NULLIF(p.festival_date_from, ''), u.festival_date_from, '') AS festival_date_from,
+                       COALESCE(NULLIF(p.festival_date_to, ''), u.festival_date_to, '') AS festival_date_to,
+                       u.created_at, u.updated_at
+                FROM server_uploads u
+                LEFT JOIN shared_contribution_packages p ON p.package_id = u.package_id
+                WHERE u.status = 'completed'
+            ),
+            refreshable_uploads AS (
+                SELECT *
+                FROM upload_scope
+                WHERE COALESCE(imported_match_count, 0) > 0
+                   OR mode_scope = 'battle_festival'
+            ),
+            latest_upload AS (
+                SELECT *
+                FROM refreshable_uploads
+                ORDER BY id DESC
+                LIMIT 1
+            ),
+            latest_battle_festival_upload AS (
+                SELECT *
+                FROM refreshable_uploads
+                WHERE mode_scope = 'battle_festival'
+                ORDER BY id DESC
+                LIMIT 1
+            )
+            SELECT 'latest_upload' AS upload_key, *
+            FROM latest_upload
+            UNION ALL
+            SELECT 'latest_battle_festival_upload' AS upload_key, *
+            FROM latest_battle_festival_upload
             '''
         )
-    ).mappings().first()
+    ).mappings().all()
 
-print(json.dumps(dict(row) if row else None, ensure_ascii=False, default=json_default))
+payload = {"latest_upload": None, "latest_battle_festival_upload": None}
+for row in rows:
+    item = dict(row)
+    key = item.pop("upload_key", "")
+    if key in payload:
+        payload[key] = item
+
+print(json.dumps(payload, ensure_ascii=False, default=json_default))
 """
 
 
@@ -97,21 +124,38 @@ def run_upload_refresh_once(
     refresher: SnapshotRefresher | None = None,
 ) -> dict[str, Any]:
     try:
-        latest_upload = (latest_upload_reader or build_latest_upload_reader(config))()
+        latest_state = (latest_upload_reader or build_latest_upload_reader(config))()
     except Exception as exc:
         return _record_failure_status(config, f"upload refresh check failed: {exc}")
 
-    if not _is_refreshable_upload(latest_upload):
+    latest_upload = _latest_upload_from_state(latest_state)
+    latest_battle_festival_upload = _latest_battle_festival_upload_from_state(latest_state)
+    if not _is_refreshable_upload(latest_upload) and not _is_refreshable_upload(latest_battle_festival_upload):
         return {"status": "skipped", "reason": "no new completed upload"}
 
-    upload_id = _to_int(latest_upload.get("id"))
+    upload_id = _to_int(latest_upload.get("id")) if _is_refreshable_upload(latest_upload) else 0
     watermark = read_upload_watermark(config.status_file)
-    if upload_id <= watermark:
+    battle_festival_upload_id = (
+        _to_int(latest_battle_festival_upload.get("id"))
+        if _is_refreshable_upload(latest_battle_festival_upload)
+        else 0
+    )
+    battle_festival_snapshot_upload_id = read_battle_festival_snapshot_upload_id(config.battle_festival_snapshot_file)
+    pending_uploads = _pending_refresh_uploads(
+        latest_upload,
+        latest_battle_festival_upload,
+        watermark,
+        battle_festival_snapshot_upload_id,
+    )
+    if not pending_uploads:
         return {
             "status": "skipped",
             "reason": "upload already refreshed",
             "uploadId": upload_id,
             "uploadWatermark": watermark,
+            "battleFestivalUploadId": battle_festival_upload_id,
+            "battleFestivalSnapshotUploadId": battle_festival_snapshot_upload_id,
+            "pendingUploads": [],
         }
 
     try:
@@ -125,6 +169,10 @@ def run_upload_refresh_once(
         "reason": refresh_result.get("reason") or "",
         "uploadId": upload_id,
         "uploadWatermark": watermark,
+        "battleFestivalUploadId": battle_festival_upload_id,
+        "battleFestivalSnapshotUploadId": battle_festival_snapshot_upload_id,
+        "pendingUploads": pending_uploads,
+        "refreshReasons": [str(item.get("scope") or "") for item in pending_uploads],
         "refresh": refresh_result,
     }
 
@@ -154,6 +202,16 @@ def read_upload_watermark(status_file: Path) -> int:
     if not isinstance(latest_upload, dict):
         return 0
     return _to_int(latest_upload.get("id"))
+
+
+def read_battle_festival_snapshot_upload_id(snapshot_file: Path) -> int:
+    try:
+        payload = json.loads(snapshot_file.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return 0
+    metadata = payload.get("metadata") if isinstance(payload, dict) else {}
+    metadata = metadata if isinstance(metadata, dict) else {}
+    return _to_int(metadata.get("sourceUploadId"))
 
 
 def build_latest_upload_reader(config: UploadRefreshConfig) -> LatestUploadReader:
@@ -325,12 +383,68 @@ def _record_failure_status(config: UploadRefreshConfig, reason: str) -> dict[str
         repo_root=config.repo_root,
         legacy_root=config.legacy_root,
         snapshot_file=config.snapshot_file,
+        battle_festival_snapshot_file=config.battle_festival_snapshot_file,
         status_file=config.status_file,
         live_status_file=config.live_status_file,
         refresh_status="failed",
         refresh_reason=reason,
     )
     return {"status": "failed", "reason": _sanitize_text(reason)}
+
+
+def _latest_upload_from_state(state: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(state, dict):
+        return None
+    latest_upload = state.get("latest_upload")
+    if isinstance(latest_upload, dict):
+        return latest_upload
+    if "latest_battle_festival_upload" in state:
+        return None
+    return state
+
+
+def _latest_battle_festival_upload_from_state(state: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(state, dict):
+        return None
+    latest_upload = state.get("latest_battle_festival_upload")
+    if isinstance(latest_upload, dict):
+        return latest_upload
+    if "latest_battle_festival_upload" in state:
+        return None
+    return state if str(state.get("mode_scope") or "") == "battle_festival" else None
+
+
+def _pending_refresh_uploads(
+    latest_upload: dict[str, Any] | None,
+    latest_battle_festival_upload: dict[str, Any] | None,
+    upload_watermark: int,
+    battle_festival_snapshot_upload_id: int,
+) -> list[dict[str, Any]]:
+    pending: list[dict[str, Any]] = []
+    upload_id = _to_int(latest_upload.get("id")) if _is_refreshable_upload(latest_upload) else 0
+    if upload_id > upload_watermark:
+        pending.append(
+            {
+                "scope": "global",
+                "uploadId": upload_id,
+                "uploadWatermark": upload_watermark,
+            }
+        )
+
+    battle_festival_upload_id = (
+        _to_int(latest_battle_festival_upload.get("id"))
+        if _is_refreshable_upload(latest_battle_festival_upload)
+        else 0
+    )
+    if battle_festival_upload_id > battle_festival_snapshot_upload_id:
+        pending.append(
+            {
+                "scope": "battle_festival",
+                "uploadId": battle_festival_upload_id,
+                "snapshotUploadId": battle_festival_snapshot_upload_id,
+            }
+        )
+    return pending
 
 
 def _is_refreshable_upload(upload: dict[str, Any] | None) -> bool:

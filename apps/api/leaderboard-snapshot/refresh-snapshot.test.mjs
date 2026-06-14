@@ -590,7 +590,25 @@ async function testRefreshBuildsBattleFestivalSnapshotFromMatches() {
   const outputPath = join(root, "published", "leaderboard-snapshot.json");
 
   try {
-    await createLegacyFixture(legacyRoot, { includeBattleFestivalMatches: true });
+    await createLegacyFixture(legacyRoot, {
+      includeBattleFestivalMatches: true,
+      battleFestivalUploadScope: {
+        upload: {
+          id: 74,
+          package_id: "pkg-battle-source",
+          match_count: 4,
+          imported_match_count: 2,
+          date_from: "2026-05-24",
+          date_to: "2026-05-25",
+          created_at: "2026-06-14T02:06:00Z"
+        },
+        package: {
+          package_id: "pkg-battle-source",
+          festival_date_from: "2026-05-24",
+          festival_date_to: "2026-05-25"
+        }
+      }
+    });
     const { battleFestival } = await refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: false });
     const battleFestivalText = await readFile(join(root, "published", "battle-festival-snapshot.json"), "utf8");
     const battleFestivalSnapshot = JSON.parse(battleFestivalText);
@@ -598,6 +616,11 @@ async function testRefreshBuildsBattleFestivalSnapshotFromMatches() {
     assert.equal(battleFestival.status, "completed");
     assert.equal(battleFestival.sourceRunId, 0);
     assert.equal(battleFestivalSnapshot.metadata.sourceKind, "battle_festival");
+    assert.equal(battleFestivalSnapshot.metadata.sourceUploadId, 74);
+    assert.equal(battleFestivalSnapshot.metadata.sourcePackageId, "pkg-battle-source");
+    assert.equal(battleFestivalSnapshot.metadata.sourceImportedMatchCount, 2);
+    assert.equal(battleFestivalSnapshot.metadata.sourceMatchCount, 4);
+    assert.equal(battleFestivalSnapshot.metadata.sourceUploadCreatedAt, "2026-06-14T02:06:00Z");
     assert.equal(battleFestivalSnapshot.metadata.sampleSize, 2);
     assert.equal(battleFestivalSnapshot.tierRows.length, 2);
     assert.ok(battleFestivalSnapshot.tierRows.some((row) => row.deckId === battleDeckA));
@@ -744,8 +767,18 @@ async function testRefreshWritesManifestOnlyBattleFestivalSnapshot() {
   try {
     await createLegacyFixture(legacyRoot, {
       battleFestivalUploadScope: {
-        upload: { mode_scope: "tier_list", festival_date_from: "", festival_date_to: "" },
+        upload: {
+          id: 74,
+          package_id: "pkg-battle-empty",
+          mode_scope: "tier_list",
+          festival_date_from: "",
+          festival_date_to: "",
+          match_count: 0,
+          imported_match_count: 0,
+          created_at: "2026-06-14T01:06:00Z"
+        },
         package: {
+          package_id: "pkg-battle-empty",
           mode_scope: "battle_festival",
           festival_date_from: "2026-06-11",
           festival_date_to: "2026-06-13"
@@ -759,6 +792,11 @@ async function testRefreshWritesManifestOnlyBattleFestivalSnapshot() {
     assert.equal(battleFestival.status, "completed");
     assert.equal(battleFestival.sourceRunId, 0);
     assert.equal(battleFestivalSnapshot.metadata.sourceKind, "battle_festival");
+    assert.equal(battleFestivalSnapshot.metadata.sourceUploadId, 74);
+    assert.equal(battleFestivalSnapshot.metadata.sourcePackageId, "pkg-battle-empty");
+    assert.equal(battleFestivalSnapshot.metadata.sourceImportedMatchCount, 0);
+    assert.equal(battleFestivalSnapshot.metadata.sourceMatchCount, 0);
+    assert.equal(battleFestivalSnapshot.metadata.sourceUploadCreatedAt, "2026-06-14T01:06:00Z");
     assert.equal(battleFestivalSnapshot.metadata.dateFrom, "2026-06-11");
     assert.equal(battleFestivalSnapshot.metadata.dateTo, "2026-06-13");
     assert.equal(battleFestivalSnapshot.metadata.sampleSize, 0);

@@ -188,10 +188,36 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             legacy_root = repo_root / "apps/api/data/legacy-service"
             tables_root = legacy_root / "tables"
             snapshot_file = repo_root / "apps/api/data/leaderboard-snapshot.json"
+            battle_festival_snapshot_file = repo_root / "apps/api/data/battle-festival-snapshot.json"
             status_file = repo_root / "apps/api/data/leaderboard-refresh-status.json"
             tables_root.mkdir(parents=True)
             snapshot_file.parent.mkdir(parents=True, exist_ok=True)
             snapshot_file.write_text(json.dumps({"metadata": {"sourceRunId": 8}}), encoding="utf-8")
+            battle_festival_snapshot_file.write_text(
+                json.dumps(
+                    {
+                        "metadata": {
+                            "sourceKind": "battle_festival",
+                            "sourceUploadId": 21,
+                            "sourcePackageId": "pkg-battle",
+                            "sourceImportedMatchCount": 10,
+                            "sourceMatchCount": 12,
+                            "sourceUploadCreatedAt": "2026-06-01T12:00:00",
+                            "dateFrom": "2026-06-11",
+                            "dateTo": "2026-06-13",
+                            "updatedAt": "2026-06-01T12:02:00Z",
+                            "sampleSize": 10,
+                        },
+                        "tierRows": [{ "deckId": "deck-a" }],
+                        "battleFestival": {
+                            "meritRows": [{"playerName": "alice"}],
+                            "meritSummary": {"meritPlayerCount": 1, "meritSampleCount": 3},
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
             (tables_root / "server_users.jsonl").write_text(
                 json.dumps(
                     {
@@ -246,6 +272,7 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
                 repo_root=repo_root,
                 legacy_root=legacy_root,
                 snapshot_file=snapshot_file,
+                battle_festival_snapshot_file=battle_festival_snapshot_file,
                 status_file=status_file,
             )
 
@@ -258,6 +285,13 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             self.assertEqual(upload["festivalDateTo"], "2026-06-13")
             self.assertEqual(upload["contributorName"], "alice token=[redacted]")
             self.assertEqual(upload["userPublicId"], "u_public")
+            self.assertEqual(status["battleFestivalSnapshot"]["sourceUploadId"], 21)
+            self.assertEqual(status["battleFestivalSnapshot"]["sourcePackageId"], "pkg-battle")
+            self.assertEqual(status["battleFestivalSnapshot"]["sampleSize"], 10)
+            self.assertEqual(status["battleFestivalSnapshot"]["tierRows"], 1)
+            self.assertEqual(status["battleFestivalSnapshot"]["meritRows"], 1)
+            self.assertEqual(status["battleFestivalSnapshot"]["meritPlayerCount"], 1)
+            self.assertEqual(status["battleFestivalSnapshot"]["meritSampleCount"], 3)
             self.assertNotIn("user_id", json.dumps(upload, ensure_ascii=False))
             self.assertNotIn("secret", status_text)
 
