@@ -26,7 +26,33 @@ const BATTLE_FESTIVAL_SNAPSHOT_FIELDS = Object.freeze([
   "meritSummary",
 ]);
 
+const BATTLE_FESTIVAL_MERIT_ROW_FIELDS = Object.freeze([
+  "playerName",
+  "camp",
+  "firstSeenAt",
+  "lastSeenAt",
+  "highestMerit",
+  "highestMeritSeenAt",
+  "meritSampleCount",
+  "observedMatchCount",
+  "winCount",
+  "lossCount",
+  "drawCount",
+  "unknownCount",
+  "winRate",
+  "decks",
+  "pace",
+]);
+
+const BATTLE_FESTIVAL_MERIT_PACE_FIELDS = Object.freeze([
+  "days",
+  "samples",
+  "projection",
+]);
+
 module.exports = {
+  BATTLE_FESTIVAL_MERIT_PACE_FIELDS,
+  BATTLE_FESTIVAL_MERIT_ROW_FIELDS,
   BATTLE_FESTIVAL_SNAPSHOT_FIELDS,
   TIER_LIST_DECK_CONFIG_ENDPOINT,
   TIER_LIST_DECK_CONFIG_FIELDS,

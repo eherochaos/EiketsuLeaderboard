@@ -321,6 +321,26 @@ async function createLegacyFixture(root, options = {}) {
           play_url: "https://eiketsu.example.test/play/battle-festival-6",
           detail_url: "https://eiketsu.example.test/detail/battle-festival-6",
           replay_id: "battle-festival-replay-6"
+        },
+        {
+          id: 7,
+          version: "Ver.test",
+          mode: "戦祭り",
+          played_at: "2026-05-25 02:00",
+          created_at: "2026-05-25 02:00",
+          play_url: "https://eiketsu.example.test/play/battle-festival-7",
+          detail_url: "https://eiketsu.example.test/detail/battle-festival-7",
+          replay_id: "battle-festival-replay-7"
+        },
+        {
+          id: 8,
+          version: "Ver.test",
+          mode: "戦祭り",
+          played_at: "2026-05-25 02:12",
+          created_at: "2026-05-25 02:12",
+          play_url: "https://eiketsu.example.test/play/battle-festival-8",
+          detail_url: "https://eiketsu.example.test/detail/battle-festival-8",
+          replay_id: "battle-festival-replay-8"
         }
       );
     }
@@ -344,7 +364,11 @@ async function createLegacyFixture(root, options = {}) {
         { id: 9, match_id: 5, side_index: 0, deck_fingerprint: battleDeckA },
         { id: 10, match_id: 5, side_index: 1, deck_fingerprint: battleDeckB },
         { id: 11, match_id: 6, side_index: 0, deck_fingerprint: battleDeckA },
-        { id: 12, match_id: 6, side_index: 1, deck_fingerprint: battleDeckA }
+        { id: 12, match_id: 6, side_index: 1, deck_fingerprint: battleDeckA },
+        { id: 13, match_id: 7, side_index: 0, deck_fingerprint: battleDeckA },
+        { id: 14, match_id: 7, side_index: 1, deck_fingerprint: battleDeckB },
+        { id: 15, match_id: 8, side_index: 0, deck_fingerprint: battleDeckA },
+        { id: 16, match_id: 8, side_index: 1, deck_fingerprint: battleDeckB }
       );
     }
   }
@@ -372,7 +396,11 @@ async function createLegacyFixture(root, options = {}) {
         matchSide(9, 5, 0, "win", "single-probe", yinCamp),
         matchSide(10, 5, 1, "unknown", "\u5358\u767a\u738b", { ...zhouCamp, "\u6226\u529f": "999999" }, { role: "enemy", followId: "" }),
         matchSide(11, 6, 0, "loss", "odds-only-3", yinCamp),
-        matchSide(12, 6, 1, "unknown", "\u5929\u304b\u3089\u304a\u5869", { ...zhouCamp, "\u6226\u529f": "45000" }, { role: "enemy", followId: "" })
+        matchSide(12, 6, 1, "unknown", "\u5929\u304b\u3089\u304a\u5869", { ...zhouCamp, "\u6226\u529f": "45000" }, { role: "enemy", followId: "" }),
+        matchSide(13, 7, 0, "loss", "runner-opponent-1", yinCamp),
+        matchSide(14, 7, 1, "unknown", "\u6700\u65b0\u65e5\u30e9\u30f3\u30ca\u30fc", { ...zhouCamp, "\u6226\u529f": "1000" }, { role: "enemy", followId: "" }),
+        matchSide(15, 8, 0, "loss", "runner-opponent-2", yinCamp),
+        matchSide(16, 8, 1, "unknown", "\u6700\u65b0\u65e5\u30e9\u30f3\u30ca\u30fc", { ...zhouCamp, "\u6226\u529f": "7000" }, { role: "enemy", followId: "" })
       );
     }
   }
@@ -643,11 +671,41 @@ async function testRefreshBuildsBattleFestivalMeritRows() {
     assert.equal(meritRows[saltRowIndex].decks[0].deckCards[0].cardId, battleCardC);
     assert.equal(meritRows[saltRowIndex].decks[1].deckId, battleDeckA);
     assert.equal(meritRows[saltRowIndex].decks[1].sampleSize, 1);
+    assert.equal(meritRows[saltRowIndex].pace.days.length, 2);
+    assert.equal(meritRows[saltRowIndex].pace.days[0].date, "2026-05-24");
+    assert.equal(meritRows[saltRowIndex].pace.days[0].meritGain, 122094);
+    assert.equal(meritRows[saltRowIndex].pace.days[0].observedMinutes, 183);
+    assert.equal(meritRows[saltRowIndex].pace.days[0].averageMinutesPerMatch, 91.5);
+    assert.equal(meritRows[saltRowIndex].pace.days[0].meritPerHour, 40030.8);
+    assert.equal(meritRows[saltRowIndex].pace.days[1].date, "2026-05-25");
+    assert.equal(meritRows[saltRowIndex].pace.days[1].meritSampleCount, 1);
+    assert.equal(meritRows[saltRowIndex].pace.days[1].observedMinutes, 3);
+    assert.equal(meritRows[saltRowIndex].pace.samples[0].firstOfDay, true);
+    assert.equal(meritRows[saltRowIndex].pace.samples[0].minutesSincePrevious, 3);
+    assert.equal(meritRows[saltRowIndex].pace.samples[1].minutesSincePrevious, 180);
+    assert.equal(meritRows[saltRowIndex].pace.samples[1].meritDelta, 122094);
+    assert.equal(meritRows[saltRowIndex].pace.projection.basisType, "all_observed");
+    assert.equal(meritRows[saltRowIndex].pace.projection.basis.meritPerHour, 39385.2);
+    assert.ok(meritRows[saltRowIndex].pace.projection.projectedFinalMerit > 45000);
+    const runnerRow = meritRows.find((row) => row.playerName === "\u6700\u65b0\u65e5\u30e9\u30f3\u30ca\u30fc");
+    assert.ok(runnerRow);
+    assert.equal(runnerRow.pace.days.length, 1);
+    assert.equal(runnerRow.pace.days[0].date, "2026-05-25");
+    assert.equal(runnerRow.pace.days[0].meritGain, 6000);
+    assert.equal(runnerRow.pace.days[0].observedMinutes, 15);
+    assert.equal(runnerRow.pace.days[0].averageMinutesPerMatch, 7.5);
+    assert.equal(runnerRow.pace.days[0].meritPerHour, 24000);
+    assert.equal(runnerRow.pace.samples[0].minutesSincePrevious, 3);
+    assert.equal(runnerRow.pace.samples[1].minutesSincePrevious, 12);
+    assert.equal(runnerRow.pace.projection.basisType, "latest_day");
+    assert.equal(runnerRow.pace.projection.basis.date, "2026-05-25");
+    assert.equal(runnerRow.pace.projection.basis.meritPerHour, 24000);
+    assert.ok(runnerRow.pace.projection.projectedFinalMerit > 7000);
     assert.equal(battleFestivalSnapshot.battleFestival.meritSummary.highestMerit, 999999);
     assert.equal(battleFestivalSnapshot.battleFestival.meritSummary.topPlayerName, "\u5358\u767a\u738b");
-    assert.equal(battleFestivalSnapshot.battleFestival.meritSummary.meritPlayerCount, 2);
-    assert.equal(battleFestivalSnapshot.battleFestival.meritSummary.meritSampleCount, 4);
-    assert.equal(battleFestivalSnapshot.battleFestival.meritSummary.observedMatchCount, 4);
+    assert.equal(battleFestivalSnapshot.battleFestival.meritSummary.meritPlayerCount, 3);
+    assert.equal(battleFestivalSnapshot.battleFestival.meritSummary.meritSampleCount, 6);
+    assert.equal(battleFestivalSnapshot.battleFestival.meritSummary.observedMatchCount, 6);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
