@@ -182,6 +182,7 @@ async function createLegacyFixture(root, options = {}) {
   const includeBattleFestivalMatches = Boolean(options.includeBattleFestivalMatches);
   const includeBattleFestivalCamp = options.includeBattleFestivalCamp !== false;
   const includeBattleFestivalMeritSamples = Boolean(options.includeBattleFestivalMeritSamples);
+  const includeBattleFestivalOpenPeriodStartMatch = Boolean(options.includeBattleFestivalOpenPeriodStartMatch);
   const battleFestivalUploadScope = options.battleFestivalUploadScope || null;
   await mkdir(tableRoot, { recursive: true });
   await mkdir(cardRoot, { recursive: true });
@@ -280,6 +281,18 @@ async function createLegacyFixture(root, options = {}) {
       detail_url: "https://eiketsu.example.test/detail/battle-festival",
       replay_id: "battle-festival-replay"
     });
+    if (includeBattleFestivalOpenPeriodStartMatch) {
+      matches.push({
+        id: 9,
+        version: "Ver.test",
+        mode: matches[matches.length - 1].mode,
+        played_at: "2026-05-22 13:00",
+        created_at: "2026-05-22 13:00",
+        play_url: "https://eiketsu.example.test/play/battle-festival-period-start",
+        detail_url: "https://eiketsu.example.test/detail/battle-festival-period-start",
+        replay_id: "battle-festival-replay-period-start"
+      });
+    }
     if (includeBattleFestivalMeritSamples) {
       matches.push(
         {
@@ -355,6 +368,12 @@ async function createLegacyFixture(root, options = {}) {
       { id: 3, match_id: 2, side_index: 0, deck_fingerprint: battleDeckA },
       { id: 4, match_id: 2, side_index: 1, deck_fingerprint: battleDeckB }
     );
+    if (includeBattleFestivalOpenPeriodStartMatch) {
+      matchDecks.push(
+        { id: 50, match_id: 9, side_index: 0, deck_fingerprint: battleDeckA },
+        { id: 51, match_id: 9, side_index: 1, deck_fingerprint: battleDeckB }
+      );
+    }
     if (includeBattleFestivalMeritSamples) {
       matchDecks.push(
         { id: 5, match_id: 3, side_index: 0, deck_fingerprint: battleDeckA },
@@ -385,6 +404,12 @@ async function createLegacyFixture(root, options = {}) {
       matchSide(3, 2, 0, "win", "carol", campProfiles[0]),
       matchSide(4, 2, 1, "loss", "dave", campProfiles[1])
     );
+    if (includeBattleFestivalOpenPeriodStartMatch) {
+      matchSides.push(
+        matchSide(50, 9, 0, "win", "period-start-rank", { ...campProfiles[0], "\u6226\u529f": "307822" }),
+        matchSide(51, 9, 1, "loss", "period-start-opponent", campProfiles[1])
+      );
+    }
     if (includeBattleFestivalMeritSamples) {
       const yinCamp = includeBattleFestivalCamp ? { [battleCampKey]: "\u6bb7\u8ecd" } : {};
       const zhouCamp = includeBattleFestivalCamp ? { [battleCampKey]: "\u5468\u8ecd" } : {};
@@ -416,6 +441,12 @@ async function createLegacyFixture(root, options = {}) {
       ...deckUnitRows(5, 3, battleDeckA),
       ...deckUnitRows(7, 4, battleDeckB)
     );
+    if (includeBattleFestivalOpenPeriodStartMatch) {
+      matchDeckUnits.push(
+        ...deckUnitRows(50, 50, battleDeckA),
+        ...deckUnitRows(52, 51, battleDeckB)
+      );
+    }
     if (includeBattleFestivalMeritSamples) {
       matchDeckUnits.push(
         ...deckUnitRows(9, 5, battleDeckA),
@@ -665,6 +696,7 @@ async function testRefreshExpandsSingleDayBattleFestivalDisplayPeriod() {
   try {
     await createLegacyFixture(legacyRoot, {
       includeBattleFestivalMatches: true,
+      includeBattleFestivalOpenPeriodStartMatch: true,
       battleFestivalUploadScope: {
         upload: {
           id: 76,
@@ -673,15 +705,15 @@ async function testRefreshExpandsSingleDayBattleFestivalDisplayPeriod() {
           imported_match_count: 2,
           date_from: "2026-05-24",
           date_to: "2026-05-24",
-          festival_date_from: "2026-05-24",
-          festival_date_to: "2026-05-24",
+          festival_date_from: "",
+          festival_date_to: "",
           created_at: "2026-05-24T06:19:12Z"
         },
         package: {
           package_id: "pkg-battle-single-day",
           mode_scope: "battle_festival",
-          festival_date_from: "2026-05-24",
-          festival_date_to: "2026-05-24"
+          festival_date_from: "",
+          festival_date_to: ""
         }
       }
     });
@@ -691,10 +723,15 @@ async function testRefreshExpandsSingleDayBattleFestivalDisplayPeriod() {
 
     assert.equal(battleFestival.status, "completed");
     assert.equal(battleFestivalSnapshot.metadata.sourceUploadId, 76);
+    assert.equal(battleFestivalSnapshot.metadata.sourcePackageId, "pkg-battle-single-day");
     assert.equal(battleFestivalSnapshot.metadata.dateFrom, "2026-05-22");
     assert.equal(battleFestivalSnapshot.metadata.dateTo, "2026-05-24");
-    assert.equal(battleFestivalSnapshot.metadata.sampleSize, 2);
+    assert.equal(battleFestivalSnapshot.metadata.sampleSize, 4);
     assert.equal(battleFestivalSnapshot.tierRows.length, 2);
+    const periodStartRow = battleFestivalSnapshot.battleFestival.meritRows.find((row) => row.playerName === "period-start-rank");
+    assert.ok(periodStartRow);
+    assert.equal(periodStartRow.highestMerit, 307822);
+    assert.equal(periodStartRow.highestMeritSeenAt, "2026-05-22 13:00");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
