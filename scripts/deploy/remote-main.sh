@@ -105,9 +105,79 @@ docker_container_running() {
   docker ps --format '{{.Names}}' | grep -Fx "$container" >/dev/null 2>&1
 }
 
+docker_container_exists() {
+  local container="$1"
+  [ -n "$container" ] || return 1
+  command -v docker >/dev/null 2>&1 || return 1
+  docker ps -a --format '{{.Names}}' | grep -Fx "$container" >/dev/null 2>&1
+}
+
+postgres_export_python_ready() {
+  if command -v docker >/dev/null 2>&1 && docker_container_running "$DEPLOY_EXPORT_CONTAINER"; then
+    docker exec "$DEPLOY_EXPORT_CONTAINER" python -c 'import sqlalchemy' >/dev/null 2>&1
+    return
+  fi
+  python3 -c 'import sqlalchemy' >/dev/null 2>&1
+}
+
 require_fastapi_container() {
   command -v docker >/dev/null 2>&1 || fail 'docker runtime is missing'
   docker_container_running "$DEPLOY_FASTAPI_CONTAINER" || fail 'fastapi container is not running'
+}
+
+start_fastapi_container_if_needed() {
+  [ -n "$DEPLOY_FASTAPI_CONTAINER" ] || return 1
+  if docker_container_running "$DEPLOY_FASTAPI_CONTAINER"; then
+    return 0
+  fi
+  if docker_container_exists "$DEPLOY_FASTAPI_CONTAINER"; then
+    docker start "$DEPLOY_FASTAPI_CONTAINER" >/dev/null
+    sleep 2
+    docker_container_running "$DEPLOY_FASTAPI_CONTAINER"
+    return
+  fi
+  return 1
+}
+
+log_fastapi_container_state() {
+  [ -n "$DEPLOY_FASTAPI_CONTAINER" ] || return 0
+  command -v docker >/dev/null 2>&1 || return 0
+  docker_container_exists "$DEPLOY_FASTAPI_CONTAINER" || return 0
+  docker inspect -f 'fastapi container state={{.State.Status}} exitCode={{.State.ExitCode}} oomKilled={{.State.OOMKilled}} error={{.State.Error}}' "$DEPLOY_FASTAPI_CONTAINER" 2>/dev/null || true
+}
+
+log_fastapi_container_errors() {
+  [ -n "$DEPLOY_FASTAPI_CONTAINER" ] || return 0
+  command -v docker >/dev/null 2>&1 || return 0
+  docker_container_exists "$DEPLOY_FASTAPI_CONTAINER" || return 0
+  docker logs --tail 80 "$DEPLOY_FASTAPI_CONTAINER" 2>&1 \
+    | sed -E 's/([Tt]oken|[Cc]ookie|[Ss]ecret|[Pp]assword|[Aa]uthorization)([=:][^[:space:],;]+)/\1=[redacted]/g' \
+    || true
+}
+
+related_database_container_name() {
+  case "$DEPLOY_FASTAPI_CONTAINER" in
+    *-api-1)
+      printf '%s-db-1' "${DEPLOY_FASTAPI_CONTAINER%-api-1}"
+      ;;
+    *)
+      printf ''
+      ;;
+  esac
+}
+
+start_related_database_container_if_needed() {
+  command -v docker >/dev/null 2>&1 || return 0
+  local container
+  container="$(related_database_container_name)"
+  [ -n "$container" ] || return 0
+  docker_container_exists "$container" || return 0
+  if docker_container_running "$container"; then
+    return 0
+  fi
+  log "start related database container $container"
+  docker start "$container" >/dev/null || true
+  sleep 2
 }
 
 publish_live_frontend() {
@@ -174,10 +244,14 @@ publish_frontend_status_asset() {
 }
 
 install_fastapi_routes() {
-  require_fastapi_container
+  start_fastapi_container_if_needed || fail 'fastapi container is not running'
   docker cp scripts/deploy/install-fastapi-leaderboard-routes.py "$DEPLOY_FASTAPI_CONTAINER:/tmp/install-fastapi-leaderboard-routes.py"
-  docker exec "$DEPLOY_FASTAPI_CONTAINER" python /tmp/install-fastapi-leaderboard-routes.py
-  docker exec "$DEPLOY_FASTAPI_CONTAINER" rm -f /tmp/install-fastapi-leaderboard-routes.py
+  if ! docker exec "$DEPLOY_FASTAPI_CONTAINER" python /tmp/install-fastapi-leaderboard-routes.py; then
+    log 'fastapi route install failed; keeping existing route patch'
+    start_fastapi_container_if_needed || true
+    return 0
+  fi
+  docker exec "$DEPLOY_FASTAPI_CONTAINER" rm -f /tmp/install-fastapi-leaderboard-routes.py || true
 }
 
 start_leaderboard_node_api() {
@@ -289,16 +363,23 @@ restart_service() {
     bash -lc "$DEPLOY_RESTART_COMMAND"
     return
   fi
+  start_related_database_container_if_needed
   if [ -n "$DEPLOY_FASTAPI_CONTAINER" ] && docker_container_running "$DEPLOY_FASTAPI_CONTAINER"; then
     docker restart "$DEPLOY_FASTAPI_CONTAINER" >/dev/null
+    return
+  fi
+  if start_fastapi_container_if_needed; then
     return
   fi
   log 'skip restart'
 }
 
 reload_fastapi_routes() {
-  require_fastapi_container
-  docker restart "$DEPLOY_FASTAPI_CONTAINER" >/dev/null
+  if docker_container_running "$DEPLOY_FASTAPI_CONTAINER"; then
+    docker restart "$DEPLOY_FASTAPI_CONTAINER" >/dev/null
+    return
+  fi
+  start_fastapi_container_if_needed || fail 'fastapi container is not running'
 }
 
 wait_for_live_health() {
@@ -312,6 +393,10 @@ wait_for_live_health() {
     fi
     sleep 2
   done
+  if ! curl -fsS "$base/health" >/dev/null 2>&1; then
+    log_fastapi_container_state
+    log_fastapi_container_errors
+  fi
 }
 
 tier_list_smoke_deck_id() {
@@ -533,6 +618,10 @@ TIER_LIST_SNAPSHOT_FILE="$DATA_ROOT/tier-list-snapshot.json"
 TIER_LIST_CONFIGS_FILE="$DATA_ROOT/tier-list-configs.json"
 BATTLE_FESTIVAL_SNAPSHOT_FILE="$DATA_ROOT/battle-festival-snapshot.json"
 BATTLE_FESTIVAL_CONFIGS_FILE="$DATA_ROOT/battle-festival-configs.json"
+if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ] && ! postgres_export_python_ready; then
+  log 'postgres export python dependencies missing; reuse existing exported data'
+  DEPLOY_EXPORT_POSTGRES=0
+fi
 if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ]; then
   log 'ensure battle festival schema'
   ensure_battle_festival_scope
@@ -576,6 +665,7 @@ else
   log 'skip postgres export'
 fi
 
+ensure_writable_dir "$DATA_ROOT"
 log 'refresh official card data'
 LEADERBOARD_LEGACY_ROOT="$LEGACY_ROOT" \
   run_node apps/api/leaderboard-snapshot/refresh-official-card-data.mjs \
