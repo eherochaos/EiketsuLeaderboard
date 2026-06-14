@@ -311,8 +311,10 @@ def test_sync_client_collects_and_uploads_active_battle_festival_scope(tmp_path,
     assert manifests[0]["mode_scope"] == MODE_SCOPE_BATTLE_FESTIVAL
     assert manifests[0]["festival_date_from"] == "2026-06-11"
     assert manifests[0]["festival_date_to"] == "2026-06-13"
+    assert manifests[0]["festival_period_source"] == client_upload.FESTIVAL_PERIOD_SOURCE_OFFICIAL
     assert manifests[0]["match_count"] == 0
     assert manifests[1]["mode_scope"] == MODE_SCOPE_TIER_LIST
+    assert manifests[1]["festival_period_source"] == ""
 
 
 def test_sync_client_warns_when_battle_festival_package_reuses_bad_local_data(tmp_path, monkeypatch):
@@ -405,6 +407,7 @@ def test_battle_festival_plan_collects_past_official_period_when_range_intersect
     assert plan.config.date_to == "2026-06-13"
     assert plan.config.festival_date_from == "2026-06-11"
     assert plan.config.festival_date_to == "2026-06-13"
+    assert plan.config.festival_period_source == client_upload.FESTIVAL_PERIOD_SOURCE_OFFICIAL
 
 
 def test_battle_festival_plan_skips_after_probe_failure():

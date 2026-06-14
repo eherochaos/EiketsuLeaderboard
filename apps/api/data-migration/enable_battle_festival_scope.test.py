@@ -23,9 +23,11 @@ class EnableBattleFestivalScopeTests(unittest.TestCase):
             self.assertIn("shared_contribution_packages.mode_scope", result["addedColumns"])
             self.assertIn("shared_contribution_packages.festival_date_from", result["addedColumns"])
             self.assertIn("shared_contribution_packages.festival_date_to", result["addedColumns"])
+            self.assertIn("shared_contribution_packages.festival_period_source", result["addedColumns"])
             self.assertIn("server_uploads.mode_scope", result["addedColumns"])
             self.assertIn("server_uploads.festival_date_from", result["addedColumns"])
             self.assertIn("server_uploads.festival_date_to", result["addedColumns"])
+            self.assertIn("server_uploads.festival_period_source", result["addedColumns"])
             self.assertEqual(result["updatedConfigRows"], 0)
             with closing(sqlite3.connect(db_path)) as connection:
                 rows = connection.execute(
@@ -36,6 +38,7 @@ class EnableBattleFestivalScopeTests(unittest.TestCase):
             self.assertIn("mode_scope", upload_columns)
             self.assertIn("festival_date_from", upload_columns)
             self.assertIn("festival_date_to", upload_columns)
+            self.assertIn("festival_period_source", upload_columns)
             self.assertEqual(result["backfilledScopeRows"], 0)
 
     def test_target_version_does_not_toggle_collection_scope(self) -> None:
@@ -62,14 +65,14 @@ class EnableBattleFestivalScopeTests(unittest.TestCase):
             with closing(sqlite3.connect(db_path)) as connection:
                 package_rows = connection.execute(
                     """
-                    SELECT package_id, mode_scope, festival_date_from, festival_date_to
+                    SELECT package_id, mode_scope, festival_date_from, festival_date_to, festival_period_source
                     FROM shared_contribution_packages
                     ORDER BY package_id
                     """
                 ).fetchall()
                 upload_rows = connection.execute(
                     """
-                    SELECT package_id, mode_scope, festival_date_from, festival_date_to
+                    SELECT package_id, mode_scope, festival_date_from, festival_date_to, festival_period_source
                     FROM server_uploads
                     ORDER BY package_id
                     """
@@ -78,15 +81,15 @@ class EnableBattleFestivalScopeTests(unittest.TestCase):
             self.assertEqual(
                 package_rows,
                 [
-                    ("pkg-battle", "battle_festival", "2026-06-11", "2026-06-13"),
-                    ("pkg-tier", "tier_list", "", ""),
+                    ("pkg-battle", "battle_festival", "", "", ""),
+                    ("pkg-tier", "tier_list", "", "", ""),
                 ],
             )
             self.assertEqual(
                 upload_rows,
                 [
-                    ("pkg-battle", "battle_festival", "2026-06-11", "2026-06-13"),
-                    ("pkg-tier", "tier_list", "", ""),
+                    ("pkg-battle", "battle_festival", "", "", ""),
+                    ("pkg-tier", "tier_list", "", "", ""),
                 ],
             )
 

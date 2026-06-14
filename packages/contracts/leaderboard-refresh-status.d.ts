@@ -32,6 +32,7 @@ export interface LeaderboardRefreshUpload {
   modeScope?: string;
   festivalDateFrom?: string;
   festivalDateTo?: string;
+  festivalPeriodSource?: string;
   status: string;
   matchCount: number;
   importedMatchCount: number;
@@ -73,6 +74,7 @@ export interface LeaderboardRefreshStatus {
     periodSourceUploadId?: number;
     periodSourcePackageId?: string;
     periodStatus?: string;
+    festivalPeriodSource?: string;
     refreshStatus?: string;
     sourceKind?: string;
     targetVersion?: string;

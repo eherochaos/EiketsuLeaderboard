@@ -15,7 +15,14 @@ from eiketsu_env.db.session import make_engine
 from eiketsu_env.services.collector import CollectResult
 from eiketsu_env.services.mode_filter import MODE_SCOPE_BATTLE_FESTIVAL
 from eiketsu_env.services.repository import EnvRepository
-from eiketsu_env.services.share import ShareConfig, export_contribution, import_contributions, load_share_config, sync_shared
+from eiketsu_env.services.share import (
+    FESTIVAL_PERIOD_SOURCE_OFFICIAL,
+    ShareConfig,
+    export_contribution,
+    import_contributions,
+    load_share_config,
+    sync_shared,
+)
 from eiketsu_env.utils import sha256_text
 
 
@@ -149,10 +156,13 @@ def test_import_contribution_preserves_battle_festival_manifest_scope(tmp_path):
             mode_scope=MODE_SCOPE_BATTLE_FESTIVAL,
             festival_date_from="2026-06-11",
             festival_date_to="2026-06-13",
+            festival_period_source=FESTIVAL_PERIOD_SOURCE_OFFICIAL,
             include_battle_festival=True,
         ),
         "alice",
     )
+    manifest = json.loads(package.path.read_text(encoding="utf-8").splitlines()[0])
+    assert manifest["festival_period_source"] == FESTIVAL_PERIOD_SOURCE_OFFICIAL
 
     dest_settings = _settings(tmp_path / "dest")
     dest_engine = _init_db(dest_settings)
@@ -166,6 +176,7 @@ def test_import_contribution_preserves_battle_festival_manifest_scope(tmp_path):
         assert imported.mode_scope == MODE_SCOPE_BATTLE_FESTIVAL
         assert imported.festival_date_from == "2026-06-11"
         assert imported.festival_date_to == "2026-06-13"
+        assert imported.festival_period_source == FESTIVAL_PERIOD_SOURCE_OFFICIAL
 
 
 def test_import_contributions_is_idempotent_and_dedupes_replay(tmp_path):

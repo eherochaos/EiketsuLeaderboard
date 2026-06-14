@@ -53,6 +53,7 @@ with make_session_factory(settings)() as session:
                        COALESCE(NULLIF(p.mode_scope, ''), u.mode_scope, '') AS mode_scope,
                        COALESCE(NULLIF(p.festival_date_from, ''), u.festival_date_from, '') AS festival_date_from,
                        COALESCE(NULLIF(p.festival_date_to, ''), u.festival_date_to, '') AS festival_date_to,
+                       COALESCE(NULLIF(p.festival_period_source, ''), u.festival_period_source, '') AS festival_period_source,
                        u.created_at, u.updated_at
                 FROM server_uploads u
                 LEFT JOIN shared_contribution_packages p ON p.package_id = u.package_id
