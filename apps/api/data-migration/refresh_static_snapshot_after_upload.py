@@ -25,6 +25,7 @@ DEFAULT_BATTLE_FESTIVAL_CONFIGS_FILE = Path("apps/api/data/battle-festival-confi
 STATUS_SCHEMA_VERSION = 1
 RECENT_STATUS_LIMIT = 20
 DEFAULT_NODE_OPTIONS = "--max-old-space-size=4096"
+REFRESH_LOCK_STALE_SECONDS = 30 * 60
 
 
 CommandRunner = Callable[[list[str], dict[str, str]], subprocess.CompletedProcess[str]]
@@ -675,13 +676,59 @@ def _resolve(root: Path, path: Path | None) -> Path:
     return path if path.is_absolute() else (root / path).resolve()
 
 
-def _acquire_lock(path: Path):
+def _acquire_lock(path: Path, stale_after_seconds: int = REFRESH_LOCK_STALE_SECONDS):
     path.parent.mkdir(parents=True, exist_ok=True)
+    lock_handle = _create_lock_file(path, stale_after_seconds)
+    if lock_handle is not None:
+        return lock_handle
+
+    if not _is_stale_lock(path, stale_after_seconds):
+        return None
+
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return None
+
+    return _create_lock_file(path, stale_after_seconds)
+
+
+def _create_lock_file(path: Path, stale_after_seconds: int):
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
         return None
-    return os.fdopen(fd, "w", encoding="utf-8")
+    handle = os.fdopen(fd, "w", encoding="utf-8")
+    try:
+        json.dump(
+            {
+                "pid": os.getpid(),
+                "startedAt": _utc_now(),
+                "staleAfterSeconds": stale_after_seconds,
+            },
+            handle,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        handle.write("\n")
+        handle.flush()
+    except Exception:
+        handle.close()
+        path.unlink(missing_ok=True)
+        raise
+    return handle
+
+
+def _is_stale_lock(path: Path, stale_after_seconds: int) -> bool:
+    if stale_after_seconds <= 0:
+        return False
+    try:
+        modified_at = path.stat().st_mtime
+    except OSError:
+        return False
+    return time.time() - modified_at > stale_after_seconds
 
 
 def build_parser() -> argparse.ArgumentParser:

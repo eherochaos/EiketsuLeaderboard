@@ -335,11 +335,12 @@ class DockerNodeRunner:
             return completed
 
         docker_args = [self._to_work_path(value) for value in command[1:]]
-        docker_env = {
-            key: self._to_work_path(value)
-            for key, value in env.items()
-            if key == "NODE_OPTIONS" or key.startswith("LEADERBOARD_")
-        }
+        docker_env = {}
+        for key, value in env.items():
+            if key == "NODE_OPTIONS":
+                docker_env[key] = value
+            elif key.startswith("LEADERBOARD_"):
+                docker_env[key] = self._to_work_path(value)
         if self.node_container:
             docker_command = ["docker", "exec", "-w", "/work"]
             for key, value in docker_env.items():

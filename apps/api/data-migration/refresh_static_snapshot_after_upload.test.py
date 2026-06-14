@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
+import refresh_static_snapshot_after_upload as refresh_module
 from refresh_static_snapshot_after_upload import refresh_static_snapshot_after_upload, write_refresh_status_only
 
 
@@ -15,6 +18,7 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             repo_root = Path(temp_dir)
             legacy_root = repo_root / "apps/api/data/legacy-service"
             snapshot_file = repo_root / "apps/api/data/leaderboard-snapshot.json"
+            lock_file = snapshot_file.with_name(f".{snapshot_file.name}.refresh.lock")
             status_file = repo_root / "apps/api/data/leaderboard-refresh-status.json"
             live_snapshot_file = repo_root / "live/leaderboard-snapshot.json"
             live_status_file = repo_root / "live/leaderboard-refresh-status.json"
@@ -86,6 +90,7 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             self.assertEqual(calls[-1][1]["LEADERBOARD_LEGACY_ROOT"], str(legacy_root))
             self.assertEqual(calls[-1][1]["LEADERBOARD_SNAPSHOT_FILE"], str(snapshot_file))
             self.assertTrue(calls[-1][1]["LEADERBOARD_MATCH_SEARCH_INDEX_FILE"].endswith("match-search-index.json"))
+            self.assertFalse(lock_file.exists())
 
     def test_refresh_static_snapshot_fails_on_run_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -141,15 +146,112 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             repo_root = Path(temp_dir)
             snapshot_file = repo_root / "apps/api/data/leaderboard-snapshot.json"
             snapshot_file.parent.mkdir(parents=True, exist_ok=True)
-            snapshot_file.with_name(f".{snapshot_file.name}.refresh.lock").write_text("busy", encoding="utf-8")
+            lock_file = snapshot_file.with_name(f".{snapshot_file.name}.refresh.lock")
+            lock_file.write_text("busy", encoding="utf-8")
 
             result = refresh_static_snapshot_after_upload(repo_root=repo_root, snapshot_file=snapshot_file)
 
             self.assertEqual(result, {"status": "skipped", "reason": "refresh already running"})
+            self.assertTrue(lock_file.exists())
             status_file = repo_root / "apps/api/data/leaderboard-refresh-status.json"
             status = json.loads(status_file.read_text(encoding="utf-8"))
             self.assertEqual(status["refresh"]["status"], "skipped")
             self.assertEqual(status["refresh"]["reason"], "refresh already running")
+
+    def test_refresh_static_snapshot_replaces_stale_zero_byte_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            legacy_root = repo_root / "apps/api/data/legacy-service"
+            snapshot_file = repo_root / "apps/api/data/leaderboard-snapshot.json"
+            status_file = repo_root / "apps/api/data/leaderboard-refresh-status.json"
+            lock_file = snapshot_file.with_name(f".{snapshot_file.name}.refresh.lock")
+            snapshot_file.parent.mkdir(parents=True, exist_ok=True)
+            lock_file.write_bytes(b"")
+            stale_time = time.time() - refresh_module.REFRESH_LOCK_STALE_SECONDS - 60
+            os.utime(lock_file, (stale_time, stale_time))
+
+            def fake_exporter(output_dir: Path) -> dict:
+                output_dir.mkdir(parents=True)
+                return {"tables": {}}
+
+            def fake_runner(command: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+                if command[-1].endswith("refresh-snapshot.mjs"):
+                    snapshot_file.write_text(json.dumps({"metadata": {"sourceRunId": 9}}), encoding="utf-8")
+                    Path(env["LEADERBOARD_TIER_LIST_SNAPSHOT_FILE"]).write_text(
+                        json.dumps({"metadata": {"sourceRunId": 9}}),
+                        encoding="utf-8",
+                    )
+                if command[-1].endswith("match-search-index.mjs"):
+                    Path(env["LEADERBOARD_MATCH_SEARCH_INDEX_FILE"]).write_text(
+                        json.dumps({"metadata": {"sourceRunId": 9}}),
+                        encoding="utf-8",
+                    )
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            result = refresh_static_snapshot_after_upload(
+                repo_root=repo_root,
+                legacy_root=legacy_root,
+                snapshot_file=snapshot_file,
+                status_file=status_file,
+                exporter=fake_exporter,
+                runner=fake_runner,
+                refresh_run=False,
+            )
+
+            self.assertEqual(result["status"], "completed")
+            self.assertFalse(lock_file.exists())
+            status = json.loads(status_file.read_text(encoding="utf-8"))
+            self.assertEqual(status["refresh"]["status"], "completed")
+
+    def test_refresh_failure_after_stale_lock_writes_failed_status(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            legacy_root = repo_root / "apps/api/data/legacy-service"
+            snapshot_file = repo_root / "apps/api/data/leaderboard-snapshot.json"
+            status_file = repo_root / "apps/api/data/leaderboard-refresh-status.json"
+            lock_file = snapshot_file.with_name(f".{snapshot_file.name}.refresh.lock")
+            snapshot_file.parent.mkdir(parents=True, exist_ok=True)
+            lock_file.write_bytes(b"")
+            stale_time = time.time() - refresh_module.REFRESH_LOCK_STALE_SECONDS - 60
+            os.utime(lock_file, (stale_time, stale_time))
+
+            def fake_exporter(output_dir: Path) -> dict:
+                output_dir.mkdir(parents=True)
+                return {"tables": {}}
+
+            def fake_runner(command: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+                raise RuntimeError("snapshot refresh failed")
+
+            with self.assertRaisesRegex(RuntimeError, "snapshot refresh failed"):
+                refresh_static_snapshot_after_upload(
+                    repo_root=repo_root,
+                    legacy_root=legacy_root,
+                    snapshot_file=snapshot_file,
+                    status_file=status_file,
+                    exporter=fake_exporter,
+                    runner=fake_runner,
+                    refresh_run=False,
+                )
+
+            self.assertFalse(lock_file.exists())
+            status = json.loads(status_file.read_text(encoding="utf-8"))
+            self.assertEqual(status["refresh"]["status"], "failed")
+            self.assertIn("snapshot refresh failed", status["refresh"]["error"])
+
+    def test_acquire_lock_writes_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            lock_file = Path(temp_dir) / "refresh.lock"
+            lock_handle = refresh_module._acquire_lock(lock_file)
+            self.assertIsNotNone(lock_handle)
+            try:
+                payload = json.loads(lock_file.read_text(encoding="utf-8"))
+                self.assertEqual(payload["pid"], os.getpid())
+                self.assertEqual(payload["staleAfterSeconds"], refresh_module.REFRESH_LOCK_STALE_SECONDS)
+                self.assertTrue(payload["startedAt"].endswith("Z"))
+            finally:
+                if lock_handle is not None:
+                    lock_handle.close()
+                lock_file.unlink(missing_ok=True)
 
     def test_refresh_failure_writes_sanitized_status(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -332,6 +333,38 @@ class UploadRefreshWorkerTests(unittest.TestCase):
                     "/work/apps/api/leaderboard-snapshot/refresh-snapshot.mjs",
                 ],
             )
+
+    def test_docker_node_runner_preserves_node_options_when_cwd_is_repo_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            captured: dict[str, list[str]] = {}
+            original_which = upload_refresh_worker.shutil.which
+            original_run_checked = upload_refresh_worker._run_checked
+            original_cwd = Path.cwd()
+
+            def fake_run_checked(command: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
+                captured["command"] = command
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            upload_refresh_worker.shutil.which = lambda _: None
+            upload_refresh_worker._run_checked = fake_run_checked
+            try:
+                os.chdir(root)
+                runner = upload_refresh_worker.DockerNodeRunner(root, node_container="eiketsu-leaderboard-api")
+                runner(
+                    ["node", str(root / "apps/api/leaderboard-snapshot/refresh-snapshot.mjs")],
+                    {
+                        "NODE_OPTIONS": "--max-old-space-size=4096",
+                        "LEADERBOARD_LEGACY_ROOT": str(root / "apps/api/data/legacy-service"),
+                    },
+                )
+            finally:
+                os.chdir(original_cwd)
+                upload_refresh_worker.shutil.which = original_which
+                upload_refresh_worker._run_checked = original_run_checked
+
+            self.assertIn("NODE_OPTIONS=--max-old-space-size=4096", captured["command"])
+            self.assertNotIn("NODE_OPTIONS=/work/--max-old-space-size=4096", captured["command"])
 
     def _config(self, root: Path) -> UploadRefreshConfig:
         return UploadRefreshConfig(
