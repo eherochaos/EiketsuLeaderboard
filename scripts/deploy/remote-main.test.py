@@ -114,6 +114,19 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn('mv "$host_export_root" "$DATA_ROOT/legacy-service.next"', self.text)
         self.assertNotIn('docker cp "$DEPLOY_EXPORT_CONTAINER:$container_export_root" "$DATA_ROOT/legacy-service.next"', self.text)
 
+    def test_postgres_export_reuses_existing_data_when_python_deps_are_missing(self) -> None:
+        preflight = self.function_body("postgres_export_python_ready")
+        self.assertIn("python -c 'import sqlalchemy'", preflight)
+        self.assertIn("postgres export python dependencies missing; reuse existing exported data", self.text)
+        skip_start = self.text.index("log 'skip postgres export'")
+        skip_block = self.text[skip_start:self.text.index("log 'refresh leaderboard snapshot'", skip_start)]
+        self.assertIn('ensure_writable_dir "$DATA_ROOT"', skip_block)
+        self.assert_order(
+            'BATTLE_FESTIVAL_CONFIGS_FILE="$DATA_ROOT/battle-festival-configs.json"',
+            "postgres export python dependencies missing; reuse existing exported data",
+            "log 'skip postgres export'",
+        )
+
     def test_upload_worker_systemd_execstart_uses_absolute_script(self) -> None:
         worker_install = self.function_body("install_upload_refresh_worker")
         self.assertIn('local worker_root="$DEPLOY_PATH/$DATA_ROOT"', worker_install)
@@ -125,9 +138,46 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
 
     def test_route_reload_keeps_installed_container_patch(self) -> None:
         route_reload = self.function_body("reload_fastapi_routes")
-        self.assertIn("require_fastapi_container", route_reload)
         self.assertIn("docker restart \"$DEPLOY_FASTAPI_CONTAINER\"", route_reload)
+        self.assertIn("start_fastapi_container_if_needed", route_reload)
         self.assertNotIn("DEPLOY_RESTART_COMMAND", route_reload)
+
+    def test_restart_service_starts_existing_stopped_fastapi_container(self) -> None:
+        restart_service = self.function_body("restart_service")
+        start_helper = self.function_body("start_fastapi_container_if_needed")
+        self.assertIn("start_fastapi_container_if_needed", restart_service)
+        self.assertIn("docker_container_exists \"$DEPLOY_FASTAPI_CONTAINER\"", start_helper)
+        self.assertIn("docker start \"$DEPLOY_FASTAPI_CONTAINER\"", start_helper)
+        self.assertIn("sleep 2", start_helper)
+
+    def test_restart_service_starts_related_database_container_first(self) -> None:
+        restart_service = self.function_body("restart_service")
+        related_name = self.function_body("related_database_container_name")
+        related_start = self.function_body("start_related_database_container_if_needed")
+        self.assertIn('printf \'%s-db-1\' "${DEPLOY_FASTAPI_CONTAINER%-api-1}"', related_name)
+        self.assertIn("docker start \"$container\"", related_start)
+        self.assert_order(
+            "start_related_database_container_if_needed",
+            "docker restart \"$DEPLOY_FASTAPI_CONTAINER\"",
+        )
+        self.assertIn("start_related_database_container_if_needed", restart_service)
+
+    def test_live_health_logs_fastapi_state_without_container_logs(self) -> None:
+        health = self.function_body("wait_for_live_health")
+        state = self.function_body("log_fastapi_container_state")
+        errors = self.function_body("log_fastapi_container_errors")
+        self.assertIn("log_fastapi_container_state", health)
+        self.assertIn("log_fastapi_container_errors", health)
+        self.assertIn("docker inspect", state)
+        self.assertIn("oomKilled", state)
+        self.assertIn("docker logs --tail 80", errors)
+        self.assertIn("[redacted]", errors)
+
+    def test_route_install_failure_keeps_existing_patch(self) -> None:
+        install_routes = self.function_body("install_fastapi_routes")
+        self.assertIn("fastapi route install failed; keeping existing route patch", install_routes)
+        self.assertIn("start_fastapi_container_if_needed", install_routes)
+        self.assertIn("return 0", install_routes)
 
     def test_node_api_is_removed_before_service_restart(self) -> None:
         stop_node = self.function_body("stop_leaderboard_node_api")
