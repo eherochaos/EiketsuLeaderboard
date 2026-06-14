@@ -600,6 +600,8 @@ async function testRefreshBuildsBattleFestivalSnapshotFromMatches() {
           imported_match_count: 2,
           date_from: "2026-05-24",
           date_to: "2026-05-25",
+          festival_date_from: "2026-06-14",
+          festival_date_to: "2026-06-14",
           created_at: "2026-06-14T02:06:00Z"
         },
         package: {
@@ -621,6 +623,8 @@ async function testRefreshBuildsBattleFestivalSnapshotFromMatches() {
     assert.equal(battleFestivalSnapshot.metadata.sourceImportedMatchCount, 2);
     assert.equal(battleFestivalSnapshot.metadata.sourceMatchCount, 4);
     assert.equal(battleFestivalSnapshot.metadata.sourceUploadCreatedAt, "2026-06-14T02:06:00Z");
+    assert.equal(battleFestivalSnapshot.metadata.dateFrom, "2026-05-24");
+    assert.equal(battleFestivalSnapshot.metadata.dateTo, "2026-05-25");
     assert.equal(battleFestivalSnapshot.metadata.sampleSize, 2);
     assert.equal(battleFestivalSnapshot.tierRows.length, 2);
     assert.ok(battleFestivalSnapshot.tierRows.some((row) => row.deckId === battleDeckA));
