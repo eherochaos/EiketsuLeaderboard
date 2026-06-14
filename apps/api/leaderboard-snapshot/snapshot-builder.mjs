@@ -511,8 +511,8 @@ function mergeBattleFestivalUploadScope(upload, packageById) {
     ...packageRow,
     ...upload,
     mode_scope: modeScope,
-    festival_date_from: upload.festival_date_from || packageRow?.festival_date_from || "",
-    festival_date_to: upload.festival_date_to || packageRow?.festival_date_to || ""
+    festival_date_from: packageRow?.festival_date_from || upload.festival_date_from || "",
+    festival_date_to: packageRow?.festival_date_to || upload.festival_date_to || ""
   };
 }
 
