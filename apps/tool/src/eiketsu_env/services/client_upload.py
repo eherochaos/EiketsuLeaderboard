@@ -92,6 +92,17 @@ class ClientCleanupResult:
 
 
 @dataclass(slots=True)
+class ContributionPackageSummary:
+    package_id: str
+    mode_scope: str
+    match_count: int
+    body_hash: str
+    content_hash: str
+    player_merit_sample_count: int
+    player_missing_merit_count: int
+
+
+@dataclass(slots=True)
 class ClientUpdateCheck:
     configured: bool
     current_version: str
@@ -508,6 +519,11 @@ def _upload_contribution(
     export_result = export_contribution(settings, share_config, config.contributor, package_path)
     package_text = export_result.path.read_text(encoding="utf-8")
     assert_safe_contribution_payload(package_text)
+    package_summary = _summarize_contribution_package(package_text)
+    if progress:
+        progress.message(_format_package_summary(package_summary))
+        if package_summary.mode_scope == MODE_SCOPE_BATTLE_FESTIVAL and package_summary.match_count > 0 and package_summary.player_merit_sample_count == 0:
+            progress.message("battle_festival 包警告：player侧戦功样本为 0，本地 DB 仍可能是旧坏数据；需要重新采集生成新包后页面才会刷新。")
     if progress:
         progress.message(f"正在上传 {share_config.mode_scope} 到服务器")
     upload = transport.request_json(
@@ -516,11 +532,54 @@ def _upload_contribution(
         {"package_text": package_text, "content_hash": sha256_text(package_text)},
         token=config.api_token,
     )
+    if progress and upload.get("already_uploaded"):
+        progress.message("服务器提示 already_uploaded=true：本次是同内容重复上传，内容未变化；请重新采集生成新包后再上传。")
     try:
         export_result.path.unlink()
     except OSError:
         pass
     return upload, export_result.path, export_result.match_count
+
+
+def _summarize_contribution_package(package_text: str) -> ContributionPackageSummary:
+    lines = [line for line in package_text.splitlines() if line.strip()]
+    manifest = json.loads(lines[0]) if lines else {}
+    merit_key = "戦功"
+    odds_key = "戦功オッズ"
+    rank_key = "戦祭りランキング"
+    player_merit_sample_count = 0
+    player_missing_merit_count = 0
+    for line in lines[1:]:
+        record = json.loads(line)
+        for player in record.get("players") or []:
+            if str(player.get("role") or "") != "player":
+                continue
+            profile = player.get("profile") or {}
+            has_merit = bool(str(profile.get(merit_key) or "").strip())
+            if has_merit:
+                player_merit_sample_count += 1
+            elif profile.get(odds_key) or profile.get(rank_key):
+                player_missing_merit_count += 1
+    return ContributionPackageSummary(
+        package_id=str(manifest.get("package_id") or ""),
+        mode_scope=str(manifest.get("mode_scope") or ""),
+        match_count=int(manifest.get("match_count") or 0),
+        body_hash=str(manifest.get("body_hash") or ""),
+        content_hash=sha256_text(package_text),
+        player_merit_sample_count=player_merit_sample_count,
+        player_missing_merit_count=player_missing_merit_count,
+    )
+
+
+def _format_package_summary(summary: ContributionPackageSummary) -> str:
+    return (
+        f"{summary.mode_scope} 包检查："
+        f"match_count {summary.match_count}，"
+        f"body_hash {summary.body_hash[:16]}，"
+        f"package_id {summary.package_id}，"
+        f"player側戦功样本 {summary.player_merit_sample_count}，"
+        f"player缺戦功 {summary.player_missing_merit_count}"
+    )
 
 
 def doctor_client(settings: Settings, transport: JsonTransport | None = None) -> dict[str, Any]:

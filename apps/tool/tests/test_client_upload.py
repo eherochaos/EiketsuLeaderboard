@@ -315,6 +315,78 @@ def test_sync_client_collects_and_uploads_active_battle_festival_scope(tmp_path,
     assert manifests[1]["mode_scope"] == MODE_SCOPE_TIER_LIST
 
 
+def test_sync_client_warns_when_battle_festival_package_reuses_bad_local_data(tmp_path, monkeypatch):
+    monkeypatch.setenv("EIKETSU_CLIENT_CONFIG_DIR", str(tmp_path / "client-config"))
+    settings = _settings(tmp_path)
+    save_client_config(
+        settings,
+        client_upload.ClientConfig(
+            server_url="http://127.0.0.1:8000",
+            api_token="token-secret",
+            contributor="alice",
+            user_public_id="u_test",
+        ),
+    )
+
+    class AlreadyUploadedTransport(_FakeTransport):
+        def request_json(self, method: str, url: str, payload: dict[str, Any] | None = None, token: str = "") -> dict[str, Any]:
+            result = super().request_json(method, url, payload, token)
+            if url.endswith("/api/v1/uploads"):
+                result["already_uploaded"] = True
+            return result
+
+    def fake_collect(settings, date_from, date_to, **kwargs):
+        engine = make_engine(settings)
+        Base.metadata.create_all(engine)
+        if kwargs.get("mode_scope") == MODE_SCOPE_BATTLE_FESTIVAL:
+            with Session(engine) as session:
+                repo = EnvRepository(session, settings)
+                detail = _detail_for(
+                    "\u6226\u796d\u308a",
+                    "Ver.battle",
+                    "https://eiketsu-taisen.net/members/history/detail?f=586&t=bad",
+                    "battle-no-player-merit",
+                    "2026-06-12 11:00",
+                )
+                detail["players"][0]["profile"] = {
+                    "\u6226\u529f\u30aa\u30c3\u30ba": "\u00d71.1",
+                    "\u6226\u796d\u308a\u30e9\u30f3\u30ad\u30f3\u30b0": "12 \u4f4d",
+                }
+                repo.upsert_match_detail(detail)
+                session.commit()
+            return CollectResult(1, "completed", {"matches": 1}, [])
+        return CollectResult(2, "completed", {"matches": 0}, [])
+
+    progress = _FakeProgress()
+    monkeypatch.setattr(client_upload, "collect_follow", fake_collect)
+    monkeypatch.setattr(
+        client_upload,
+        "probe_battle_festival_period",
+        lambda *args, **kwargs: BattleFestivalProbeResult(
+            BattleFestivalPeriod("2026-06-11", "2026-06-13"),
+            "active",
+            "festival active",
+        ),
+    )
+    monkeypatch.setattr(client_upload, "today_jst", lambda: date(2026, 6, 12))
+
+    result = sync_client(
+        settings,
+        interactive_auth=False,
+        transport=AlreadyUploadedTransport(),
+        target_version="Ver.battle",
+        progress=progress,
+    )
+
+    assert result.battle_festival_upload is not None
+    assert result.battle_festival_upload["already_uploaded"] is True
+    assert any("battle_festival 包检查" in message for message in progress.messages)
+    assert any("player側戦功样本 0" in message for message in progress.messages)
+    assert any("player缺戦功 1" in message for message in progress.messages)
+    assert any("本地 DB 仍可能是旧坏数据" in message for message in progress.messages)
+    assert any("同内容重复上传" in message for message in progress.messages)
+
+
 def test_battle_festival_plan_collects_past_official_period_when_range_intersects():
     config = client_upload.ShareConfig(target_version="Ver.3.5.0B", date_from="2026-06-13", date_to="2026-06-13")
     probe = BattleFestivalProbeResult(
