@@ -451,6 +451,7 @@ def _read_battle_festival_snapshot_summary(snapshot_file: Path | None) -> dict[s
         "periodSourceUploadId": metadata.get("periodSourceUploadId"),
         "periodSourcePackageId": metadata.get("periodSourcePackageId"),
         "periodStatus": metadata.get("periodStatus"),
+        "festivalPeriodSource": metadata.get("festivalPeriodSource"),
         "updatedAt": metadata.get("updatedAt"),
         "sampleSize": metadata.get("sampleSize"),
         "tierRows": len(payload.get("tierRows") or []) if isinstance(payload, dict) else 0,
@@ -513,6 +514,7 @@ def _read_recent_uploads(
                 "modeScope": mode_scope or "tier_list",
                 "festivalDateFrom": package.get("festival_date_from") or row.get("festival_date_from") or "",
                 "festivalDateTo": package.get("festival_date_to") or row.get("festival_date_to") or "",
+                "festivalPeriodSource": package.get("festival_period_source") or row.get("festival_period_source") or "",
                 "status": row.get("status"),
                 "matchCount": row.get("match_count"),
                 "importedMatchCount": row.get("imported_match_count"),
@@ -543,6 +545,7 @@ def _read_upload_packages(path: Path | None) -> dict[Any, dict[str, str]]:
             "mode_scope": str(row.get("mode_scope") or ""),
             "festival_date_from": str(row.get("festival_date_from") or ""),
             "festival_date_to": str(row.get("festival_date_to") or ""),
+            "festival_period_source": str(row.get("festival_period_source") or ""),
         }
     return packages
 

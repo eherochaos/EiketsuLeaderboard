@@ -30,7 +30,12 @@ from eiketsu_env.services.battle_festival import (
 from eiketsu_env.services.collector import CollectResult, collect_follow
 from eiketsu_env.services.mode_filter import MODE_SCOPE_BATTLE_FESTIVAL, MODE_SCOPE_TIER_LIST
 from eiketsu_env.services.progress import ProgressReporter
-from eiketsu_env.services.share import ShareConfig, assert_safe_contribution_payload, export_contribution
+from eiketsu_env.services.share import (
+    FESTIVAL_PERIOD_SOURCE_OFFICIAL,
+    ShareConfig,
+    assert_safe_contribution_payload,
+    export_contribution,
+)
 from eiketsu_env.utils import sha256_text
 
 
@@ -352,6 +357,7 @@ def apply_client_date_override(config: ShareConfig, date_from: str = "", date_to
         mode_scope=config.mode_scope,
         festival_date_from=config.festival_date_from,
         festival_date_to=config.festival_date_to,
+        festival_period_source=config.festival_period_source,
         include_solo=config.include_solo,
         include_battle_festival=config.include_battle_festival,
         high_ranker_rank=config.high_ranker_rank,
@@ -412,6 +418,7 @@ def battle_festival_share_config_from_period(
         date_to=collect_to,
         festival_date_from=period.date_from,
         festival_date_to=period.date_to,
+        festival_period_source=FESTIVAL_PERIOD_SOURCE_OFFICIAL,
     )
 
 
@@ -421,6 +428,7 @@ def _battle_festival_share_config_for_window(
     date_to: str,
     festival_date_from: str,
     festival_date_to: str,
+    festival_period_source: str = "",
 ) -> ShareConfig:
     battle_config = ShareConfig(
         schema_version=base_config.schema_version,
@@ -430,6 +438,7 @@ def _battle_festival_share_config_for_window(
         mode_scope=MODE_SCOPE_BATTLE_FESTIVAL,
         festival_date_from=festival_date_from,
         festival_date_to=festival_date_to,
+        festival_period_source=festival_period_source,
         include_solo=False,
         include_battle_festival=True,
         high_ranker_rank=base_config.high_ranker_rank,
@@ -457,6 +466,7 @@ def battle_festival_collect_plan(
                 date_to=date_to,
                 festival_date_from=probe.period.date_from,
                 festival_date_to=probe.period.date_to,
+                festival_period_source=FESTIVAL_PERIOD_SOURCE_OFFICIAL,
             )
             return BattleFestivalCollectPlan(official_config, "official_period", True, "官方战祭周期已匹配采集范围")
         return BattleFestivalCollectPlan(None, "official_inactive", False, "官方战祭周期未覆盖采集范围")

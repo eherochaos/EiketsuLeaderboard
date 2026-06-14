@@ -20,6 +20,7 @@ const LEADERBOARD_SNAPSHOT_METADATA_FIELDS = Object.freeze([
   "periodSourceUploadId",
   "periodSourcePackageId",
   "periodStatus",
+  "festivalPeriodSource",
   "excludedInvalidDeckRows",
   "excludedInvalidDeckSampleSize",
 ]);

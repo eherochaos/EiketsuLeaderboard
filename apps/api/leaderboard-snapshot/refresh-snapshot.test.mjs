@@ -208,6 +208,7 @@ async function createLegacyFixture(root, options = {}) {
       mode_scope: "battle_festival",
       festival_date_from: "2026-06-11",
       festival_date_to: "2026-06-13",
+      festival_period_source: "official",
       ...scope.package
     })));
   }
@@ -654,6 +655,7 @@ async function testRefreshBuildsBattleFestivalSnapshotFromMatches() {
     assert.equal(battleFestivalSnapshot.metadata.periodSourceUploadId, 74);
     assert.equal(battleFestivalSnapshot.metadata.periodSourcePackageId, "pkg-battle-source");
     assert.equal(battleFestivalSnapshot.metadata.periodStatus, "official");
+    assert.equal(battleFestivalSnapshot.metadata.festivalPeriodSource, "official");
     assert.equal(battleFestivalSnapshot.metadata.dateFrom, "2026-05-24");
     assert.equal(battleFestivalSnapshot.metadata.dateTo, "2026-05-25");
     assert.equal(battleFestivalSnapshot.metadata.sampleSize, 2);
@@ -730,6 +732,49 @@ async function testRefreshSkipsSingleDayBattleFestivalWithoutOfficialPeriod() {
   }
 }
 
+async function testRefreshSkipsMultiDayBattleFestivalWithoutOfficialSource() {
+  const root = await mkdtemp(join(tmpdir(), "battle-festival-untrusted-period-skip-refresh-"));
+  const legacyRoot = join(root, "legacy-service");
+  const outputPath = join(root, "published", "leaderboard-snapshot.json");
+
+  try {
+    await createLegacyFixture(legacyRoot, {
+      includeBattleFestivalMatches: true,
+      battleFestivalUploadScope: {
+        upload: {
+          id: 77,
+          package_id: "pkg-battle-untrusted-period",
+          match_count: 2,
+          imported_match_count: 2,
+          date_from: "2026-06-12",
+          date_to: "2026-06-13",
+          festival_date_from: "2026-06-12",
+          festival_date_to: "2026-06-13",
+          festival_period_source: "",
+          created_at: "2026-06-13T06:19:12Z"
+        },
+        package: {
+          package_id: "pkg-battle-untrusted-period",
+          mode_scope: "battle_festival",
+          festival_date_from: "2026-06-12",
+          festival_date_to: "2026-06-13",
+          festival_period_source: ""
+        }
+      }
+    });
+    const { battleFestival } = await refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: false });
+
+    assert.equal(battleFestival.status, "skipped_missing_official_period");
+    assert.equal(battleFestival.reason, "official battle festival period is not available");
+    await assert.rejects(
+      () => readFile(join(root, "published", "battle-festival-snapshot.json"), "utf8"),
+      { code: "ENOENT" }
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 async function testRefreshUsesEarlierOfficialPeriodForLatestSingleDayBattleFestivalUpload() {
   const root = await mkdtemp(join(tmpdir(), "battle-festival-official-period-refresh-"));
   const legacyRoot = join(root, "legacy-service");
@@ -775,7 +820,8 @@ async function testRefreshUsesEarlierOfficialPeriodForLatestSingleDayBattleFesti
             package_id: "pkg-battle-single-day-manifest",
             mode_scope: "battle_festival",
             festival_date_from: "2026-05-24",
-            festival_date_to: "2026-05-24"
+            festival_date_to: "2026-05-24",
+            festival_period_source: ""
           }
         }
       ]
@@ -790,6 +836,7 @@ async function testRefreshUsesEarlierOfficialPeriodForLatestSingleDayBattleFesti
     assert.equal(battleFestivalSnapshot.metadata.periodSourceUploadId, 78);
     assert.equal(battleFestivalSnapshot.metadata.periodSourcePackageId, "pkg-battle-official-period");
     assert.equal(battleFestivalSnapshot.metadata.periodStatus, "official");
+    assert.equal(battleFestivalSnapshot.metadata.festivalPeriodSource, "official");
     assert.equal(battleFestivalSnapshot.metadata.dateFrom, "2026-05-22");
     assert.equal(battleFestivalSnapshot.metadata.dateTo, "2026-05-24");
     assert.equal(battleFestivalSnapshot.metadata.sampleSize, 4);
@@ -983,6 +1030,7 @@ async function testRefreshWritesManifestOnlyBattleFestivalSnapshot() {
     assert.equal(battleFestivalSnapshot.metadata.periodSourceUploadId, 74);
     assert.equal(battleFestivalSnapshot.metadata.periodSourcePackageId, "pkg-battle-empty");
     assert.equal(battleFestivalSnapshot.metadata.periodStatus, "official");
+    assert.equal(battleFestivalSnapshot.metadata.festivalPeriodSource, "official");
     assert.equal(battleFestivalSnapshot.metadata.dateFrom, "2026-06-11");
     assert.equal(battleFestivalSnapshot.metadata.dateTo, "2026-06-13");
     assert.equal(battleFestivalSnapshot.metadata.sampleSize, 0);
@@ -998,6 +1046,7 @@ await testRefreshWritesAtomicSnapshot();
 await testRefreshWritesBattleFestivalSnapshot();
 await testRefreshBuildsBattleFestivalSnapshotFromMatches();
 await testRefreshSkipsSingleDayBattleFestivalWithoutOfficialPeriod();
+await testRefreshSkipsMultiDayBattleFestivalWithoutOfficialSource();
 await testRefreshUsesEarlierOfficialPeriodForLatestSingleDayBattleFestivalUpload();
 await testRefreshBuildsBattleFestivalMeritRows();
 await testRefreshBuildsBattleFestivalSnapshotWithoutCampField();

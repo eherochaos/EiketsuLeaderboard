@@ -39,6 +39,7 @@ MANIFEST_RECORD_TYPE = "manifest"
 MATCH_RECORD_TYPE = "match"
 DEFAULT_REPORTS = ["overview", "deck", "card", "deck-version", "card-version"]
 DEFAULT_REPORT_FORMATS = ["md", "csv"]
+FESTIVAL_PERIOD_SOURCE_OFFICIAL = "official"
 SAFE_GIT_PATHS = ["shared/share_config.json", "shared/contributions", "shared/reports"]
 FORBIDDEN_SHARED_KEYS = {
     "cookie",
@@ -64,6 +65,7 @@ class ShareConfig:
     mode_scope: str = MODE_SCOPE_TIER_LIST
     festival_date_from: str = ""
     festival_date_to: str = ""
+    festival_period_source: str = ""
     include_solo: bool = False
     include_battle_festival: bool = False
     high_ranker_rank: int = 100
@@ -80,6 +82,7 @@ class ShareConfig:
             mode_scope=normalize_mode_scope(str(payload.get("mode_scope") or MODE_SCOPE_TIER_LIST)),
             festival_date_from=str(payload.get("festival_date_from") or ""),
             festival_date_to=str(payload.get("festival_date_to") or ""),
+            festival_period_source=str(payload.get("festival_period_source") or ""),
             include_solo=bool(payload.get("include_solo", False)),
             include_battle_festival=bool(payload.get("include_battle_festival", False)),
             high_ranker_rank=int(payload.get("high_ranker_rank") or 100),
@@ -104,6 +107,8 @@ class ShareConfig:
             _validate_date(self.festival_date_to, "festival_date_to")
         if self.festival_date_from and self.festival_date_to and self.festival_date_to < self.festival_date_from:
             raise ValueError("share_config.json 的 festival_date_to 不能早于 festival_date_from")
+        if self.festival_period_source and self.festival_period_source != FESTIVAL_PERIOD_SOURCE_OFFICIAL:
+            raise ValueError("share_config.json 的 festival_period_source 只能是 official 或空")
         unsupported_formats = [item for item in self.report_formats if item not in {"csv", "md"}]
         if unsupported_formats:
             raise ValueError(f"不支持的报告格式：{unsupported_formats}")
@@ -165,6 +170,7 @@ def effective_share_config(config: ShareConfig, today: date | None = None) -> Sh
         mode_scope=config.mode_scope,
         festival_date_from=config.festival_date_from,
         festival_date_to=config.festival_date_to,
+        festival_period_source=config.festival_period_source,
         include_solo=config.include_solo,
         include_battle_festival=config.include_battle_festival,
         high_ranker_rank=config.high_ranker_rank,
@@ -223,6 +229,7 @@ def export_contribution(
         "mode_scope": config.mode_scope,
         "festival_date_from": config.festival_date_from,
         "festival_date_to": config.festival_date_to,
+        "festival_period_source": config.festival_period_source,
         "include_solo": config.include_solo,
         "include_battle_festival": config.include_battle_festival,
         "body_hash": body_hash,
@@ -676,6 +683,7 @@ def _update_package_row(
     package.mode_scope = normalize_mode_scope(str(manifest.get("mode_scope") or MODE_SCOPE_TIER_LIST))
     package.festival_date_from = str(manifest.get("festival_date_from") or "")
     package.festival_date_to = str(manifest.get("festival_date_to") or "")
+    package.festival_period_source = str(manifest.get("festival_period_source") or "")
     package.schema_version = str(manifest.get("schema_version") or SHARE_SCHEMA_VERSION)
     package.content_hash = content_hash
     package.file_path = str(path)

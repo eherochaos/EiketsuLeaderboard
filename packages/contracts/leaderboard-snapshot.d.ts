@@ -140,6 +140,7 @@ export interface LeaderboardSnapshot {
     periodSourceUploadId?: number;
     periodSourcePackageId?: string;
     periodStatus?: string;
+    festivalPeriodSource?: string;
     excludedInvalidDeckRows?: number;
     excludedInvalidDeckSampleSize?: number;
   };

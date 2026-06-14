@@ -43,6 +43,7 @@ const BATTLE_FESTIVAL_CAMP_KEYS = ["\u6240\u5c5e\u9663\u55b6", "\u6240\u5c5e\u96
 const BATTLE_FESTIVAL_MERIT_KEY = "\u6226\u529f";
 const BATTLE_FESTIVAL_PLAYER_DECK_LIMIT = 5;
 const BATTLE_FESTIVAL_FIRST_MATCH_MINUTES = 3;
+const FESTIVAL_PERIOD_SOURCE_OFFICIAL = "official";
 const BATTLE_FESTIVAL_MODES = new Set(["戦祭り", "戦祭", "戰祭", "战祭"]);
 
 function csvParts(row) {
@@ -516,7 +517,8 @@ function mergeBattleFestivalUploadScope(upload, packageById) {
     ...upload,
     mode_scope: modeScope,
     festival_date_from: packageRow?.festival_date_from || upload.festival_date_from || "",
-    festival_date_to: packageRow?.festival_date_to || upload.festival_date_to || ""
+    festival_date_to: packageRow?.festival_date_to || upload.festival_date_to || "",
+    festival_period_source: packageRow?.festival_period_source || upload.festival_period_source || ""
   };
 }
 
@@ -535,10 +537,12 @@ function latestBattleFestivalScope(uploadRows, packageRows, shareConfig) {
 }
 
 function authoritativeBattleFestivalPeriod(scope) {
+  const periodSource = String(scope?.festival_period_source || "").trim();
+  if (periodSource !== FESTIVAL_PERIOD_SOURCE_OFFICIAL) return null;
   const festivalDateFrom = String(scope?.festival_date_from || "").trim();
   const festivalDateTo = String(scope?.festival_date_to || "").trim();
   if (isIsoDate(festivalDateFrom) && isIsoDate(festivalDateTo) && festivalDateFrom < festivalDateTo) {
-    return { dateFrom: festivalDateFrom, dateTo: festivalDateTo };
+    return { dateFrom: festivalDateFrom, dateTo: festivalDateTo, source: periodSource };
   }
   return null;
 }
@@ -560,7 +564,8 @@ function battleFestivalMetadataScope(shareConfig, uploadScope = null, periodScop
     filterDateTo: period.dateTo,
     periodSourceUploadId: toNumber(periodScope?.id),
     periodSourcePackageId: String(periodScope?.package_id || ""),
-    periodStatus: "official"
+    periodStatus: "official",
+    festivalPeriodSource: period.source
   };
 }
 
@@ -589,6 +594,7 @@ function emptyBattleFestivalSnapshot(shareConfig, uploadScope = null, periodScop
       periodSourceUploadId: scope.periodSourceUploadId,
       periodSourcePackageId: scope.periodSourcePackageId,
       periodStatus: scope.periodStatus,
+      festivalPeriodSource: scope.festivalPeriodSource,
       ...battleFestivalSourceUploadMetadata(uploadScope)
     },
     home: {
@@ -2342,6 +2348,7 @@ async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope =
       periodSourceUploadId: scope.periodSourceUploadId,
       periodSourcePackageId: scope.periodSourcePackageId,
       periodStatus: scope.periodStatus,
+      festivalPeriodSource: scope.festivalPeriodSource,
       ...battleFestivalSourceUploadMetadata(uploadScope)
     },
     home: {

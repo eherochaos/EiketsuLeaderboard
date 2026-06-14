@@ -313,6 +313,7 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
                             "periodSourceUploadId": 21,
                             "periodSourcePackageId": "pkg-battle",
                             "periodStatus": "official",
+                            "festivalPeriodSource": "official",
                             "updatedAt": "2026-06-01T12:02:00Z",
                             "sampleSize": 10,
                         },
@@ -350,6 +351,7 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
                         "mode_scope": "tier_list",
                         "festival_date_from": "2026-06-14",
                         "festival_date_to": "2026-06-14",
+                        "festival_period_source": "",
                         "status": "completed",
                         "match_count": 12,
                         "imported_match_count": 10,
@@ -369,6 +371,7 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
                         "mode_scope": "battle_festival",
                         "festival_date_from": "2026-06-11",
                         "festival_date_to": "2026-06-13",
+                        "festival_period_source": "official",
                     },
                     ensure_ascii=False,
                 )
@@ -391,6 +394,7 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             self.assertEqual(upload["modeScope"], "battle_festival")
             self.assertEqual(upload["festivalDateFrom"], "2026-06-11")
             self.assertEqual(upload["festivalDateTo"], "2026-06-13")
+            self.assertEqual(upload["festivalPeriodSource"], "official")
             self.assertEqual(upload["contributorName"], "alice token=[redacted]")
             self.assertEqual(upload["userPublicId"], "u_public")
             self.assertEqual(status["battleFestivalSnapshot"]["sourceUploadId"], 21)
@@ -398,6 +402,7 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             self.assertEqual(status["battleFestivalSnapshot"]["periodSourceUploadId"], 21)
             self.assertEqual(status["battleFestivalSnapshot"]["periodSourcePackageId"], "pkg-battle")
             self.assertEqual(status["battleFestivalSnapshot"]["periodStatus"], "official")
+            self.assertEqual(status["battleFestivalSnapshot"]["festivalPeriodSource"], "official")
             self.assertEqual(status["battleFestivalSnapshot"]["sampleSize"], 10)
             self.assertEqual(status["battleFestivalSnapshot"]["tierRows"], 1)
             self.assertEqual(status["battleFestivalSnapshot"]["meritRows"], 1)

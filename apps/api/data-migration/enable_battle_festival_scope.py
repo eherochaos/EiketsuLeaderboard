@@ -15,6 +15,7 @@ SCOPE_COLUMN_SPECS = {
     "mode_scope": "VARCHAR(32) NOT NULL DEFAULT 'tier_list'",
     "festival_date_from": "VARCHAR(10) NOT NULL DEFAULT ''",
     "festival_date_to": "VARCHAR(10) NOT NULL DEFAULT ''",
+    "festival_period_source": "VARCHAR(32) NOT NULL DEFAULT ''",
 }
 TABLE_COLUMN_SPECS = {
     "server_share_config": CONFIG_COLUMN_SPECS,
@@ -99,16 +100,16 @@ def _backfill_battle_festival_scope_sqlite(connection: sqlite3.Connection) -> in
         return 0
     package_columns = _sqlite_columns(connection, "shared_contribution_packages")
     match_columns = _sqlite_columns(connection, "matches")
-    if not {"package_id", "date_from", "date_to"}.issubset(package_columns) or not {"id", "mode"}.issubset(match_columns):
+    if "package_id" not in package_columns or not {"id", "mode"}.issubset(match_columns):
         return 0
 
     rows = connection.execute(
         """
-        SELECT p.package_id, p.date_from, p.date_to
+        SELECT p.package_id
         FROM shared_contribution_packages p
         JOIN shared_contribution_matches link ON link.package_id = p.package_id
         JOIN matches m ON m.id = link.match_id
-        GROUP BY p.package_id, p.date_from, p.date_to
+        GROUP BY p.package_id
         HAVING COUNT(*) > 0
            AND SUM(CASE WHEN COALESCE(m.mode, '') = ? THEN 1 ELSE 0 END) = COUNT(*)
         """,
@@ -117,38 +118,27 @@ def _backfill_battle_festival_scope_sqlite(connection: sqlite3.Connection) -> in
     return _apply_battle_festival_scope_sqlite(connection, rows)
 
 
-def _apply_battle_festival_scope_sqlite(connection: sqlite3.Connection, rows: list[tuple[Any, Any, Any]]) -> int:
+def _apply_battle_festival_scope_sqlite(connection: sqlite3.Connection, rows: list[tuple[Any, ...]]) -> int:
     changed = 0
-    for package_id, date_from, date_to in rows:
+    for row in rows:
+        package_id = row[0]
         package_result = connection.execute(
             """
             UPDATE shared_contribution_packages
-            SET mode_scope = 'battle_festival',
-                festival_date_from = CASE WHEN COALESCE(festival_date_from, '') = '' THEN ? ELSE festival_date_from END,
-                festival_date_to = CASE WHEN COALESCE(festival_date_to, '') = '' THEN ? ELSE festival_date_to END
+            SET mode_scope = 'battle_festival'
             WHERE package_id = ?
-              AND (
-                COALESCE(mode_scope, '') <> 'battle_festival'
-                OR COALESCE(festival_date_from, '') = ''
-                OR COALESCE(festival_date_to, '') = ''
-              )
+              AND COALESCE(mode_scope, '') <> 'battle_festival'
             """,
-            (str(date_from or ""), str(date_to or ""), package_id),
+            (package_id,),
         )
         upload_result = connection.execute(
             """
             UPDATE server_uploads
-            SET mode_scope = 'battle_festival',
-                festival_date_from = CASE WHEN COALESCE(festival_date_from, '') = '' THEN ? ELSE festival_date_from END,
-                festival_date_to = CASE WHEN COALESCE(festival_date_to, '') = '' THEN ? ELSE festival_date_to END
+            SET mode_scope = 'battle_festival'
             WHERE package_id = ?
-              AND (
-                COALESCE(mode_scope, '') <> 'battle_festival'
-                OR COALESCE(festival_date_from, '') = ''
-                OR COALESCE(festival_date_to, '') = ''
-              )
+              AND COALESCE(mode_scope, '') <> 'battle_festival'
             """,
-            (str(date_from or ""), str(date_to or ""), package_id),
+            (package_id,),
         )
         changed += int(package_result.rowcount or 0) + int(upload_result.rowcount or 0)
     return changed
@@ -160,11 +150,11 @@ def _backfill_battle_festival_scope_server(connection: Any) -> int:
     rows = connection.execute(
         text(
             """
-            SELECT p.package_id, p.date_from, p.date_to
+            SELECT p.package_id
             FROM shared_contribution_packages p
             JOIN shared_contribution_matches link ON link.package_id = p.package_id
             JOIN matches m ON m.id = link.match_id
-            GROUP BY p.package_id, p.date_from, p.date_to
+            GROUP BY p.package_id
             HAVING COUNT(*) > 0
                AND SUM(CASE WHEN COALESCE(m.mode, '') = :mode THEN 1 ELSE 0 END) = COUNT(*)
             """
@@ -175,22 +165,14 @@ def _backfill_battle_festival_scope_server(connection: Any) -> int:
     for row in rows:
         params = {
             "package_id": row["package_id"],
-            "date_from": str(row["date_from"] or ""),
-            "date_to": str(row["date_to"] or ""),
         }
         package_result = connection.execute(
             text(
                 """
                 UPDATE shared_contribution_packages
-                SET mode_scope = 'battle_festival',
-                    festival_date_from = CASE WHEN COALESCE(festival_date_from, '') = '' THEN :date_from ELSE festival_date_from END,
-                    festival_date_to = CASE WHEN COALESCE(festival_date_to, '') = '' THEN :date_to ELSE festival_date_to END
+                SET mode_scope = 'battle_festival'
                 WHERE package_id = :package_id
-                  AND (
-                    COALESCE(mode_scope, '') <> 'battle_festival'
-                    OR COALESCE(festival_date_from, '') = ''
-                    OR COALESCE(festival_date_to, '') = ''
-                  )
+                  AND COALESCE(mode_scope, '') <> 'battle_festival'
                 """
             ),
             params,
@@ -199,15 +181,9 @@ def _backfill_battle_festival_scope_server(connection: Any) -> int:
             text(
                 """
                 UPDATE server_uploads
-                SET mode_scope = 'battle_festival',
-                    festival_date_from = CASE WHEN COALESCE(festival_date_from, '') = '' THEN :date_from ELSE festival_date_from END,
-                    festival_date_to = CASE WHEN COALESCE(festival_date_to, '') = '' THEN :date_to ELSE festival_date_to END
+                SET mode_scope = 'battle_festival'
                 WHERE package_id = :package_id
-                  AND (
-                    COALESCE(mode_scope, '') <> 'battle_festival'
-                    OR COALESCE(festival_date_from, '') = ''
-                    OR COALESCE(festival_date_to, '') = ''
-                  )
+                  AND COALESCE(mode_scope, '') <> 'battle_festival'
                 """
             ),
             params,
