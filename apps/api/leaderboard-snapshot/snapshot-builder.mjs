@@ -539,15 +539,20 @@ function latestBattleFestivalScope(uploadRows, packageRows, shareConfig) {
 
 function battleFestivalMetadataScope(shareConfig, uploadScope = null) {
   const scope = uploadScope || shareConfig || {};
-  const dateFrom = scope.festival_date_from || scope.date_from || shareConfig?.festival_date_from || shareConfig?.date_from || "";
-  const dateTo = scope.festival_date_to || scope.date_to || shareConfig?.festival_date_to || shareConfig?.date_to || "";
-  const displayFrom = dateFrom && dateFrom === dateTo ? addIsoDays(dateTo, -2) || dateFrom : dateFrom;
+  const festivalDateFrom = scope.festival_date_from || shareConfig?.festival_date_from || "";
+  const festivalDateTo = scope.festival_date_to || shareConfig?.festival_date_to || "";
+  const dateFrom = festivalDateFrom || scope.date_from || shareConfig?.date_from || "";
+  const dateTo = festivalDateTo || scope.date_to || shareConfig?.date_to || "";
+  const hasExplicitFestivalScope = Boolean(festivalDateFrom && festivalDateTo);
+  const effectiveDateFrom = !hasExplicitFestivalScope && dateFrom && dateFrom === dateTo
+    ? addIsoDays(dateTo, -2) || dateFrom
+    : dateFrom;
   return {
     targetVersion: scope.target_version || shareConfig?.target_version || "",
-    dateFrom: displayFrom,
+    dateFrom: effectiveDateFrom,
     dateTo,
-    filterDateFrom: scope.date_from || scope.festival_date_from || shareConfig?.date_from || "",
-    filterDateTo: scope.date_to || scope.festival_date_to || shareConfig?.date_to || ""
+    filterDateFrom: effectiveDateFrom,
+    filterDateTo: dateTo
   };
 }
 
