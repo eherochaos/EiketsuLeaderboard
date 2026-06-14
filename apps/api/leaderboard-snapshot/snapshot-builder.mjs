@@ -481,6 +481,17 @@ function formalRunDate(value) {
   return String(value || "").slice(0, 10);
 }
 
+function isIsoDate(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+}
+
+function addIsoDays(value, days) {
+  if (!isIsoDate(value)) return "";
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 function matchesFormalRun(match, run) {
   if (run.target_version && match.version !== run.target_version) return false;
 
@@ -528,10 +539,13 @@ function latestBattleFestivalScope(uploadRows, packageRows, shareConfig) {
 
 function battleFestivalMetadataScope(shareConfig, uploadScope = null) {
   const scope = uploadScope || shareConfig || {};
+  const dateFrom = scope.festival_date_from || scope.date_from || shareConfig?.festival_date_from || shareConfig?.date_from || "";
+  const dateTo = scope.festival_date_to || scope.date_to || shareConfig?.festival_date_to || shareConfig?.date_to || "";
+  const displayFrom = dateFrom && dateFrom === dateTo ? addIsoDays(dateTo, -2) || dateFrom : dateFrom;
   return {
     targetVersion: scope.target_version || shareConfig?.target_version || "",
-    dateFrom: scope.festival_date_from || scope.date_from || shareConfig?.date_from || "",
-    dateTo: scope.festival_date_to || scope.date_to || shareConfig?.date_to || "",
+    dateFrom: displayFrom,
+    dateTo,
     filterDateFrom: scope.date_from || scope.festival_date_from || shareConfig?.date_from || "",
     filterDateTo: scope.date_to || scope.festival_date_to || shareConfig?.date_to || ""
   };
