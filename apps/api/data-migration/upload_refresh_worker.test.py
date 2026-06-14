@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import tempfile
 import unittest
 from dataclasses import replace
@@ -35,6 +36,76 @@ class UploadRefreshWorkerTests(unittest.TestCase):
             result = run_upload_refresh_once(
                 config,
                 latest_upload_reader=lambda: {"id": 11, "status": "completed", "imported_match_count": 3},
+                refresher=lambda: self.fail("refresh should not run"),
+            )
+
+            self.assertEqual(result["status"], "skipped")
+            self.assertEqual(result["reason"], "upload already refreshed")
+
+    def test_failed_status_does_not_advance_upload_watermark(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(Path(temp_dir))
+            self._write_status_payload(
+                config.status_file,
+                {
+                    "refresh": {"status": "failed"},
+                    "snapshot": {"sourceRunId": 10},
+                    "latestRun": {"id": 12, "uploadWatermark": 11},
+                    "latestUpload": {"id": 11},
+                },
+            )
+            calls: list[str] = []
+
+            result = run_upload_refresh_once(
+                config,
+                latest_upload_reader=lambda: {"id": 11, "status": "completed", "imported_match_count": 3},
+                refresher=lambda: calls.append("refresh") or {"status": "completed", "reason": "retry"},
+            )
+
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["uploadId"], 11)
+            self.assertEqual(calls, ["refresh"])
+
+    def test_snapshot_run_mismatch_does_not_skip_upload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(Path(temp_dir))
+            self._write_status_payload(
+                config.status_file,
+                {
+                    "refresh": {"status": "completed"},
+                    "snapshot": {"sourceRunId": 151},
+                    "latestRun": {"id": 153, "uploadWatermark": 67},
+                    "latestUpload": {"id": 67},
+                },
+            )
+            calls: list[str] = []
+
+            result = run_upload_refresh_once(
+                config,
+                latest_upload_reader=lambda: {"id": 67, "status": "completed", "imported_match_count": 418},
+                refresher=lambda: calls.append("refresh") or {"status": "completed", "reason": "retry"},
+            )
+
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["uploadId"], 67)
+            self.assertEqual(calls, ["refresh"])
+
+    def test_failed_status_keeps_watermark_when_snapshot_matches_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(Path(temp_dir))
+            self._write_status_payload(
+                config.status_file,
+                {
+                    "refresh": {"status": "failed"},
+                    "snapshot": {"sourceRunId": 158},
+                    "latestRun": {"id": 158, "uploadWatermark": 67},
+                    "latestUpload": {"id": 67},
+                },
+            )
+
+            result = run_upload_refresh_once(
+                config,
+                latest_upload_reader=lambda: {"id": 67, "status": "completed", "imported_match_count": 418},
                 refresher=lambda: self.fail("refresh should not run"),
             )
 
@@ -138,6 +209,50 @@ class UploadRefreshWorkerTests(unittest.TestCase):
             self.assertEqual(captured["battle_festival_configs_file"], config.battle_festival_configs_file)
             self.assertEqual(captured["live_status_file"], config.live_status_file)
 
+    def test_docker_node_runner_uses_configured_node_container(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            captured: dict[str, list[str]] = {}
+            original_which = upload_refresh_worker.shutil.which
+            original_run_checked = upload_refresh_worker._run_checked
+
+            def fake_run_checked(command: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
+                captured["command"] = command
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            upload_refresh_worker.shutil.which = lambda _: None
+            upload_refresh_worker._run_checked = fake_run_checked
+            try:
+                runner = upload_refresh_worker.DockerNodeRunner(root, node_container="eiketsu-leaderboard-api")
+                runner(
+                    ["node", str(root / "apps/api/leaderboard-snapshot/refresh-snapshot.mjs")],
+                    {
+                        "NODE_OPTIONS": "--max-old-space-size=4096",
+                        "LEADERBOARD_LEGACY_ROOT": str(root / "apps/api/data/legacy-service"),
+                        "IGNORED": str(root / "ignored"),
+                    },
+                )
+            finally:
+                upload_refresh_worker.shutil.which = original_which
+                upload_refresh_worker._run_checked = original_run_checked
+
+            self.assertEqual(
+                captured["command"],
+                [
+                    "docker",
+                    "exec",
+                    "-w",
+                    "/work",
+                    "-e",
+                    "NODE_OPTIONS=--max-old-space-size=4096",
+                    "-e",
+                    "LEADERBOARD_LEGACY_ROOT=/work/apps/api/data/legacy-service",
+                    "eiketsu-leaderboard-api",
+                    "node",
+                    "/work/apps/api/leaderboard-snapshot/refresh-snapshot.mjs",
+                ],
+            )
+
     def _config(self, root: Path) -> UploadRefreshConfig:
         return UploadRefreshConfig(
             repo_root=root,
@@ -152,9 +267,12 @@ class UploadRefreshWorkerTests(unittest.TestCase):
         )
 
     def _write_status(self, path: Path, latest_upload_id: int) -> None:
+        self._write_status_payload(path, {"latestUpload": {"id": latest_upload_id}})
+
+    def _write_status_payload(self, path: Path, payload: dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
-            json.dumps({"latestUpload": {"id": latest_upload_id}}, ensure_ascii=False),
+            json.dumps(payload, ensure_ascii=False),
             encoding="utf-8",
         )
 

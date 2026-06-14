@@ -21,6 +21,7 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
             "log 'reload fastapi routes'",
             "log 'start leaderboard node api'",
             "log 'smoke check api routes'",
+            "log 'install upload refresh worker'",
             "log 'publish live frontend'",
             "log 'smoke check live routes'",
         )
@@ -71,6 +72,11 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         api_smoke = self.function_body("smoke_check_api_routes")
         self.assertIn('SITE_ANALYTICS_ADMIN_TOKEN="$SITE_ANALYTICS_ADMIN_TOKEN" python3', api_smoke)
 
+    def test_run_node_uses_larger_snapshot_heap(self) -> None:
+        run_node = self.function_body("run_node")
+        self.assertIn('NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"', run_node)
+        self.assertIn('-e "NODE_OPTIONS=${NODE_OPTIONS:---max-old-space-size=4096}"', run_node)
+
     def test_site_analytics_token_is_decoded_from_deploy_workflow(self) -> None:
         self.assertIn('SITE_ANALYTICS_ADMIN_TOKEN="$(decode_env "${SITE_ANALYTICS_ADMIN_TOKEN_B64:-}")"', self.text)
 
@@ -92,6 +98,15 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn("--battle-festival-configs-file", worker_install)
         self.assertIn("BATTLE_FESTIVAL_SNAPSHOT_FILE", worker_install)
         self.assertIn("BATTLE_FESTIVAL_CONFIGS_FILE", worker_install)
+        self.assertIn("--node-container", worker_install)
+        self.assertIn("DEPLOY_NODE_API_CONTAINER", worker_install)
+
+    def test_upload_worker_starts_after_node_api_container(self) -> None:
+        self.assert_order(
+            "log 'start leaderboard node api'",
+            "log 'smoke check api routes'",
+            "log 'install upload refresh worker'",
+        )
 
     def test_postgres_export_copies_through_host_temp_dir(self) -> None:
         self.assertIn('host_export_root="/tmp/eiketsu-legacy-service-export-host-$$"', self.text)
