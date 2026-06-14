@@ -16,6 +16,7 @@ from eiketsu_env.services.collector import CollectResult
 from eiketsu_env.services.mode_filter import MODE_SCOPE_BATTLE_FESTIVAL
 from eiketsu_env.services.repository import EnvRepository
 from eiketsu_env.services.share import ShareConfig, export_contribution, import_contributions, load_share_config, sync_shared
+from eiketsu_env.utils import sha256_text
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -194,6 +195,55 @@ def test_import_contributions_is_idempotent_and_dedupes_replay(tmp_path):
         assert len(session.scalars(select(Match)).all()) == 1
         assert len(session.scalars(select(SharedContributionPackage)).all()) == 2
         assert len(session.scalars(select(SharedContributionMatch)).all()) == 2
+
+
+def test_import_contribution_reimports_same_package_id_when_content_changes(tmp_path):
+    source_settings = _settings(tmp_path / "source")
+    source_engine = _init_db(source_settings)
+    with Session(source_engine) as session:
+        repo = EnvRepository(session, source_settings)
+        detail = _detail("battle-festival-replay", mode="戦祭り")
+        detail["players"][0]["profile"] = {"戦功オッズ": "×1.1", "戦祭りランキング": "12 位"}
+        repo.upsert_match_detail(detail)
+        session.commit()
+    config = ShareConfig(
+        target_version="Ver.share",
+        date_from="2026-05-10",
+        date_to="2026-05-12",
+        mode_scope=MODE_SCOPE_BATTLE_FESTIVAL,
+        include_battle_festival=True,
+    )
+    old_package = export_contribution(source_settings, config, "alice")
+    lines = [json.loads(line) for line in old_package.path.read_text(encoding="utf-8").splitlines()]
+    manifest = lines[0]
+    fixed_record = json.loads(json.dumps(lines[1]))
+    fixed_record["players"][0]["profile"]["戦功"] = "307822"
+    fixed_body = _json_line(fixed_record)
+    manifest["body_hash"] = sha256_text(fixed_body)
+    fixed_path = tmp_path / "fixed-same-package-id.jsonl"
+    fixed_path.write_text(_json_line(manifest) + fixed_body, encoding="utf-8")
+
+    dest_settings = _settings(tmp_path / "dest")
+    dest_engine = _init_db(dest_settings)
+
+    first = import_contributions(dest_settings, [old_package.path])
+    second = import_contributions(dest_settings, [fixed_path])
+
+    assert first.packages_imported == 1
+    assert second.packages_imported == 1
+    assert second.packages_skipped == 0
+    with Session(dest_engine) as session:
+        match = session.scalar(select(Match))
+        package = session.scalar(select(SharedContributionPackage))
+        assert match is not None
+        assert package is not None
+        assert match.sides[0].profile_json["戦功"] == "307822"
+        assert package.content_hash != old_package.content_hash
+        assert len(session.scalars(select(SharedContributionPackage)).all()) == 1
+
+
+def _json_line(payload: dict) -> str:
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
 
 
 def test_load_share_config_extends_stale_date_to_for_tools(tmp_path, monkeypatch):

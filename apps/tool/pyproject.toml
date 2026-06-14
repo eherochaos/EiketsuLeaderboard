@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eiketsu-collector-tool"
-version = "0.2.10"
+version = "0.2.11"
 description = "Eiketsu Collector client tool"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -92,6 +92,17 @@ class ClientCleanupResult:
 
 
 @dataclass(slots=True)
+class ContributionPackageSummary:
+    package_id: str
+    mode_scope: str
+    match_count: int
+    body_hash: str
+    content_hash: str
+    player_merit_sample_count: int
+    player_missing_merit_count: int
+
+
+@dataclass(slots=True)
 class ClientUpdateCheck:
     configured: bool
     current_version: str
@@ -396,14 +407,30 @@ def battle_festival_share_config_from_period(
         return None
     assert period is not None
     collect_to = min(period.date_to, current_day.isoformat())
+    return _battle_festival_share_config_for_window(
+        base_config,
+        date_from=period.date_from,
+        date_to=collect_to,
+        festival_date_from=period.date_from,
+        festival_date_to=period.date_to,
+    )
+
+
+def _battle_festival_share_config_for_window(
+    base_config: ShareConfig,
+    date_from: str,
+    date_to: str,
+    festival_date_from: str,
+    festival_date_to: str,
+) -> ShareConfig:
     battle_config = ShareConfig(
         schema_version=base_config.schema_version,
         target_version=base_config.target_version,
-        date_from=period.date_from,
-        date_to=collect_to,
+        date_from=date_from,
+        date_to=date_to,
         mode_scope=MODE_SCOPE_BATTLE_FESTIVAL,
-        festival_date_from=period.date_from,
-        festival_date_to=period.date_to,
+        festival_date_from=festival_date_from,
+        festival_date_to=festival_date_to,
         include_solo=False,
         include_battle_festival=True,
         high_ranker_rank=base_config.high_ranker_rank,
@@ -420,35 +447,34 @@ def battle_festival_collect_plan(
     current_day: date | None = None,
 ) -> BattleFestivalCollectPlan:
     current_day = current_day or today_jst()
-    official_config = battle_festival_share_config_from_period(base_config, probe.period, current_day=current_day)
-    if official_config is not None:
-        return BattleFestivalCollectPlan(official_config, "official_period", True, "官方战祭周期已开启")
-
-    if probe.period is not None:
-        return BattleFestivalCollectPlan(None, "official_inactive", False, "官方战祭周期当前未开启")
-
     current = current_day.isoformat()
-    if not (base_config.date_from <= current <= base_config.date_to):
-        return BattleFestivalCollectPlan(None, "outside_sync_window", False, "采集范围未覆盖今天")
+    if probe.period is not None:
+        date_from = max(base_config.date_from, probe.period.date_from)
+        date_to = min(base_config.date_to, probe.period.date_to, current)
+        if date_from <= date_to:
+            official_config = _battle_festival_share_config_for_window(
+                base_config,
+                date_from=date_from,
+                date_to=date_to,
+                festival_date_from=probe.period.date_from,
+                festival_date_to=probe.period.date_to,
+            )
+            return BattleFestivalCollectPlan(official_config, "official_period", True, "官方战祭周期已匹配采集范围")
+        return BattleFestivalCollectPlan(None, "official_inactive", False, "官方战祭周期未覆盖采集范围")
 
     fallback_from = (current_day - timedelta(days=2)).isoformat()
     date_from = max(base_config.date_from, fallback_from)
     date_to = min(base_config.date_to, current)
-    fallback_config = ShareConfig(
-        schema_version=base_config.schema_version,
-        target_version=base_config.target_version,
+    if date_from > date_to:
+        return BattleFestivalCollectPlan(None, "outside_sync_window", False, "采集范围未覆盖战祭补采窗口")
+
+    fallback_config = _battle_festival_share_config_for_window(
+        base_config,
         date_from=date_from,
         date_to=date_to,
-        mode_scope=MODE_SCOPE_BATTLE_FESTIVAL,
         festival_date_from=date_from,
         festival_date_to=date_to,
-        include_solo=False,
-        include_battle_festival=True,
-        high_ranker_rank=base_config.high_ranker_rank,
-        report_formats=list(base_config.report_formats),
-        reports=list(base_config.reports),
     )
-    fallback_config.validate()
     return BattleFestivalCollectPlan(
         fallback_config,
         "history_fallback",
@@ -493,6 +519,11 @@ def _upload_contribution(
     export_result = export_contribution(settings, share_config, config.contributor, package_path)
     package_text = export_result.path.read_text(encoding="utf-8")
     assert_safe_contribution_payload(package_text)
+    package_summary = _summarize_contribution_package(package_text)
+    if progress:
+        progress.message(_format_package_summary(package_summary))
+        if package_summary.mode_scope == MODE_SCOPE_BATTLE_FESTIVAL and package_summary.match_count > 0 and package_summary.player_merit_sample_count == 0:
+            progress.message("battle_festival 包警告：player侧戦功样本为 0，本地 DB 仍可能是旧坏数据；需要重新采集生成新包后页面才会刷新。")
     if progress:
         progress.message(f"正在上传 {share_config.mode_scope} 到服务器")
     upload = transport.request_json(
@@ -501,11 +532,54 @@ def _upload_contribution(
         {"package_text": package_text, "content_hash": sha256_text(package_text)},
         token=config.api_token,
     )
+    if progress and upload.get("already_uploaded"):
+        progress.message("服务器提示 already_uploaded=true：本次是同内容重复上传，内容未变化；请重新采集生成新包后再上传。")
     try:
         export_result.path.unlink()
     except OSError:
         pass
     return upload, export_result.path, export_result.match_count
+
+
+def _summarize_contribution_package(package_text: str) -> ContributionPackageSummary:
+    lines = [line for line in package_text.splitlines() if line.strip()]
+    manifest = json.loads(lines[0]) if lines else {}
+    merit_key = "戦功"
+    odds_key = "戦功オッズ"
+    rank_key = "戦祭りランキング"
+    player_merit_sample_count = 0
+    player_missing_merit_count = 0
+    for line in lines[1:]:
+        record = json.loads(line)
+        for player in record.get("players") or []:
+            if str(player.get("role") or "") != "player":
+                continue
+            profile = player.get("profile") or {}
+            has_merit = bool(str(profile.get(merit_key) or "").strip())
+            if has_merit:
+                player_merit_sample_count += 1
+            elif profile.get(odds_key) or profile.get(rank_key):
+                player_missing_merit_count += 1
+    return ContributionPackageSummary(
+        package_id=str(manifest.get("package_id") or ""),
+        mode_scope=str(manifest.get("mode_scope") or ""),
+        match_count=int(manifest.get("match_count") or 0),
+        body_hash=str(manifest.get("body_hash") or ""),
+        content_hash=sha256_text(package_text),
+        player_merit_sample_count=player_merit_sample_count,
+        player_missing_merit_count=player_missing_merit_count,
+    )
+
+
+def _format_package_summary(summary: ContributionPackageSummary) -> str:
+    return (
+        f"{summary.mode_scope} 包检查："
+        f"match_count {summary.match_count}，"
+        f"body_hash {summary.body_hash[:16]}，"
+        f"package_id {summary.package_id}，"
+        f"player側戦功样本 {summary.player_merit_sample_count}，"
+        f"player缺戦功 {summary.player_missing_merit_count}"
+    )
 
 
 def doctor_client(settings: Settings, transport: JsonTransport | None = None) -> dict[str, Any]:
