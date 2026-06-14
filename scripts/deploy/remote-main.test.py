@@ -101,6 +101,19 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn("--node-container", worker_install)
         self.assertIn("DEPLOY_NODE_API_CONTAINER", worker_install)
 
+    def test_upload_worker_waits_for_dependency_containers(self) -> None:
+        worker_install = self.function_body("install_upload_refresh_worker")
+        self.assertIn("wait_for_container", worker_install)
+        self.assertIn("UPLOAD_REFRESH_CONTAINER_WAIT_SECONDS:-120", worker_install)
+        self.assertIn("DEPLOY_NODE_API_CONTAINER", worker_install)
+        self.assertIn("DEPLOY_EXPORT_CONTAINER", worker_install)
+        self.assertIn('wait_for_container "$node_api_container"', worker_install)
+        self.assertIn('wait_for_container "$export_container"', worker_install)
+        self.assertLess(
+            worker_install.index('wait_for_container "$export_container"'),
+            worker_install.index('python3 apps/api/data-migration/upload_refresh_worker.py "${args[@]}"'),
+        )
+
     def test_upload_worker_starts_after_node_api_container(self) -> None:
         self.assert_order(
             "log 'start leaderboard node api'",

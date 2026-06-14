@@ -42,6 +42,84 @@ class UploadRefreshWorkerTests(unittest.TestCase):
             self.assertEqual(result["status"], "skipped")
             self.assertEqual(result["reason"], "upload already refreshed")
 
+    def test_battle_festival_upload_newer_than_snapshot_triggers_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(Path(temp_dir))
+            self._write_status(config.status_file, latest_upload_id=75)
+            self._write_battle_festival_snapshot(config.battle_festival_snapshot_file, source_upload_id=73)
+            calls: list[str] = []
+
+            result = run_upload_refresh_once(
+                config,
+                latest_upload_reader=lambda: {
+                    "latest_upload": {"id": 75, "status": "completed", "imported_match_count": 2},
+                    "latest_battle_festival_upload": {
+                        "id": 74,
+                        "status": "completed",
+                        "imported_match_count": 0,
+                        "mode_scope": "battle_festival",
+                    },
+                },
+                refresher=lambda: calls.append("refresh") or {"status": "completed", "reason": "upload refresh completed"},
+            )
+
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["uploadId"], 75)
+            self.assertEqual(result["battleFestivalUploadId"], 74)
+            self.assertEqual(result["battleFestivalSnapshotUploadId"], 73)
+            self.assertEqual(result["refreshReasons"], ["battle_festival"])
+            self.assertEqual(calls, ["refresh"])
+
+    def test_battle_festival_upload_current_snapshot_skips_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(Path(temp_dir))
+            self._write_status(config.status_file, latest_upload_id=75)
+            self._write_battle_festival_snapshot(config.battle_festival_snapshot_file, source_upload_id=74)
+
+            result = run_upload_refresh_once(
+                config,
+                latest_upload_reader=lambda: {
+                    "latest_upload": {"id": 75, "status": "completed", "imported_match_count": 2},
+                    "latest_battle_festival_upload": {
+                        "id": 74,
+                        "status": "completed",
+                        "imported_match_count": 0,
+                        "mode_scope": "battle_festival",
+                    },
+                },
+                refresher=lambda: self.fail("refresh should not run"),
+            )
+
+            self.assertEqual(result["status"], "skipped")
+            self.assertEqual(result["reason"], "upload already refreshed")
+            self.assertEqual(result["battleFestivalUploadId"], 74)
+            self.assertEqual(result["battleFestivalSnapshotUploadId"], 74)
+
+    def test_missing_battle_festival_snapshot_triggers_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(Path(temp_dir))
+            self._write_status(config.status_file, latest_upload_id=75)
+            calls: list[str] = []
+
+            result = run_upload_refresh_once(
+                config,
+                latest_upload_reader=lambda: {
+                    "latest_upload": {"id": 75, "status": "completed", "imported_match_count": 2},
+                    "latest_battle_festival_upload": {
+                        "id": 74,
+                        "status": "completed",
+                        "imported_match_count": 0,
+                        "mode_scope": "battle_festival",
+                    },
+                },
+                refresher=lambda: calls.append("refresh") or {"status": "completed", "reason": "upload refresh completed"},
+            )
+
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["battleFestivalUploadId"], 74)
+            self.assertEqual(result["battleFestivalSnapshotUploadId"], 0)
+            self.assertEqual(calls, ["refresh"])
+
     def test_failed_status_does_not_advance_upload_watermark(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config = self._config(Path(temp_dir))
@@ -147,6 +225,8 @@ class UploadRefreshWorkerTests(unittest.TestCase):
     def test_latest_upload_query_joins_package_scope(self) -> None:
         self.assertIn("LEFT JOIN shared_contribution_packages", upload_refresh_worker.LATEST_UPLOAD_QUERY)
         self.assertIn("COALESCE(NULLIF(p.mode_scope, ''), u.mode_scope", upload_refresh_worker.LATEST_UPLOAD_QUERY)
+        self.assertIn("latest_battle_festival_upload", upload_refresh_worker.LATEST_UPLOAD_QUERY)
+        self.assertIn("mode_scope = 'battle_festival'", upload_refresh_worker.LATEST_UPLOAD_QUERY)
 
     def test_lock_skip_result_is_returned(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -273,6 +353,13 @@ class UploadRefreshWorkerTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(payload, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    def _write_battle_festival_snapshot(self, path: Path, source_upload_id: int) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"metadata": {"sourceUploadId": source_upload_id}}, ensure_ascii=False),
             encoding="utf-8",
         )
 

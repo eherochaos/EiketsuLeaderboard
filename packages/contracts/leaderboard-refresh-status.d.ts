@@ -64,6 +64,23 @@ export interface LeaderboardRefreshStatus {
     tierRows?: number;
     homeTierRows?: number;
   };
+  battleFestivalSnapshot: {
+    sourceUploadId?: number;
+    sourcePackageId?: string;
+    sourceImportedMatchCount?: number;
+    sourceMatchCount?: number;
+    sourceUploadCreatedAt?: string;
+    sourceKind?: string;
+    targetVersion?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    updatedAt?: string;
+    sampleSize?: number;
+    tierRows?: number;
+    meritRows?: number;
+    meritPlayerCount?: number;
+    meritSampleCount?: number;
+  };
   export: {
     tables: Record<string, number>;
     cards: Record<string, boolean>;

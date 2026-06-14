@@ -8,6 +8,7 @@ const LEADERBOARD_REFRESH_STATUS_ROOT_FIELDS = Object.freeze([
   "refresh",
   "runRefresh",
   "snapshot",
+  "battleFestivalSnapshot",
   "export",
   "latestRun",
   "recentRuns",
