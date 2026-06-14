@@ -101,6 +101,60 @@ function slimBattleFestivalMeritDeck(deck) {
   };
 }
 
+function slimBattleFestivalMeritPaceDay(day) {
+  return {
+    date: String(day?.date || ""),
+    firstObservedAt: String(day?.firstObservedAt || ""),
+    lastObservedAt: String(day?.lastObservedAt || ""),
+    firstMerit: Number(day?.firstMerit || 0),
+    lastMerit: Number(day?.lastMerit || 0),
+    meritGain: Number(day?.meritGain || 0),
+    meritSampleCount: Number(day?.meritSampleCount || 0),
+    observedMinutes: Number(day?.observedMinutes || 0),
+    averageMinutesPerMatch: Number(day?.averageMinutesPerMatch || 0),
+    meritPerHour: Number(day?.meritPerHour || 0)
+  };
+}
+
+function slimBattleFestivalMeritPaceSample(sample) {
+  return {
+    observedAt: String(sample?.observedAt || ""),
+    merit: Number(sample?.merit || 0),
+    meritDelta: Number(sample?.meritDelta || 0),
+    minutesSincePrevious: Number(sample?.minutesSincePrevious || 0),
+    firstOfDay: Boolean(sample?.firstOfDay)
+  };
+}
+
+function slimBattleFestivalMeritProjection(projection) {
+  if (!projection || typeof projection !== "object") return null;
+  return {
+    basis: projection.basis && typeof projection.basis === "object" ? {
+      date: String(projection.basis.date || ""),
+      meritGain: Number(projection.basis.meritGain || 0),
+      meritSampleCount: Number(projection.basis.meritSampleCount || 0),
+      observedMinutes: Number(projection.basis.observedMinutes || 0),
+      averageMinutesPerMatch: Number(projection.basis.averageMinutesPerMatch || 0),
+      meritPerHour: Number(projection.basis.meritPerHour || 0)
+    } : null,
+    basisType: String(projection.basisType || ""),
+    latestObservedAt: String(projection.latestObservedAt || ""),
+    latestMerit: Number(projection.latestMerit || 0),
+    finalAt: String(projection.finalAt || ""),
+    remainingMinutes: Number(projection.remainingMinutes || 0),
+    projectedFinalMerit: Number(projection.projectedFinalMerit || 0)
+  };
+}
+
+function slimBattleFestivalMeritPace(pace) {
+  if (!pace || typeof pace !== "object") return undefined;
+  return {
+    days: Array.isArray(pace.days) ? pace.days.map(slimBattleFestivalMeritPaceDay) : [],
+    samples: Array.isArray(pace.samples) ? pace.samples.map(slimBattleFestivalMeritPaceSample) : [],
+    projection: slimBattleFestivalMeritProjection(pace.projection)
+  };
+}
+
 function slimBattleFestivalMeritRow(row) {
   return {
     playerName: String(row?.playerName || ""),
@@ -116,7 +170,8 @@ function slimBattleFestivalMeritRow(row) {
     drawCount: Number(row?.drawCount || 0),
     unknownCount: Number(row?.unknownCount || 0),
     winRate: Number(row?.winRate || 0),
-    decks: Array.isArray(row?.decks) ? row.decks.map(slimBattleFestivalMeritDeck) : []
+    decks: Array.isArray(row?.decks) ? row.decks.map(slimBattleFestivalMeritDeck) : [],
+    pace: slimBattleFestivalMeritPace(row?.pace)
   };
 }
 

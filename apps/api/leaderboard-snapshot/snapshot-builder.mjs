@@ -42,6 +42,7 @@ const OFFICIAL_ASSET_BASE_URL = "https://image.eiketsu-taisen.net/";
 const BATTLE_FESTIVAL_CAMP_KEYS = ["\u6240\u5c5e\u9663\u55b6", "\u6240\u5c5e\u9635\u8425"];
 const BATTLE_FESTIVAL_MERIT_KEY = "\u6226\u529f";
 const BATTLE_FESTIVAL_PLAYER_DECK_LIMIT = 5;
+const BATTLE_FESTIVAL_FIRST_MATCH_MINUTES = 3;
 const BATTLE_FESTIVAL_MODES = new Set(["戦祭り", "戦祭", "戰祭", "战祭"]);
 
 function csvParts(row) {
@@ -1838,6 +1839,151 @@ function compareHighestMeritSamples(left, right) {
     toNumber(right.matchId) - toNumber(left.matchId);
 }
 
+function battleFestivalPaceDate(value) {
+  return String(value || "").slice(0, 10);
+}
+
+function battleFestivalTimestampMs(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!match) return NaN;
+  const [, year, month, day, hour = "0", minute = "0", second = "0"] = match;
+  return Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second)
+  );
+}
+
+function battleFestivalMinutesBetween(previousAt, currentAt) {
+  const previousMs = battleFestivalTimestampMs(previousAt);
+  const currentMs = battleFestivalTimestampMs(currentAt);
+  if (!Number.isFinite(previousMs) || !Number.isFinite(currentMs)) return 1;
+  return Math.max(1, Math.round((currentMs - previousMs) / 60000));
+}
+
+function battleFestivalRemainingMinutes(fromAt, toAt) {
+  const fromMs = battleFestivalTimestampMs(fromAt);
+  const toMs = battleFestivalTimestampMs(toAt);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return 0;
+  return Math.max(0, Math.round((toMs - fromMs) / 60000));
+}
+
+function battleFestivalRound(value) {
+  return Number(toNumber(value).toFixed(1));
+}
+
+function battleFestivalMeritPerHour(meritGain, observedMinutes) {
+  return observedMinutes > 0 ? battleFestivalRound(meritGain / observedMinutes * 60) : 0;
+}
+
+function battleFestivalPaceDayView(day) {
+  const meritGain = Math.max(0, toNumber(day.lastMerit) - toNumber(day.firstMerit));
+  const observedMinutes = toNumber(day.observedMinutes);
+  return {
+    date: day.date,
+    firstObservedAt: day.firstObservedAt,
+    lastObservedAt: day.lastObservedAt,
+    firstMerit: toNumber(day.firstMerit),
+    lastMerit: toNumber(day.lastMerit),
+    meritGain,
+    meritSampleCount: toNumber(day.meritSampleCount),
+    observedMinutes,
+    averageMinutesPerMatch: day.meritSampleCount ? battleFestivalRound(observedMinutes / day.meritSampleCount) : 0,
+    meritPerHour: battleFestivalMeritPerHour(meritGain, observedMinutes)
+  };
+}
+
+function battleFestivalPeriodPace(days) {
+  const meritGain = days.reduce((sum, day) => sum + toNumber(day.meritGain), 0);
+  const observedMinutes = days.reduce((sum, day) => sum + toNumber(day.observedMinutes), 0);
+  const meritSampleCount = days.reduce((sum, day) => sum + toNumber(day.meritSampleCount), 0);
+  return {
+    date: "",
+    meritGain,
+    observedMinutes,
+    meritSampleCount,
+    averageMinutesPerMatch: meritSampleCount ? battleFestivalRound(observedMinutes / meritSampleCount) : 0,
+    meritPerHour: battleFestivalMeritPerHour(meritGain, observedMinutes)
+  };
+}
+
+function buildBattleFestivalMeritPace(meritSamples, finalDate) {
+  const sorted = meritSamples
+    .filter((sample) => Number.isFinite(toNumber(sample.merit)) && sample.playedAt)
+    .slice()
+    .sort(compareObservedSamples);
+  if (!sorted.length) return null;
+
+  const previousByDate = new Map();
+  const daysByDate = new Map();
+  const samples = [];
+  for (const sample of sorted) {
+    const date = battleFestivalPaceDate(sample.playedAt);
+    if (!date) continue;
+    const previous = previousByDate.get(date);
+    const firstOfDay = !previous;
+    const minutesSincePrevious = firstOfDay
+      ? BATTLE_FESTIVAL_FIRST_MATCH_MINUTES
+      : battleFestivalMinutesBetween(previous.playedAt, sample.playedAt);
+    const meritDelta = previous ? Math.max(0, toNumber(sample.merit) - toNumber(previous.merit)) : 0;
+    samples.push({
+      observedAt: sample.playedAt,
+      merit: toNumber(sample.merit),
+      meritDelta,
+      minutesSincePrevious,
+      firstOfDay
+    });
+
+    const day = daysByDate.get(date) || {
+      date,
+      firstObservedAt: sample.playedAt,
+      lastObservedAt: sample.playedAt,
+      firstMerit: toNumber(sample.merit),
+      lastMerit: toNumber(sample.merit),
+      meritSampleCount: 0,
+      observedMinutes: 0
+    };
+    day.lastObservedAt = sample.playedAt;
+    day.lastMerit = toNumber(sample.merit);
+    day.meritSampleCount += 1;
+    day.observedMinutes += minutesSincePrevious;
+    daysByDate.set(date, day);
+    previousByDate.set(date, sample);
+  }
+
+  const days = Array.from(daysByDate.values()).map(battleFestivalPaceDayView);
+  if (!days.length) return null;
+
+  const period = battleFestivalPeriodPace(days);
+  const latestDay = days[days.length - 1];
+  const basis = latestDay.meritSampleCount >= 2 && latestDay.meritPerHour > 0 ? latestDay : period;
+  const basisType = basis === latestDay ? "latest_day" : "all_observed";
+  const latestSample = sorted[sorted.length - 1];
+  const finalAt = `${finalDate || battleFestivalPaceDate(latestSample.playedAt)} 23:59`;
+  const remainingMinutes = battleFestivalRemainingMinutes(latestSample.playedAt, finalAt);
+  const projectedFinalMerit = Math.max(
+    toNumber(latestSample.merit),
+    Math.round(toNumber(latestSample.merit) + basis.meritPerHour / 60 * remainingMinutes)
+  );
+
+  return {
+    days,
+    samples,
+    projection: {
+      basis,
+      basisType,
+      latestObservedAt: latestSample.playedAt,
+      latestMerit: toNumber(latestSample.merit),
+      finalAt,
+      remainingMinutes,
+      projectedFinalMerit
+    }
+  };
+}
+
 function addBattleFestivalObservedResult(stats, result) {
   stats.sampleSize = toNumber(stats.sampleSize) + 1;
   if (result === "win") stats.winCount += 1;
@@ -1868,7 +2014,7 @@ function battleFestivalMeritDeckView(deckId, stats, tierRowByDeckId, cardCatalog
   };
 }
 
-function buildBattleFestivalMeritAnalysis(sides, matchById, deckIdBySideKey, tierRowByDeckId, cardCatalog) {
+function buildBattleFestivalMeritAnalysis(sides, matchById, deckIdBySideKey, tierRowByDeckId, cardCatalog, options = {}) {
   const players = new Map();
   for (const side of sides) {
     const playerName = firstText(side?.player_name);
@@ -1924,6 +2070,7 @@ function buildBattleFestivalMeritAnalysis(sides, matchById, deckIdBySideKey, tie
       const firstObserved = observedSamples[0] || meritSamples[0];
       const lastObserved = observedSamples[observedSamples.length - 1] || meritSamples[meritSamples.length - 1];
       const highestSample = meritSamples.slice().sort(compareHighestMeritSamples)[0];
+      const pace = buildBattleFestivalMeritPace(meritSamples, options.finalDate);
       const decks = Array.from(player.decks.entries())
         .map(([deckId, stats]) => battleFestivalMeritDeckView(deckId, stats, tierRowByDeckId, cardCatalog))
         .sort((left, right) =>
@@ -1946,7 +2093,8 @@ function buildBattleFestivalMeritAnalysis(sides, matchById, deckIdBySideKey, tie
         drawCount: player.drawCount,
         unknownCount: player.unknownCount,
         winRate: battleFestivalObservedWinRate(player),
-        decks
+        decks,
+        pace
       };
     })
     .filter(Boolean)
@@ -2113,7 +2261,8 @@ async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope =
     matchById,
     deckIdBySideKey,
     tierRowByDeckId,
-    cardCatalog
+    cardCatalog,
+    { finalDate: scope.dateTo }
   );
   const rowsByCamp = {};
   for (const [camp, campStatsByDeck] of statsByCamp.entries()) {
