@@ -137,6 +137,9 @@ export interface LeaderboardSnapshot {
     sourceImportedMatchCount?: number;
     sourceMatchCount?: number;
     sourceUploadCreatedAt?: string;
+    periodSourceUploadId?: number;
+    periodSourcePackageId?: string;
+    periodStatus?: string;
     excludedInvalidDeckRows?: number;
     excludedInvalidDeckSampleSize?: number;
   };

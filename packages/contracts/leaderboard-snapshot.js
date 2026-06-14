@@ -17,6 +17,9 @@ const LEADERBOARD_SNAPSHOT_METADATA_FIELDS = Object.freeze([
   "dateTo",
   "updatedAt",
   "sampleSize",
+  "periodSourceUploadId",
+  "periodSourcePackageId",
+  "periodStatus",
   "excludedInvalidDeckRows",
   "excludedInvalidDeckSampleSize",
 ]);

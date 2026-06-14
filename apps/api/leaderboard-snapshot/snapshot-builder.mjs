@@ -485,13 +485,6 @@ function isIsoDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
 }
 
-function addIsoDays(value, days) {
-  if (!isIsoDate(value)) return "";
-  const date = new Date(`${value}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
 function matchesFormalRun(match, run) {
   if (run.target_version && match.version !== run.target_version) return false;
 
@@ -527,32 +520,47 @@ function mergeBattleFestivalUploadScope(upload, packageById) {
   };
 }
 
-function latestBattleFestivalScope(uploadRows, packageRows, shareConfig) {
+function battleFestivalScopes(uploadRows, packageRows, shareConfig) {
   const packageById = new Map(packageRows.map((row) => [String(row.package_id || ""), row]));
   return uploadRows
     .map((row) => mergeBattleFestivalUploadScope(row, packageById))
     .filter((row) => String(row.mode_scope || "") === "battle_festival")
     .filter((row) => !shareConfig?.target_version || row.target_version === shareConfig.target_version)
     .slice()
-    .sort((left, right) => toNumber(right.id) - toNumber(left.id))[0] || null;
+    .sort((left, right) => toNumber(right.id) - toNumber(left.id));
 }
 
-function battleFestivalMetadataScope(shareConfig, uploadScope = null) {
+function latestBattleFestivalScope(uploadRows, packageRows, shareConfig) {
+  return battleFestivalScopes(uploadRows, packageRows, shareConfig)[0] || null;
+}
+
+function authoritativeBattleFestivalPeriod(scope) {
+  const festivalDateFrom = String(scope?.festival_date_from || "").trim();
+  const festivalDateTo = String(scope?.festival_date_to || "").trim();
+  if (isIsoDate(festivalDateFrom) && isIsoDate(festivalDateTo) && festivalDateFrom < festivalDateTo) {
+    return { dateFrom: festivalDateFrom, dateTo: festivalDateTo };
+  }
+  return null;
+}
+
+function latestBattleFestivalPeriodScope(uploadRows, packageRows, shareConfig) {
+  return battleFestivalScopes(uploadRows, packageRows, shareConfig)
+    .find((row) => authoritativeBattleFestivalPeriod(row)) || null;
+}
+
+function battleFestivalMetadataScope(shareConfig, uploadScope = null, periodScope = null) {
   const scope = uploadScope || shareConfig || {};
-  const festivalDateFrom = scope.festival_date_from || shareConfig?.festival_date_from || "";
-  const festivalDateTo = scope.festival_date_to || shareConfig?.festival_date_to || "";
-  const dateFrom = festivalDateFrom || scope.date_from || shareConfig?.date_from || "";
-  const dateTo = festivalDateTo || scope.date_to || shareConfig?.date_to || "";
-  const hasExplicitFestivalScope = Boolean(festivalDateFrom && festivalDateTo);
-  const effectiveDateFrom = !hasExplicitFestivalScope && dateFrom && dateFrom === dateTo
-    ? addIsoDays(dateTo, -2) || dateFrom
-    : dateFrom;
+  const period = authoritativeBattleFestivalPeriod(periodScope);
+  if (!period) return null;
   return {
     targetVersion: scope.target_version || shareConfig?.target_version || "",
-    dateFrom: effectiveDateFrom,
-    dateTo,
-    filterDateFrom: effectiveDateFrom,
-    filterDateTo: dateTo
+    dateFrom: period.dateFrom,
+    dateTo: period.dateTo,
+    filterDateFrom: period.dateFrom,
+    filterDateTo: period.dateTo,
+    periodSourceUploadId: toNumber(periodScope?.id),
+    periodSourcePackageId: String(periodScope?.package_id || ""),
+    periodStatus: "official"
   };
 }
 
@@ -566,8 +574,9 @@ function battleFestivalSourceUploadMetadata(uploadScope = null) {
   };
 }
 
-function emptyBattleFestivalSnapshot(shareConfig, uploadScope = null) {
-  const scope = battleFestivalMetadataScope(shareConfig, uploadScope);
+function emptyBattleFestivalSnapshot(shareConfig, uploadScope = null, periodScope = null) {
+  const scope = battleFestivalMetadataScope(shareConfig, uploadScope, periodScope);
+  if (!scope) throw new Error("Battle festival official period is not available.");
   return {
     metadata: {
       sourceRunId: 0,
@@ -577,6 +586,9 @@ function emptyBattleFestivalSnapshot(shareConfig, uploadScope = null) {
       dateTo: scope.dateTo,
       updatedAt: new Date().toISOString(),
       sampleSize: 0,
+      periodSourceUploadId: scope.periodSourceUploadId,
+      periodSourcePackageId: scope.periodSourcePackageId,
+      periodStatus: scope.periodStatus,
       ...battleFestivalSourceUploadMetadata(uploadScope)
     },
     home: {
@@ -2216,8 +2228,12 @@ function buildBattleFestivalCampShare(statsByCamp, rowsByCamp) {
   return rounded;
 }
 
-async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope = null) {
-  const scope = battleFestivalMetadataScope(shareConfig, uploadScope);
+async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope = null, periodScope = null) {
+  const scope = battleFestivalMetadataScope(shareConfig, uploadScope, periodScope);
+  if (!scope) {
+    if (uploadScope) throw new Error("Battle festival official period is not available.");
+    throw new Error("No ready battle festival leaderboard run.");
+  }
   const filterScope = {
     target_version: scope.targetVersion,
     date_from: scope.filterDateFrom,
@@ -2230,7 +2246,7 @@ async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope =
   const matchIds = new Set(matches.map((match) => toNumber(match.id)));
   const matchById = new Map(matches.map((match) => [toNumber(match.id), match]));
   if (!matchIds.size) {
-    if (uploadScope) return emptyBattleFestivalSnapshot(shareConfig, uploadScope);
+    if (uploadScope) return emptyBattleFestivalSnapshot(shareConfig, uploadScope, periodScope);
     throw new Error("No ready battle festival leaderboard run.");
   }
 
@@ -2278,7 +2294,7 @@ async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope =
 
   const deckStats = battleFestivalDeckStats(statsByDeck);
   if (!deckStats.length) {
-    if (uploadScope) return emptyBattleFestivalSnapshot(shareConfig, uploadScope);
+    if (uploadScope) return emptyBattleFestivalSnapshot(shareConfig, uploadScope, periodScope);
     throw new Error("No ready battle festival leaderboard run.");
   }
 
@@ -2323,6 +2339,9 @@ async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope =
       dateTo: scope.dateTo,
       updatedAt: new Date().toISOString(),
       sampleSize: deckStats.reduce((sum, row) => sum + toNumber(row.sample_count), 0),
+      periodSourceUploadId: scope.periodSourceUploadId,
+      periodSourcePackageId: scope.periodSourcePackageId,
+      periodStatus: scope.periodStatus,
       ...battleFestivalSourceUploadMetadata(uploadScope)
     },
     home: {
@@ -2365,12 +2384,11 @@ async function buildSnapshotFromData(options = {}) {
   }
 
   if (options.includeBattleFestival) {
-    const uploadScope = latestBattleFestivalScope(
-      await readOptionalJsonl(resolve(legacyRoot, "tables/server_uploads.jsonl")),
-      await readOptionalJsonl(resolve(legacyRoot, "tables/shared_contribution_packages.jsonl")),
-      shareConfig
-    );
-    return buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope);
+    const uploadRows = await readOptionalJsonl(resolve(legacyRoot, "tables/server_uploads.jsonl"));
+    const packageRows = await readOptionalJsonl(resolve(legacyRoot, "tables/shared_contribution_packages.jsonl"));
+    const uploadScope = latestBattleFestivalScope(uploadRows, packageRows, shareConfig);
+    const periodScope = latestBattleFestivalPeriodScope(uploadRows, packageRows, shareConfig);
+    return buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope, periodScope);
   }
 
   if (options.includeSolo) {

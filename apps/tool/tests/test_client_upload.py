@@ -407,28 +407,26 @@ def test_battle_festival_plan_collects_past_official_period_when_range_intersect
     assert plan.config.festival_date_to == "2026-06-13"
 
 
-def test_battle_festival_plan_fallback_collects_recent_past_range_after_probe_failure():
+def test_battle_festival_plan_skips_after_probe_failure():
     config = client_upload.ShareConfig(target_version="Ver.3.5.0B", date_from="2026-06-13", date_to="2026-06-13")
     probe = BattleFestivalProbeResult(None, "redirected", "festival probe redirected")
 
     plan = client_upload.battle_festival_collect_plan(config, probe, current_day=date(2026, 6, 14))
 
-    assert plan.config is not None
-    assert plan.source == "history_fallback"
+    assert plan.config is None
+    assert plan.source == "missing_official_period"
     assert plan.upload_when_empty is False
-    assert plan.config.mode_scope == MODE_SCOPE_BATTLE_FESTIVAL
-    assert plan.config.date_from == "2026-06-13"
-    assert plan.config.date_to == "2026-06-13"
+    assert "probe_status=redirected" in plan.reason
 
 
-def test_battle_festival_plan_fallback_skips_outside_recent_range_after_probe_failure():
+def test_battle_festival_plan_skips_without_official_period_even_inside_sync_window():
     config = client_upload.ShareConfig(target_version="Ver.3.5.0B", date_from="2026-06-10", date_to="2026-06-11")
     probe = BattleFestivalProbeResult(None, "redirected", "festival probe redirected")
 
     plan = client_upload.battle_festival_collect_plan(config, probe, current_day=date(2026, 6, 14))
 
     assert plan.config is None
-    assert plan.source == "outside_sync_window"
+    assert plan.source == "missing_official_period"
 
 
 def test_sync_client_reports_battle_festival_probe_failure(tmp_path, monkeypatch):
@@ -473,7 +471,7 @@ def test_sync_client_reports_battle_festival_probe_failure(tmp_path, monkeypatch
     assert manifest["mode_scope"] == MODE_SCOPE_TIER_LIST
 
 
-def test_sync_client_fallback_uses_history_daily_when_festival_probe_redirects(tmp_path, monkeypatch):
+def test_sync_client_skips_battle_festival_when_festival_probe_redirects(tmp_path, monkeypatch):
     monkeypatch.setenv("EIKETSU_CLIENT_CONFIG_DIR", str(tmp_path / "client-config"))
     settings = _settings(tmp_path)
     save_client_config(
@@ -542,26 +540,19 @@ def test_sync_client_fallback_uses_history_daily_when_festival_probe_redirects(t
         progress=progress,
     )
 
-    assert result.battle_festival_upload is not None
-    assert len(transport.upload_payloads) == 2
-    battle_lines = [json.loads(line) for line in transport.upload_payloads[0]["package_text"].splitlines()]
-    tier_lines = [json.loads(line) for line in transport.upload_payloads[1]["package_text"].splitlines()]
-    assert battle_lines[0]["mode_scope"] == MODE_SCOPE_BATTLE_FESTIVAL
-    assert battle_lines[0]["festival_date_from"] == "2026-06-11"
-    assert battle_lines[0]["festival_date_to"] == "2026-06-13"
-    assert battle_lines[0]["match_count"] == 3
-    assert all(record["mode"] == battle_mode for record in battle_lines[1:])
+    assert result.battle_festival_upload is None
+    assert len(transport.upload_payloads) == 1
+    tier_lines = [json.loads(line) for line in transport.upload_payloads[0]["package_text"].splitlines()]
     assert tier_lines[0]["mode_scope"] == MODE_SCOPE_TIER_LIST
     assert all(record["mode"] == tier_mode for record in tier_lines[1:])
-    assert any("history_fallback" in message for message in progress.messages)
-    assert any("戦祭り seeds 3" in message for message in progress.messages)
-    assert any("battle_festival 上传场数：3" in message for message in progress.messages)
+    assert any("missing_official_period" in message for message in progress.messages)
+    assert any("probe_status=redirected" in message for message in progress.messages)
 
     engine = make_engine(settings)
     with Session(engine) as session:
         runs = session.query(CollectionRun).order_by(CollectionRun.id).all()
-        assert any(run.scope_json.get("mode_scope") == MODE_SCOPE_BATTLE_FESTIVAL for run in runs)
-        assert session.query(Match).filter_by(mode=battle_mode).count() == 3
+        assert not any(run.scope_json.get("mode_scope") == MODE_SCOPE_BATTLE_FESTIVAL for run in runs)
+        assert session.query(Match).filter_by(mode=battle_mode).count() == 0
 
 
 def test_sync_client_continues_tier_list_when_battle_festival_collect_fails(tmp_path, monkeypatch):

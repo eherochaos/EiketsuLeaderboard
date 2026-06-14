@@ -119,6 +119,17 @@ async function refreshBattleFestivalSnapshot(outputPath, options = {}) {
       clusterRows: tierList.clusterRows
     };
   } catch (error) {
+    if (String(error?.message || "").includes("Battle festival official period is not available.")) {
+      return {
+        status: "skipped_missing_official_period",
+        reason: "official battle festival period is not available",
+        snapshotFile,
+        configsFile,
+        sourceRunId: 0,
+        tierRows: 0,
+        clusterRows: 0
+      };
+    }
     if (String(error?.message || "").includes("No ready battle festival leaderboard run.")) {
       const snapshot = emptyBattleFestivalSnapshot(options.fallbackSnapshot);
       const tierList = await writeTierListSnapshotFiles({
