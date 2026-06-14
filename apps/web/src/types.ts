@@ -37,6 +37,9 @@ export type {
 
 export type {
   BattleFestivalMeritDeck,
+  BattleFestivalMeritPace,
+  BattleFestivalMeritPaceDay,
+  BattleFestivalMeritPaceSample,
   BattleFestivalMeritRow,
   BattleFestivalMeritSummary,
   TierListClusterVariant,

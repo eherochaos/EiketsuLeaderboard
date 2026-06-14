@@ -33,6 +33,50 @@ export interface BattleFestivalMeritDeck {
   deckCards: CardView[];
 }
 
+export interface BattleFestivalMeritPaceDay {
+  date: string;
+  firstObservedAt: string;
+  lastObservedAt: string;
+  firstMerit: number;
+  lastMerit: number;
+  meritGain: number;
+  meritSampleCount: number;
+  observedMinutes: number;
+  averageMinutesPerMatch: number;
+  meritPerHour: number;
+}
+
+export interface BattleFestivalMeritPaceSample {
+  observedAt: string;
+  merit: number;
+  meritDelta: number;
+  minutesSincePrevious: number;
+  firstOfDay: boolean;
+}
+
+export interface BattleFestivalMeritProjection {
+  basis: {
+    date: string;
+    meritGain: number;
+    meritSampleCount: number;
+    observedMinutes: number;
+    averageMinutesPerMatch: number;
+    meritPerHour: number;
+  } | null;
+  basisType: string;
+  latestObservedAt: string;
+  latestMerit: number;
+  finalAt: string;
+  remainingMinutes: number;
+  projectedFinalMerit: number;
+}
+
+export interface BattleFestivalMeritPace {
+  days: BattleFestivalMeritPaceDay[];
+  samples: BattleFestivalMeritPaceSample[];
+  projection: BattleFestivalMeritProjection | null;
+}
+
 export interface BattleFestivalMeritRow {
   playerName: string;
   camp: string;
@@ -48,6 +92,7 @@ export interface BattleFestivalMeritRow {
   unknownCount: number;
   winRate: number;
   decks: BattleFestivalMeritDeck[];
+  pace?: BattleFestivalMeritPace;
 }
 
 export interface BattleFestivalMeritSummary {
