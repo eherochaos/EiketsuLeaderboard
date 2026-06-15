@@ -31,7 +31,7 @@ function card(cardId, cardCode, name, extra = {}) {
     force: "",
     intelligence: "",
     image_url: `https://image.example.test/${cardId}.jpg`,
-    label: `${name}(1.0 槍兵)`
+    label: extra.label ?? `${name}(1.0 槍兵)`
   };
 }
 
@@ -243,7 +243,7 @@ async function createLegacyFixture(root, options = {}) {
   await writeJsonl(join(tableRoot, "server_leaderboard_runs.jsonl"), runs);
   const rows = [
     deckRow(1, deckA, [card("legacy-card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 1, 0, 1),
-    deckRow(2, deckB, [card("card-b1", "緋001", "Gamma"), card("card-b2", "緋002", "Delta")], 2, 1, 0),
+    deckRow(2, deckB, [card("card-b1", "緋001", "Gamma"), card("card-b2", "緋002", "Delta", { label: "未识别卡(card-b2)" })], 2, 1, 0),
     archetypeRow(3, "Published Cluster", [card("card-b1", "緋001", "Gamma"), card("card-b2", "緋002", "Delta")], 1, 4, 1, deckB, [
       { deck_fingerprint: deckA, sample_count: 2 },
       { deck_fingerprint: deckB, sample_count: 3 }
@@ -565,6 +565,8 @@ async function testRefreshWritesAtomicSnapshot() {
     assert.deepEqual(noSkillCard.skills, []);
     const plCard = output.tierRows.flatMap((row) => row.deckCards).find((card) => card.cardId === "card-b2");
     assert.ok(plCard);
+    assert.equal(plCard.name, "Delta");
+    assert.equal(plCard.imageAlt, "Delta");
     assert.equal(plCard.faction, "\u84bc");
     assert.equal(unknownFactionCount(output), 0);
     assert.equal(unknownFactionCount(tierList), 0);

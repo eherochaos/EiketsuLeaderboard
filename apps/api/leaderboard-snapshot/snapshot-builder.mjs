@@ -232,6 +232,12 @@ function shortName(value) {
   return String(value || "").split("(", 1)[0].trim();
 }
 
+function isPlaceholderCardName(value) {
+  const text = String(value ?? "").trim();
+  const name = shortName(text);
+  return name === "未识别" || name === "未识别卡";
+}
+
 function cardCodeFaction(cardCode) {
   const first = Array.from(String(cardCode || "").trim())[0] || "";
   return OFFICIAL_FACTION_ORDER.includes(first) ? first : "unknown";
@@ -300,6 +306,7 @@ function mergeNonEmptyCardData(baseCard, overrideCard) {
     if (value === "" || value === null || value === undefined) continue;
     if (Array.isArray(value) && value.length === 0) continue;
     if (key === "faction" && String(value).trim() === "unknown") continue;
+    if (["name", "imageAlt", "image_alt"].includes(key) && isPlaceholderCardName(value)) continue;
     merged[key] = value;
   }
   return merged;
@@ -370,7 +377,10 @@ function formalCardView(card, cardCatalog = {}) {
   const cardId = String(card?.card_hash || "");
   const catalogCard = catalogCardFor(cardCatalog, cardId, card);
   const mergedCard = mergeNonEmptyCardData(catalogCard, card);
-  const name = labelName(card?.label) || String(card?.card_hash || "").slice(0, 8);
+  const rawLabelName = labelName(card?.label);
+  const name = isPlaceholderCardName(rawLabelName)
+    ? firstText(mergedCard.name, mergedCard.card_code, String(card?.card_hash || "").slice(0, 8))
+    : rawLabelName || String(card?.card_hash || "").slice(0, 8);
   return {
     cardId,
     name,

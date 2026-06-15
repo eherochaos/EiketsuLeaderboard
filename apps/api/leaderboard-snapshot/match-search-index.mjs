@@ -167,12 +167,18 @@ async function writeJson(path, payload) {
   await writeFile(path, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
 
+function isPlaceholderCardName(value) {
+  const text = String(value ?? "").trim();
+  return text === "未识别" || text === "未识别卡" || /^未识别卡\([^)]*\)$/.test(text);
+}
+
 function mergeNonEmptyCardData(baseCard, overrideCard) {
   const merged = { ...baseCard };
   for (const [key, value] of Object.entries(overrideCard || {})) {
     if (value === "" || value === null || value === undefined) continue;
     if (Array.isArray(value) && value.length === 0) continue;
     if (key === "faction" && String(value).trim() === "unknown") continue;
+    if (["name", "imageAlt", "image_alt"].includes(key) && isPlaceholderCardName(value)) continue;
     merged[key] = value;
   }
   return merged;
@@ -572,6 +578,19 @@ function tempIndexPath(outputPath) {
   return resolve(dirname(outputPath), `.${basename(outputPath)}.${Date.now()}.${process.pid}.tmp`);
 }
 
+export function validateMatchSearchIndex(index) {
+  const offenders = (Array.isArray(index?.cards) ? index.cards : [])
+    .filter((card) => firstText(card?.cardCode, card?.card_code))
+    .filter((card) => isPlaceholderCardName(card?.name));
+  if (!offenders.length) return;
+
+  const samples = offenders
+    .slice(0, 5)
+    .map((card) => `${firstText(card?.cardCode, card?.card_code)}:${firstText(card?.cardId, card?.card_id) || "-"}`)
+    .join(", ");
+  throw new Error(`match search index contains placeholder card names: ${samples}`);
+}
+
 export async function refreshMatchSearchIndex(options = {}) {
   const env = typeof process !== "undefined" ? process.env : {};
   const outputPath = resolve(options.outputPath || env.LEADERBOARD_MATCH_SEARCH_INDEX_FILE || DEFAULT_INDEX_FILE);
@@ -583,6 +602,7 @@ export async function refreshMatchSearchIndex(options = {}) {
       legacyRoot: options.legacyRoot || env.LEADERBOARD_LEGACY_ROOT || DEFAULT_LEGACY_ROOT,
       snapshotFile: options.snapshotFile || env.LEADERBOARD_SNAPSHOT_FILE || DEFAULT_SNAPSHOT_FILE
     });
+    validateMatchSearchIndex(index);
     await writeJson(temporaryPath, index);
     await rename(temporaryPath, outputPath);
     return { outputPath, index };
