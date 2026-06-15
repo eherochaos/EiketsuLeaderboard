@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildMatchSearchIndex, refreshMatchSearchIndex, searchMatchIndex } from "./match-search-index.mjs";
+import { buildMatchSearchIndex, refreshMatchSearchIndex, searchMatchIndex, validateMatchSearchIndex } from "./match-search-index.mjs";
 
 async function writeJson(path, payload) {
   await writeFile(path, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
@@ -102,6 +102,13 @@ async function createFixture(root) {
             cardCode: "PL116",
             cost: "2.5",
             unitType: "\u9a0e\u5175"
+          },
+          {
+            cardId: "card-b",
+            name: "未识别卡",
+            faction: "蒼",
+            cardCode: "蒼002",
+            imageAlt: "未识别卡"
           }
         ]
       }
@@ -203,6 +210,8 @@ async function testBuildIndexAndSearchFilters() {
     assert.equal(index.metadata.matchCount, 2);
     assert.equal(index.cards.find((card) => card.cardId === "card-a").imageUrl, "https://cards.example.test/alpha.jpg");
     assert.equal(index.cards.find((card) => card.cardId === "card-b").imageUrl, "https://image.eiketsu-taisen.net/general/card_small/card-b.jpg?260520a");
+    assert.equal(index.cards.find((card) => card.cardId === "card-b").name, "Beta");
+    assert.equal(index.cards.find((card) => card.cardId === "card-b").imageAlt, "Beta");
     assert.equal(index.cards.find((card) => card.cardId === "card-c").imageUrl, "https://image.eiketsu-taisen.net/general/card_small/catalog-card-c.jpg?260520a");
     assert.equal(index.cards.find((card) => card.cardId === "card-b").force, "6");
     assert.equal(index.cards.find((card) => card.cardId === "card-b").intelligence, "3");
@@ -271,7 +280,26 @@ async function testRefreshWritesAtomicIndex() {
   }
 }
 
+function testValidateRejectsPlaceholderCardNames() {
+  assert.throws(
+    () => validateMatchSearchIndex({
+      cards: [
+        { cardId: "card-x", cardCode: "緋183", name: "未识别卡" },
+      ],
+    }),
+    /placeholder card names/
+  );
+
+  assert.doesNotThrow(() => validateMatchSearchIndex({
+    cards: [
+      { cardId: "card-y", cardCode: "", name: "未识别卡" },
+      { cardId: "card-z", cardCode: "緋184", name: "廊御方" },
+    ],
+  }));
+}
+
 await testBuildIndexAndSearchFilters();
 await testRefreshWritesAtomicIndex();
+testValidateRejectsPlaceholderCardNames();
 
 console.log("match search index tests passed");
