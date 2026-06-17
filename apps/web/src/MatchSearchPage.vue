@@ -3,11 +3,14 @@ import { computed, nextTick, onMounted, reactive, ref } from "vue";
 import CommonDeckRail from "./components/Common_DeckRail.vue";
 import CommonHeader from "./components/Common_Header.vue";
 import CommonImageFrame from "./components/Common_ImageFrame.vue";
+import CommonVersionSelect from "./components/Common_VersionSelect.vue";
 import { dateOnly, integer } from "./lib/format";
 import { loadMatchSearchOptions, searchMatches } from "./lib/matchSearch";
 import { trackPageView, trackSiteEvent } from "./lib/siteAnalytics";
+import { loadVersionOptions, readVersionParam, selectedVersionFromManifest, writeVersionParam } from "./lib/versionOptions";
 import type {
   CardView,
+  LeaderboardVersionManifest,
   MatchSearchCardMatchMode,
   MatchSearchCardOption,
   MatchSearchItem,
@@ -36,6 +39,8 @@ interface SideForm {
 }
 
 const options = ref<MatchSearchOptions | null>(null);
+const versionOptions = ref<LeaderboardVersionManifest | null>(null);
+const selectedVersion = ref("");
 const response = ref<MatchSearchResponse | null>(null);
 const loading = ref(true);
 const searching = ref(false);
@@ -58,16 +63,42 @@ const sideKeys: SideKey[] = ["sideA", "sideB"];
 
 onMounted(async () => {
   trackPageView("match-search");
+  const requestedVersion = readVersionParam();
   try {
-    options.value = await loadMatchSearchOptions();
+    versionOptions.value = await loadVersionOptions();
+    selectedVersion.value = selectedVersionFromManifest(versionOptions.value, requestedVersion);
+    writeVersionParam(selectedVersion.value);
+    options.value = await loadMatchSearchOptions(selectedVersion.value);
   } catch (caught) {
-    error.value = caught instanceof Error ? caught.message : "对局搜索数据读取失败";
+    try {
+      selectedVersion.value = requestedVersion;
+      options.value = await loadMatchSearchOptions(requestedVersion);
+      const targetVersion = options.value.metadata.targetVersion || requestedVersion;
+      selectedVersion.value = targetVersion;
+      versionOptions.value = {
+        schemaVersion: 1,
+        currentTargetVersion: targetVersion,
+        versions: targetVersion ? [{
+          targetVersion,
+          sourceRunId: options.value.metadata.sourceRunId || 0,
+          dateFrom: options.value.metadata.dateFrom || "",
+          dateTo: options.value.metadata.dateTo || "",
+          updatedAt: options.value.metadata.updatedAt || "",
+          sampleSize: options.value.metadata.sampleSize || 0,
+          current: true,
+        }] : [],
+      };
+      writeVersionParam(selectedVersion.value);
+    } catch (fallbackCaught) {
+      error.value = fallbackCaught instanceof Error ? fallbackCaught.message : "对局搜索数据读取失败";
+    }
   } finally {
     loading.value = false;
   }
 });
 
 const metadata = computed(() => options.value?.metadata ?? null);
+const versionList = computed(() => versionOptions.value?.versions ?? []);
 const cards = computed(() => options.value?.cards ?? []);
 const weapons = computed(() => options.value?.weapons ?? []);
 const cardsById = computed(() => new Map(cards.value.map((card) => [card.cardId, card])));
@@ -205,6 +236,51 @@ function clearSide(side: SideForm): void {
   Object.assign(side, fresh);
 }
 
+function pruneSideForm(side: SideForm): void {
+  const availableCardIds = new Set(cards.value.map((card) => card.cardId));
+  const availableWeapons = new Set(weapons.value.map((weapon) => weapon.name));
+  side.cardIds = side.cardIds.filter((cardId) => availableCardIds.has(cardId));
+  side.strategyByCard = Object.fromEntries(
+    Object.entries(side.strategyByCard).filter(([cardId]) => availableCardIds.has(cardId))
+  );
+  if (side.weaponName && !availableWeapons.has(side.weaponName)) {
+    side.weaponName = "";
+  }
+  if (side.faction !== "all" && !factions.value.includes(side.faction)) {
+    side.faction = "all";
+  }
+  if (side.unitType !== "all" && !unitTypes.value.includes(side.unitType)) {
+    side.unitType = "all";
+  }
+  if (side.cost !== "all" && !costs.value.includes(side.cost)) {
+    side.cost = "all";
+  }
+}
+
+function pruneSearchForms(): void {
+  for (const sideKey of sideKeys) {
+    pruneSideForm(sideForms[sideKey]);
+  }
+}
+
+async function handleVersionChange(targetVersion: string): Promise<void> {
+  if (!targetVersion || targetVersion === selectedVersion.value) return;
+  selectedVersion.value = targetVersion;
+  writeVersionParam(targetVersion);
+  loading.value = true;
+  error.value = "";
+  response.value = null;
+  searchError.value = "";
+  try {
+    options.value = await loadMatchSearchOptions(targetVersion);
+    pruneSearchForms();
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : "对局搜索数据读取失败";
+  } finally {
+    loading.value = false;
+  }
+}
+
 function hasAnyFilter(side: SideForm): boolean {
   return side.cardIds.length > 0
     || Boolean(side.weaponName)
@@ -229,6 +305,7 @@ async function runSearch(nextPage = 1): Promise<void> {
 
   try {
     response.value = await searchMatches({
+      targetVersion: selectedVersion.value,
       page: nextPage,
       pageSize: 20,
       cardMatchMode: cardMatchMode.value,
@@ -329,6 +406,13 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
             <span>{{ dateOnly(metadata.dateFrom || "") }} - {{ dateOnly(metadata.dateTo || "") }}</span>
             <span>视频 {{ integer(metadata.videoMatchCount) }}</span>
           </p>
+          <CommonVersionSelect
+            class="MatchSearch_VersionSelect"
+            :model-value="selectedVersion"
+            :versions="versionList"
+            :disabled="loading || searching"
+            @update:model-value="handleVersionChange"
+          />
         </div>
         <div class="MatchSearch_ActionBox">
           <span>{{ cardMatchMode === "all" ? "AND" : "OR" }}</span>
@@ -572,6 +656,10 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   font-family: var(--font-control);
   font-size: 14px;
   font-weight: 700;
+}
+
+.MatchSearch_VersionSelect {
+  margin-top: 8px;
 }
 
 .MatchSearch_ActionBox {

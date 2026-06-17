@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import CommonDeckRail from "./Common_DeckRail.vue";
-import CommonImageFrame from "./Common_ImageFrame.vue";
-import { integer, percent } from "../lib/format";
+import { percent } from "../lib/format";
 import type { CardView, DeckRow } from "../types";
 
 // 代表卡组展示完整构成和核心指标，作为首页到 TierList 的中间层。
@@ -23,13 +22,6 @@ const rankedDecks = computed(() => props.decks.slice().sort((left, right) => {
 function deckSlots(deck: DeckRow): (CardView | null)[] {
   return Array.from({ length: 8 }, (_, index) => deck.deckCards[index] ?? null);
 }
-
-function deckMeta(deck: DeckRow): string {
-  const parts = [];
-  if (deck.categoryName && deck.categoryName !== deck.deckName) parts.push(deck.categoryName);
-  parts.push(`样本 ${integer(deck.sampleSize)}`);
-  return parts.join(" · ");
-}
 </script>
 
 <template>
@@ -44,11 +36,15 @@ function deckMeta(deck: DeckRow): string {
         <div class="Main_RepresentativeDecks_Section_Rank">#{{ index + 1 }}</div>
         <div class="Main_RepresentativeDecks_Section_RailBlock">
           <div class="Main_RepresentativeDecks_Section_Summary">
-              <span class="Common_FactionPill" :data-faction="deck.faction">{{ deck.faction }}</span>
-              <h3>{{ deck.deckName }}</h3>
+            <span class="Common_FactionPill" :data-faction="deck.faction">{{ deck.faction }}</span>
+            <h3>{{ deck.deckName }}</h3>
           </div>
-          <!-- <span>卡组构成</span> -->
-          <CommonDeckRail :cards="deckSlots(deck)" />
+          <CommonDeckRail
+            :cards="deckSlots(deck)"
+            rail-class="Common_DeckRail Main_RepresentativeDecks_Section_DeckRail"
+            :show-card-details="false"
+            show-card-overlays
+          />
         </div>
         <div class="Main_RepresentativeDecks_Section_Stats">
           <div>
@@ -97,16 +93,14 @@ function deckMeta(deck: DeckRow): string {
 /* 卡组摘要区：预留主卡和文字信息。 */
 .Main_RepresentativeDecks_Section_Summary {
   display: grid;
-  grid-template-columns: 82px minmax(0, 1fr);
-  gap: var(--space-md);
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
   align-items: center;
   min-width: 0;
 }
 
-/* 卡组摘要中的主卡尺寸。 */
-.Main_RepresentativeDecks_Section_Summary :deep(.Common_ImageFrame) {
-  width: 82px;
-  height: auto;
+.Main_RepresentativeDecks_Section_Summary .Common_FactionPill {
+  margin-bottom: 0;
 }
 
 /* 卡组名称，最多两行。 */
@@ -222,15 +216,8 @@ function deckMeta(deck: DeckRow): string {
     padding: 14px;
   }
 
-  /* 手机摘要区缩小主卡列。 */
   .Main_RepresentativeDecks_Section_Summary {
-    grid-template-columns: 62px minmax(0, 1fr);
-  }
-
-  /* 手机摘要主卡尺寸。 */
-  .Main_RepresentativeDecks_Section_Summary :deep(.Common_ImageFrame) {
-    width: 62px;
-    height: auto;
+    grid-template-columns: auto minmax(0, 1fr);
   }
 
   /* 手机构成和指标铺满整张卡。 */
@@ -243,6 +230,10 @@ function deckMeta(deck: DeckRow): string {
   .Main_RepresentativeDecks_Section_Stats {
     width: 100%;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .Main_RepresentativeDecks_Section_RailBlock :deep(.Main_RepresentativeDecks_Section_DeckRail) {
+    overflow-x: hidden;
   }
 }
 </style>

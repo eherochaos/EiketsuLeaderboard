@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 import { isBattleFestivalActive, loadBattleFestivalPeriod } from "../lib/battleFestival";
 import { trackSiteEvent } from "../lib/siteAnalytics";
+import { readVersionParam, versionedPageHref } from "../lib/versionOptions";
 
 const props = defineProps<{
   current: "home" | "tier" | "battleFestival" | "status" | "matchSearch" | "adminStats";
@@ -16,10 +17,27 @@ const navItems = [
 ] as const;
 
 const showBattleFestival = ref(false);
+const currentVersion = ref("");
 
 onMounted(async () => {
+  currentVersion.value = readVersionParam();
+  window.addEventListener("popstate", syncVersionParam);
+  window.addEventListener("eiketsu-version-change", syncVersionParam);
   showBattleFestival.value = isBattleFestivalActive(await loadBattleFestivalPeriod());
 });
+
+onBeforeUnmount(() => {
+  window.removeEventListener("popstate", syncVersionParam);
+  window.removeEventListener("eiketsu-version-change", syncVersionParam);
+});
+
+function syncVersionParam(): void {
+  currentVersion.value = readVersionParam();
+}
+
+function navHref(href: string): string {
+  return versionedPageHref(href, currentVersion.value);
+}
 
 function trackNavClick(key: string, href: string): void {
   trackSiteEvent("nav_click", key, { href });
@@ -29,7 +47,7 @@ function trackNavClick(key: string, href: string): void {
 <template>
   <header class="Common_Header">
     <nav class="Common_Header_Nav" aria-label="主要导航">
-      <a class="Common_Header_Brand" href="/leaderboard/" @click="trackNavClick('brand', '/leaderboard/')">
+      <a class="Common_Header_Brand" :href="navHref('/leaderboard/')" @click="trackNavClick('brand', navHref('/leaderboard/'))">
         <span class="Common_Header_BrandSymbol" aria-hidden="true"></span>
         <span>Eiketsu Leaderboard</span>
       </a>
@@ -39,8 +57,8 @@ function trackNavClick(key: string, href: string): void {
           v-show="item.key !== props.current && (!item.activeOnly || showBattleFestival)"
           :key="item.key"
           class="Common_NavPrimary"
-          :href="item.href"
-          @click="trackNavClick(item.key, item.href)"
+          :href="navHref(item.href)"
+          @click="trackNavClick(item.key, navHref(item.href))"
         >
           {{ item.label }}
         </a>
@@ -75,6 +93,7 @@ function trackNavClick(key: string, href: string): void {
   display: inline-flex;
   align-items: center;
   gap: 12px;
+  min-height: 44px;
   min-width: 0;
   color: #fff7e7;
   font-family: var(--font-serif);
@@ -133,7 +152,8 @@ function trackNavClick(key: string, href: string): void {
   }
 
   .Common_NavPrimary {
-    min-height: 38px;
+    min-height: 44px;
+    min-width: 44px;
     padding: 0 10px;
     font-size: 13px;
   }
@@ -161,7 +181,8 @@ function trackNavClick(key: string, href: string): void {
   }
 
   .Common_NavPrimary {
-    min-height: 32px;
+    min-height: 44px;
+    min-width: 44px;
     padding: 0 8px;
     font-size: 12px;
   }

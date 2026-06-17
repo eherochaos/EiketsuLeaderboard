@@ -1,4 +1,5 @@
 import type { TierListDeckConfigResponse, TierListScope, TierListSnapshot } from "../types";
+import { apiUrlWithVersion } from "./versionOptions";
 
 export type TierListPageKind = "tierList" | "battleFestival";
 
@@ -19,14 +20,8 @@ function pageErrorLabel(pageKind: TierListPageKind): string {
   return pageKind === "battleFestival" ? "战祭数据" : "TierList 数据";
 }
 
-function freshUrl(value: string): string {
-  const url = new URL(value, window.location.origin);
-  url.searchParams.set("_ts", String(Date.now()));
-  return url.toString();
-}
-
-export async function loadTierListSnapshot(pageKind: TierListPageKind = "tierList"): Promise<TierListSnapshot> {
-  const response = await fetch(freshUrl(pageSnapshotUrl(pageKind)), { cache: "no-store" });
+export async function loadTierListSnapshot(pageKind: TierListPageKind = "tierList", targetVersion = ""): Promise<TierListSnapshot> {
+  const response = await fetch(apiUrlWithVersion(pageSnapshotUrl(pageKind), pageKind === "tierList" ? targetVersion : ""), { cache: "no-store" });
 
   if (!response.ok) {
     throw new Error(`${pageErrorLabel(pageKind)}读取失败：${response.status}`);
@@ -38,11 +33,15 @@ export async function loadTierListSnapshot(pageKind: TierListPageKind = "tierLis
 export async function loadTierListDeckConfig(
   scope: TierListScope,
   deckId: string,
-  pageKind: TierListPageKind = "tierList"
+  pageKind: TierListPageKind = "tierList",
+  targetVersion = ""
 ): Promise<TierListDeckConfigResponse> {
   const url = new URL(pageDeckConfigUrl(pageKind), window.location.origin);
   url.searchParams.set("scope", scope);
   url.searchParams.set("deckId", deckId);
+  if (pageKind === "tierList" && targetVersion) {
+    url.searchParams.set("version", targetVersion);
+  }
   url.searchParams.set("_ts", String(Date.now()));
   const response = await fetch(url.toString(), { cache: "no-store" });
 

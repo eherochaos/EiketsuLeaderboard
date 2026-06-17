@@ -1,5 +1,24 @@
 export type NamingSource = "single" | "combo" | "type";
 
+export const LEADERBOARD_SNAPSHOT_ENDPOINT: string;
+export const LEADERBOARD_VERSION_OPTIONS_ENDPOINT: string;
+
+export interface LeaderboardVersionOption {
+  targetVersion: string;
+  sourceRunId: number;
+  dateFrom: string;
+  dateTo: string;
+  updatedAt: string;
+  sampleSize: number;
+  current: boolean;
+}
+
+export interface LeaderboardVersionManifest {
+  schemaVersion: number;
+  currentTargetVersion: string;
+  versions: LeaderboardVersionOption[];
+}
+
 export interface CardView {
   cardId: string;
   name: string;

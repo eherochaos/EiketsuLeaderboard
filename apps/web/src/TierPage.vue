@@ -2,15 +2,15 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import CommonHeader from "./components/Common_Header.vue";
 import CommonDeckRail from "./components/Common_DeckRail.vue";
-import CommonImageFrame from "./components/Common_ImageFrame.vue";
-import CommonMetricTags from "./components/Common_MetricTags.vue";
+import CommonVersionSelect from "./components/Common_VersionSelect.vue";
 import TierPageDeckConfigPanel from "./components/TierPage_DeckConfigPanel.vue";
 import { dateOnly, dateTime, integer, percent, sourceLabels } from "./lib/format";
 import { loadRefreshStatus } from "./lib/refreshStatus";
 import { trackPageView, trackSiteEvent } from "./lib/siteAnalytics";
 import { loadTierListDeckConfig, loadTierListSnapshot } from "./lib/tierList";
 import type { TierListPageKind } from "./lib/tierList";
-import type { BattleFestivalMeritDeck, BattleFestivalMeritPace, BattleFestivalMeritPaceDay, BattleFestivalMeritPaceSample, BattleFestivalMeritRow, CardView, DeckConfigStats, LeaderboardRefreshStatus, LeaderboardRefreshUpload, TierListClusterVariant, TierListRow, TierListScope, TierListSnapshot } from "./types";
+import { loadVersionOptions, manifestFromSnapshot, readVersionParam, selectedVersionFromManifest, writeVersionParam } from "./lib/versionOptions";
+import type { BattleFestivalMeritDeck, BattleFestivalMeritPace, BattleFestivalMeritPaceDay, BattleFestivalMeritPaceSample, BattleFestivalMeritRow, CardView, DeckConfigStats, LeaderboardRefreshStatus, LeaderboardRefreshUpload, LeaderboardVersionManifest, TierListClusterVariant, TierListRow, TierListScope, TierListSnapshot } from "./types";
 
 type SortKey = "rankScore" | "winRate" | "playerAverageWinRate" | "usageRate" | "kabukiPoints" | "sampleSize";
 
@@ -27,6 +27,8 @@ const VISIBLE_MERIT_ROWS_STEP = 50;
 const BATTLE_FESTIVAL_STATUS_POLL_MS = 15000;
 
 const snapshot = ref<TierListSnapshot | null>(null);
+const versionOptions = ref<LeaderboardVersionManifest | null>(null);
+const selectedVersion = ref("");
 const loading = ref(true);
 const error = ref("");
 const snapshotRefreshing = ref(false);
@@ -45,13 +47,11 @@ const expandedMeritPlayerNames = ref(new Set<string>());
 const visibleRowLimit = ref(INITIAL_VISIBLE_ROWS);
 const visibleMeritRowLimit = ref(INITIAL_VISIBLE_MERIT_ROWS);
 const mobileViewport = ref(false);
-const compactMobileViewport = ref(false);
 const mobileFiltersOpen = ref(false);
 const deckConfigs = ref<Record<string, DeckConfigStats>>({});
 const deckConfigLoadingIds = ref(new Set<string>());
 const deckConfigErrors = ref<Record<string, string>>({});
 let mobileMediaQuery: MediaQueryList | null = null;
-let compactMobileMediaQuery: MediaQueryList | null = null;
 let battleFestivalStatusTimer: number | null = null;
 const lastBattleFestivalUploadId = ref<number | null>(null);
 const lastRefreshStatus = ref("");
@@ -99,7 +99,6 @@ const pageCopy = computed(() => {
 
 function updateViewportMode(): void {
   mobileViewport.value = Boolean(mobileMediaQuery?.matches);
-  compactMobileViewport.value = Boolean(compactMobileMediaQuery?.matches);
 }
 
 function latestBattleFestivalUploadFromStatus(status: LeaderboardRefreshStatus | null): LeaderboardRefreshUpload | null {
@@ -112,7 +111,12 @@ async function refreshSnapshot(): Promise<void> {
   if (snapshotRefreshing.value) return;
   snapshotRefreshing.value = true;
   try {
-    snapshot.value = await loadTierListSnapshot(props.pageKind);
+    snapshot.value = await loadTierListSnapshot(props.pageKind, selectedVersion.value);
+    if (props.pageKind === "tierList" && !versionOptions.value && snapshot.value) {
+      versionOptions.value = manifestFromSnapshot(snapshot.value);
+      selectedVersion.value = snapshot.value.metadata.targetVersion || selectedVersion.value;
+      writeVersionParam(selectedVersion.value);
+    }
     error.value = "";
     snapshotRefreshError.value = "";
   } catch (caught) {
@@ -126,6 +130,41 @@ async function refreshSnapshot(): Promise<void> {
     loading.value = false;
     snapshotRefreshing.value = false;
   }
+}
+
+async function loadTierPageVersionOptions(): Promise<void> {
+  if (props.pageKind !== "tierList") return;
+  const requestedVersion = readVersionParam();
+  try {
+    versionOptions.value = await loadVersionOptions();
+    selectedVersion.value = selectedVersionFromManifest(versionOptions.value, requestedVersion);
+    writeVersionParam(selectedVersion.value);
+  } catch {
+    selectedVersion.value = requestedVersion;
+  }
+}
+
+function resetTierListState(): void {
+  battleCampFilter.value = "all";
+  factionFilter.value = "all";
+  sourceFilter.value = "all";
+  sortKey.value = "rankScore";
+  clusterSameName.value = false;
+  clusterVariantIndexes.value = {};
+  expandedDeckIds.value = new Set();
+  visibleRowLimit.value = INITIAL_VISIBLE_ROWS;
+  deckConfigs.value = {};
+  deckConfigErrors.value = {};
+  deckConfigLoadingIds.value = new Set();
+}
+
+async function handleVersionChange(targetVersion: string): Promise<void> {
+  if (!targetVersion || targetVersion === selectedVersion.value) return;
+  selectedVersion.value = targetVersion;
+  writeVersionParam(targetVersion);
+  resetTierListState();
+  loading.value = true;
+  await refreshSnapshot();
 }
 
 async function refreshBattleFestivalStatus(refreshSnapshotOnChange = false): Promise<boolean> {
@@ -186,10 +225,9 @@ function manualRefreshSnapshot(): void {
 onMounted(async () => {
   trackPageView(pageCopy.value.analyticsPage);
   mobileMediaQuery = window.matchMedia("(max-width: 760px)");
-  compactMobileMediaQuery = window.matchMedia("(max-width: 430px)");
   updateViewportMode();
   mobileMediaQuery.addEventListener("change", updateViewportMode);
-  compactMobileMediaQuery.addEventListener("change", updateViewportMode);
+  await loadTierPageVersionOptions();
   await refreshSnapshot();
   if (props.pageKind === "battleFestival") {
     await refreshBattleFestivalStatus(false);
@@ -200,14 +238,13 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   mobileMediaQuery?.removeEventListener("change", updateViewportMode);
-  compactMobileMediaQuery?.removeEventListener("change", updateViewportMode);
   document.removeEventListener("visibilitychange", handleVisibilityChange);
   stopBattleFestivalStatusPolling();
   mobileMediaQuery = null;
-  compactMobileMediaQuery = null;
 });
 
 const metadata = computed(() => snapshot.value?.metadata ?? null);
+const versionList = computed(() => versionOptions.value?.versions ?? []);
 const battleFestivalData = computed(() => props.pageKind === "battleFestival" ? snapshot.value?.battleFestival ?? null : null);
 const showBattleFestivalRefreshPanel = computed(() => props.pageKind === "battleFestival");
 const latestBattleFestivalUpload = computed(() => latestBattleFestivalUploadFromStatus(refreshStatus.value));
@@ -342,7 +379,7 @@ async function ensureDeckConfig(deck: TierListRow): Promise<void> {
   deckConfigErrors.value = { ...deckConfigErrors.value, [stateKey]: "" };
 
   try {
-    const response = await loadTierListDeckConfig(deckConfigScope(), deckId, props.pageKind);
+    const response = await loadTierListDeckConfig(deckConfigScope(), deckId, props.pageKind, selectedVersion.value);
     deckConfigs.value = { ...deckConfigs.value, [stateKey]: response.deckConfig };
   } catch (caught) {
     deckConfigErrors.value = {
@@ -539,25 +576,6 @@ function activeClusterVariant(deck: TierListRow): TierListClusterVariant | null 
   return variants[activeIndex] ?? variants[0] ?? null;
 }
 
-function deckImageUrl(deck: TierListRow): string {
-  return activeClusterVariant(deck)?.imageUrl || deck.imageUrl;
-}
-
-function deckImageAlt(deck: TierListRow): string {
-  return activeClusterVariant(deck)?.imageAlt || deck.imageAlt;
-}
-
-function deckImageCard(deck: TierListRow): CardView | null {
-  const variant = activeClusterVariant(deck);
-  const cards = variant?.deckCards ?? deck.deckCards;
-  const imageUrl = deckImageUrl(deck);
-  const imageAlt = deckImageAlt(deck);
-  return cards.find((card) => (
-    (imageUrl && card.imageUrl === imageUrl) ||
-    (imageAlt && (card.imageAlt === imageAlt || card.name === imageAlt))
-  )) || cards[0] || null;
-}
-
 function hasClusterVariants(deck: TierListRow): boolean {
   return clusterVariants(deck).length > 1;
 }
@@ -596,7 +614,7 @@ function switchClusterVariant(deck: TierListRow): void {
     <section v-if="loading" class="Common_StatusPanel">{{ pageCopy.loading }}</section>
     <section v-else-if="error" class="Common_StatusPanel Common_StatusPanel_Error">{{ error }}</section>
     <template v-else-if="snapshot && metadata">
-      <section class="TierPage_Hero" aria-labelledby="tier-title">
+      <section class="TierPage_Hero" :class="{ TierPage_Hero_TierList: props.pageKind === 'tierList' }" aria-labelledby="tier-title">
         <div>
           <p class="Common_Eyebrow">{{ pageCopy.eyebrow }}</p>
           <h1 id="tier-title">{{ pageCopy.title }}</h1>
@@ -606,6 +624,14 @@ function switchClusterVariant(deck: TierListRow): void {
             <span>{{ dateOnly(metadata.dateFrom) }} - {{ dateOnly(metadata.dateTo) }}</span>
             <span>样本 {{ integer(metadata.sampleSize) }}</span>
           </p>
+          <CommonVersionSelect
+            v-if="props.pageKind === 'tierList'"
+            class="TierPage_VersionSelect"
+            :model-value="selectedVersion"
+            :versions="versionList"
+            :disabled="snapshotRefreshing"
+            @update:model-value="handleVersionChange"
+          />
           <div v-if="showBattleFestivalRefreshPanel" class="TierPage_RefreshPanel" aria-label="战祭数据刷新状态">
             <span v-if="snapshotUpdatedLabel">{{ snapshotUpdatedLabel }}</span>
             <span v-if="latestBattleFestivalUploadLabel">{{ latestBattleFestivalUploadLabel }}</span>
@@ -953,7 +979,6 @@ function switchClusterVariant(deck: TierListRow): void {
                   {{ isDeckExpanded(deck) ? "收起配置" : "配置详情" }}
                 </button>
               </td>
-              <!-- <td class="TierPage_EvidenceCell"><CommonMetricTags :tags="deck.evidenceTags" /></td> -->
             </tr>
             <tr v-if="isDeckExpanded(deck)" class="TierPage_ConfigRow">
               <td :colspan="4">
@@ -976,17 +1001,9 @@ function switchClusterVariant(deck: TierListRow): void {
           <article v-for="(deck, index) in renderedRows" :key="`${displayRowKey(deck)}-mobile`" class="TierPage_MobileRow">
             <div class="TierPage_MobileHead">
               <span class="Common_RankCell">#{{ index + 1 }}</span>
-              <CommonImageFrame
-                v-if="!compactMobileViewport"
-                :src="deckImageUrl(deck)"
-                :alt="deckImageAlt(deck)"
-                :card="deckImageCard(deck)"
-                show-details
-                density="full"
-                ratio="portrait"
-              />
-              <div>
+              <div class="TierPage_MobileTitleGroup">
                 <div class="TierPage_MobileTitleLine">
+                  <span class="TierPage_MobileDeckPrefix">{{ mobileDeckSubtitle(deck) }}</span>
                   <h3>{{ deck.deckName }}</h3>
                   <button
                     v-if="hasClusterVariants(deck)"
@@ -999,9 +1016,16 @@ function switchClusterVariant(deck: TierListRow): void {
                     {{ clusterVariantLabel(deck) }}
                   </button>
                 </div>
-                <p>{{ mobileDeckSubtitle(deck) }}</p>
-                <small>{{ sourceLabels[deck.namingSource] }}</small>
               </div>
+              <button
+                class="TierPage_ConfigToggle TierPage_ConfigToggle_MobileHead"
+                type="button"
+                :aria-expanded="isDeckExpanded(deck)"
+                :aria-controls="deckConfigPanelId(deck)"
+                @click="toggleDeckConfig(deck)"
+              >
+                {{ isDeckExpanded(deck) ? "收起配置" : "配置详情" }}
+              </button>
             </div>
             <div class="TierPage_MobileMetricGrid">
               <span><b>{{ deck.rankScore }}</b>综合 Rank</span>
@@ -1011,26 +1035,13 @@ function switchClusterVariant(deck: TierListRow): void {
               <span><b>{{ integer(deck.sampleSize) }}</b>样本</span>
             </div>
             <div class="TierPage_MobileDeckSection">
-              <span>核心构成</span>
               <CommonDeckRail
                 :cards="deckSlots(deck)"
-                :rail-class="compactMobileViewport ? 'Common_DeckRail Common_DeckRail_Mobile Common_DeckRail_TierCompact' : 'Common_DeckRail Common_DeckRail_Mobile'"
-                :show-card-details="!compactMobileViewport"
-                :show-card-overlays="compactMobileViewport"
-                :card-density="compactMobileViewport ? 'mini' : 'compact'"
+                rail-class="Common_DeckRail Common_DeckRail_Mobile TierPage_MobileDeckRail"
+                :show-card-details="false"
+                show-card-overlays
+                card-density="compact"
               />
-            </div>
-            <div class="TierPage_MobileActions">
-              <button
-                class="TierPage_ConfigToggle"
-                type="button"
-                :aria-expanded="isDeckExpanded(deck)"
-                :aria-controls="deckConfigPanelId(deck)"
-                @click="toggleDeckConfig(deck)"
-              >
-                {{ isDeckExpanded(deck) ? "收起配置" : "配置详情" }}
-              </button>
-              <CommonMetricTags :tags="deck.evidenceTags" />
             </div>
             <TierPageDeckConfigPanel
               v-if="isDeckExpanded(deck) && deckConfigFor(deck)"
@@ -1096,6 +1107,10 @@ function switchClusterVariant(deck: TierListRow): void {
   font-family: var(--font-control);
   font-size: 14px;
   font-weight: 700;
+}
+
+.TierPage_VersionSelect {
+  margin-top: 8px;
 }
 
 .TierPage_RefreshPanel {
@@ -1747,6 +1762,30 @@ function switchClusterVariant(deck: TierListRow): void {
   min-width: 0;
 }
 
+.TierPage_MobileTitleGroup {
+  min-width: 0;
+}
+
+.TierPage_MobileDeckPrefix {
+  flex: 0 0 auto;
+  min-height: 24px;
+  max-width: 100%;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-muted);
+  background: var(--color-panel);
+  font-family: var(--font-control);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 聚类式样按钮：显示当前式样序号，点击切换下一个样本量排序后的式样。 */
 .TierPage_ClusterVariantButton {
   flex: 0 0 auto;
@@ -1865,11 +1904,6 @@ function switchClusterVariant(deck: TierListRow): void {
   background: #fff4d9;
 }
 
-.TierPage_MobileActions {
-  display: grid;
-  gap: 8px;
-}
-
 /* 配置详情展开行：不新增表格列，只承载附属统计。 */
 .TierPage_ConfigRow td {
   padding-top: 0;
@@ -1944,34 +1978,163 @@ function switchClusterVariant(deck: TierListRow): void {
   /* 手机单条榜单卡。 */
   .TierPage_MobileRow {
     display: grid;
-    gap: 12px;
-    padding: 14px;
+    gap: 8px;
+    padding: 8px 12px 12px;
     border: 1px solid rgba(216, 192, 151, 0.82);
     background: rgba(255, 250, 240, 0.76);
   }
 
-  /* 手机榜单卡头部：Rank、头像、卡组名。 */
+  /* 手机榜单卡头部：Rank、卡组名、配置入口。 */
   .TierPage_MobileHead {
     display: grid;
-    grid-template-columns: 44px 50px 1fr;
-    gap: 12px;
-    align-items: start;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
   }
 
-  /* 手机榜单头像尺寸。 */
-  .TierPage_MobileHead :deep(.Common_ImageFrame) {
-    width: 50px;
-    height: auto;
+  .TierPage_MobileTitleLine {
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 8px;
   }
 
-  /* 手机命名来源文本。 */
-  .TierPage_MobileHead small {
-    display: block;
-    margin-top: 4px;
-    color: var(--color-muted);
-    font-family: var(--font-control);
-    font-size: var(--font-size-sm);
-    font-weight: 800;
+  .TierPage_MobileTitleLine h3 {
+    flex: 1 1 160px;
+    margin-bottom: 0;
+  }
+
+  .TierPage_ConfigToggle_MobileHead {
+    position: relative;
+    isolation: isolate;
+    width: auto;
+    min-height: 44px;
+    margin-top: 0;
+    padding: 0 8px;
+    border-color: transparent;
+    background: transparent;
+    white-space: nowrap;
+  }
+
+  .TierPage_ConfigToggle_MobileHead::before {
+    content: "";
+    position: absolute;
+    inset: 4px 0;
+    z-index: -1;
+    border: 1px solid rgba(185, 133, 36, 0.52);
+    background: rgba(255, 244, 217, 0.72);
+  }
+
+  .TierPage_ConfigToggle_MobileHead:hover {
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .TierPage_ConfigToggle_MobileHead:hover::before {
+    border-color: rgba(185, 133, 36, 0.78);
+    background: #fff4d9;
+  }
+
+  .TierPage_MobileDeckSection {
+    min-width: 0;
+    margin-inline: -4px;
+  }
+
+  .TierPage_MobileDeckSection :deep(.Common_DeckRail_Mobile) {
+    max-width: 100%;
+  }
+
+  .TierPage_MobileDeckSection :deep(.TierPage_MobileDeckRail) {
+    --TierPage_MobileDeckRailPadding: 3px;
+    --TierPage_MobileDeckRailGap: 1px;
+    --TierPage_MobileCardWidth: calc((100cqw - var(--TierPage_MobileDeckRailPadding) * 2 - var(--TierPage_MobileDeckRailGap) * 7) / 8);
+    --Common_DeckRail_SlotHeight: clamp(66px, calc(var(--TierPage_MobileCardWidth) * 1.6), 76px);
+
+    container-type: inline-size;
+    width: 100%;
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    grid-auto-rows: var(--Common_DeckRail_SlotHeight);
+    gap: var(--TierPage_MobileDeckRailGap);
+    padding: var(--TierPage_MobileDeckRailPadding);
+    overflow: hidden;
+  }
+
+  .TierPage_MobileDeckSection :deep(.TierPage_MobileDeckRail .Common_ImageFrame) {
+    --Common_ImageFrame_UnitSize: calc(var(--TierPage_MobileCardWidth) * 0.30);
+    --Common_ImageFrame_CostWidth: calc(var(--TierPage_MobileCardWidth) - var(--Common_ImageFrame_UnitSize) - 1px);
+    --TierPage_MobileCardBadgeSize: calc(var(--TierPage_MobileCardWidth) * 0.25);
+    --Common_ImageFrame_StatSize: var(--TierPage_MobileCardBadgeSize);
+    --Common_ImageFrame_SkillSize: var(--TierPage_MobileCardBadgeSize);
+    --TierPage_MobileCardOverlayGap: max(0.5px, calc(var(--TierPage_MobileCardWidth) * 0.022));
+    --TierPage_MobileCardOverlayRadius: max(2px, calc(var(--TierPage_MobileCardWidth) * 0.055));
+  }
+
+  .TierPage_MobileDeckSection :deep(.TierPage_MobileDeckRail .Common_ImageFrame_UnitIcon) {
+    max-width: 30%;
+  }
+
+  .TierPage_MobileDeckSection :deep(.TierPage_MobileDeckRail .Common_ImageFrame_CostIcon) {
+    left: calc(var(--Common_ImageFrame_UnitSize) + 1px);
+    right: 0;
+    width: auto;
+    max-width: none;
+    margin-left: 0;
+  }
+
+  .TierPage_MobileDeckSection :deep(.TierPage_MobileDeckRail .Common_ImageFrame_CostIcon img) {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .TierPage_MobileDeckSection :deep(.TierPage_MobileDeckRail .Common_ImageFrame_PowerStats),
+  .TierPage_MobileDeckSection :deep(.TierPage_MobileDeckRail .Common_ImageFrame_SkillBadges) {
+    align-items: center;
+    gap: var(--TierPage_MobileCardOverlayGap);
+    padding: var(--TierPage_MobileCardOverlayGap);
+  }
+
+  .TierPage_MobileDeckSection :deep(.TierPage_MobileDeckRail .Common_ImageFrame_PowerStats) {
+    bottom: 0;
+    grid-template-columns: repeat(2, auto);
+    max-width: 100%;
+    overflow: visible;
+  }
+
+  .TierPage_MobileDeckSection :deep(.TierPage_MobileDeckRail .Common_ImageFrame_SkillBadges) {
+    left: 0;
+    right: auto;
+    bottom: calc(var(--TierPage_MobileCardBadgeSize) + var(--TierPage_MobileCardOverlayGap) * 2);
+    max-width: 100%;
+    justify-content: flex-start;
+    overflow: visible;
+  }
+
+  .TierPage_MobileDeckSection :deep(.TierPage_MobileDeckRail .Common_ImageFrame_PowerValue),
+  .TierPage_MobileDeckSection :deep(.TierPage_MobileDeckRail .Common_ImageFrame_SkillBadge) {
+    border-radius: var(--TierPage_MobileCardOverlayRadius);
+  }
+
+  .TierPage_MobileDeckSection :deep(.TierPage_MobileDeckRail .Common_ImageFrame_PowerValue) {
+    width: auto;
+    min-width: calc(var(--TierPage_MobileCardBadgeSize) * 0.86);
+    height: var(--TierPage_MobileCardBadgeSize);
+    box-sizing: border-box;
+    padding: 0 calc(var(--TierPage_MobileCardBadgeSize) * 0.08);
+    border: 0;
+    color: var(--color-panel-strong);
+    background: color-mix(in srgb, var(--color-brown) 60%, transparent);
+    box-shadow: none;
+    font-size: calc(var(--TierPage_MobileCardBadgeSize) * 0.82);
+  }
+
+  .TierPage_MobileDeckSection :deep(.TierPage_MobileDeckRail .Common_ImageFrame_SkillBadge) {
+    width: auto;
+    min-width: calc(var(--TierPage_MobileCardBadgeSize) * 0.86);
+    height: var(--TierPage_MobileCardBadgeSize);
+    box-sizing: border-box;
+    padding: 0 calc(var(--TierPage_MobileCardBadgeSize) * 0.08);
+    background: color-mix(in srgb, var(--color-panel-strong) 82%, transparent);
+    box-shadow: none;
+    font-size: calc(var(--TierPage_MobileCardBadgeSize) * 0.82);
   }
 
   /* 手机 Hero 改为单列。 */
@@ -1986,6 +2149,25 @@ function switchClusterVariant(deck: TierListRow): void {
   .TierPage_Hero h1 {
     margin-bottom: var(--space-xs);
     font-size: 32px;
+  }
+
+  .TierPage_Hero_TierList {
+    padding: 16px;
+    gap: 8px;
+  }
+
+  .TierPage_Hero_TierList .Common_Eyebrow,
+  .TierPage_Hero_TierList .TierPage_MetaLine,
+  .TierPage_Hero_TierList .TierPage_Leader {
+    display: none;
+  }
+
+  .TierPage_Hero_TierList h1 {
+    margin-bottom: 8px;
+  }
+
+  .TierPage_Hero_TierList .TierPage_VersionSelect :deep(select) {
+    height: 44px;
   }
 
   /* 手机当前第一提示卡：名称和 Rank 同行感。 */
@@ -2040,7 +2222,11 @@ function switchClusterVariant(deck: TierListRow): void {
 
   /* 手机下拉框高度。 */
   .TierPage_FilterBar select {
-    height: 34px;
+    height: 44px;
+  }
+
+  .TierPage_ClusterToggle {
+    height: 44px;
   }
 
   /* 手机筛选控件铺满。 */
@@ -2086,23 +2272,9 @@ function switchClusterVariant(deck: TierListRow): void {
     grid-template-columns: 1fr;
   }
 
-  /* 手机核心构成标题。 */
-  .TierPage_MobileDeckSection > span {
-    display: block;
-    margin-bottom: 8px;
-    color: var(--color-muted);
-    font-family: var(--font-control);
-    font-size: var(--font-size-sm);
-    font-weight: 800;
-  }
-
   /* 手机指标数字大小。 */
   .TierPage_MobileMetricGrid b {
     font-size: 18px;
-  }
-
-  .TierPage_MobileTitleLine {
-    align-items: flex-start;
   }
 
   .TierPage_ConfigToggle {
@@ -2152,7 +2324,7 @@ function switchClusterVariant(deck: TierListRow): void {
   }
 
   .TierPage_FilterSummary {
-    min-height: 36px;
+    min-height: 44px;
     padding: 0 10px;
     display: flex;
     align-items: center;
@@ -2183,11 +2355,11 @@ function switchClusterVariant(deck: TierListRow): void {
   }
 
   .TierPage_FilterBar select {
-    height: 32px;
+    height: 44px;
   }
 
   .TierPage_ClusterToggle {
-    height: 32px;
+    height: 44px;
   }
 
   .TierPage_TableCard {
@@ -2210,44 +2382,34 @@ function switchClusterVariant(deck: TierListRow): void {
   }
 
   .TierPage_MobileRow {
-    gap: 6px;
-    padding: 7px;
+    gap: 4px;
+    padding: 4px 8px 8px;
   }
 
   .TierPage_MobileHead {
-    grid-template-columns: 32px minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 8px;
-    align-items: start;
+    align-items: center;
   }
 
   .TierPage_MobileHead .Common_RankCell {
     font-size: 20px;
   }
 
-  .TierPage_MobileHead :deep(.Common_ImageFrame) {
-    width: 38px;
-  }
-
   .TierPage_MobileTitleLine {
-    gap: 6px;
+    gap: 4px 6px;
   }
 
   .TierPage_MobileRow h3 {
-    margin-bottom: 2px;
+    margin-bottom: 0;
     font-size: 16px;
     line-height: 1.18;
   }
 
-  .TierPage_MobileRow p {
-    margin-bottom: 0;
-    font-size: 12px;
-    line-height: 1.2;
-  }
-
-  .TierPage_MobileHead small {
-    margin-top: 2px;
+  .TierPage_MobileDeckPrefix {
+    min-height: 24px;
+    padding: 0 8px;
     font-size: 11px;
-    line-height: 1.15;
   }
 
   .TierPage_MobileMetricGrid {
@@ -2267,44 +2429,13 @@ function switchClusterVariant(deck: TierListRow): void {
     font-size: 14px;
   }
 
-  .TierPage_MobileDeckSection > span {
-    margin-bottom: 2px;
-    font-size: 11px;
-  }
-
-  .TierPage_MobileActions {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: center;
-    gap: 4px;
-    min-width: 0;
-  }
-
   .TierPage_ConfigToggle {
     width: auto;
-    min-height: 28px;
+    min-height: 44px;
     margin-top: 0;
     padding: 0 8px;
     flex: 0 0 auto;
     font-size: 11px;
-  }
-
-  .TierPage_MobileActions :deep(.Common_MetricTags) {
-    min-width: 0;
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(0, 1fr);
-    gap: 3px;
-  }
-
-  .TierPage_MobileActions :deep(.Common_MetricTags_Item) {
-    min-width: 0;
-    min-height: 26px;
-    justify-content: center;
-    padding: 0 3px;
-    overflow: hidden;
-    font-size: 10px;
-    text-overflow: ellipsis;
   }
 }
 </style>

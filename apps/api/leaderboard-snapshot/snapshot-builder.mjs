@@ -4,6 +4,7 @@ import { createReadStream } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { VERSION_MANIFEST_SCHEMA_VERSION } from "./version-files.mjs";
 
 const require = createRequire(import.meta.url);
 const { classifyAnalysisDecks } = require("../deck-classification/eiketsu-analysis-deck.js");
@@ -372,6 +373,52 @@ function latestFormalRun(runs, targetVersion, options = {}) {
       return Boolean(toNumber(run.include_battle_festival)) === false && runSolo === includeSolo;
     })
     .sort((left, right) => toNumber(right.id) - toNumber(left.id))[0] || null;
+}
+
+function formalRunScopeMatches(run, options = {}) {
+  const includeSolo = Boolean(options.includeSolo);
+  const includeBattleFestival = Boolean(options.includeBattleFestival);
+  const runSolo = Boolean(toNumber(run.include_solo));
+  if (includeBattleFestival) {
+    return "include_battle_festival" in run
+      ? Boolean(toNumber(run.include_battle_festival))
+      : runSolo;
+  }
+  return Boolean(toNumber(run.include_battle_festival)) === false && runSolo === includeSolo;
+}
+
+function latestFormalRunsByVersion(runs, options = {}) {
+  const byVersion = new Map();
+  const candidates = runs
+    .filter((run) => run.status === "ready")
+    .filter((run) => String(run.target_version || "").trim())
+    .filter((run) => formalRunScopeMatches(run, options))
+    .sort((left, right) => toNumber(right.id) - toNumber(left.id));
+
+  for (const run of candidates) {
+    if (!byVersion.has(run.target_version)) {
+      byVersion.set(run.target_version, run);
+    }
+  }
+
+  return Array.from(byVersion.values());
+}
+
+function formalRunUpdatedAt(run) {
+  return String(run.generated_at || run.updated_at || "");
+}
+
+function versionManifestEntry(run, currentTargetVersion) {
+  const targetVersion = String(run.target_version || "").trim();
+  return {
+    targetVersion,
+    sourceRunId: toNumber(run.id),
+    dateFrom: String(run.date_from || ""),
+    dateTo: String(run.date_to || ""),
+    updatedAt: formalRunUpdatedAt(run),
+    sampleSize: toNumber(run.counts_json?.side_samples),
+    current: targetVersion === currentTargetVersion
+  };
 }
 
 function formalCardView(card, cardCatalog = {}) {
@@ -2385,7 +2432,8 @@ async function buildBattleFestivalSnapshotFromMatches(shareConfig, uploadScope =
 async function buildSnapshotFromData(options = {}) {
   const shareConfig = latestShareConfig(await readJsonl(resolve(legacyRoot, "tables/server_share_config.jsonl")));
   const formalRuns = await readJsonl(resolve(legacyRoot, "tables/server_leaderboard_runs.jsonl"));
-  const formalRun = latestFormalRun(formalRuns, shareConfig?.target_version, {
+  const targetVersion = String(options.targetVersion || shareConfig?.target_version || "").trim();
+  const formalRun = latestFormalRun(formalRuns, targetVersion, {
     includeSolo: Boolean(options.includeSolo),
     includeBattleFestival: Boolean(options.includeBattleFestival)
   });
@@ -2480,12 +2528,47 @@ export async function buildLeaderboardSnapshot(options = {}) {
     return await buildSnapshotFromData({
       includeSolo: Boolean(options.includeSolo),
       includeBattleFestival: Boolean(options.includeBattleFestival),
-      sourceKind: options.sourceKind
+      sourceKind: options.sourceKind,
+      targetVersion: options.targetVersion
     });
   } finally {
     legacyRoot = previousLegacyRoot;
     diagnosticsEnabled = previousDiagnosticsEnabled;
     unitTypeRepairWarnings = previousUnitTypeRepairWarnings;
+  }
+}
+
+export async function buildLeaderboardVersionManifest(options = {}) {
+  const previousLegacyRoot = legacyRoot;
+  legacyRoot = options.legacyRoot ? resolve(options.legacyRoot) : defaultLegacyRoot;
+
+  try {
+    const shareConfig = latestShareConfig(await readJsonl(resolve(legacyRoot, "tables/server_share_config.jsonl")));
+    const formalRuns = await readJsonl(resolve(legacyRoot, "tables/server_leaderboard_runs.jsonl"));
+    const latestRuns = latestFormalRunsByVersion(formalRuns, {
+      includeSolo: Boolean(options.includeSolo),
+      includeBattleFestival: Boolean(options.includeBattleFestival)
+    });
+    const configuredVersion = String(options.targetVersion || shareConfig?.target_version || "").trim();
+    const currentRun = latestFormalRun(formalRuns, configuredVersion, {
+      includeSolo: Boolean(options.includeSolo),
+      includeBattleFestival: Boolean(options.includeBattleFestival)
+    }) || latestRuns[0] || null;
+    const currentTargetVersion = String(currentRun?.target_version || configuredVersion || "").trim();
+    const versions = latestRuns
+      .map((run) => versionManifestEntry(run, currentTargetVersion))
+      .sort((left, right) => {
+        if (left.current !== right.current) return left.current ? -1 : 1;
+        return right.sourceRunId - left.sourceRunId;
+      });
+
+    return {
+      schemaVersion: VERSION_MANIFEST_SCHEMA_VERSION,
+      currentTargetVersion,
+      versions
+    };
+  } finally {
+    legacyRoot = previousLegacyRoot;
   }
 }
 

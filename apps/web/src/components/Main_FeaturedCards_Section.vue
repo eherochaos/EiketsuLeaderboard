@@ -67,12 +67,11 @@ defineProps<{
             <h3>{{ card.name }}</h3>
           </span>
         </div>
-        <span>使用 {{ percent(card.usageRate) }}</span>
-          <span>胜率 {{ percent(card.winRate) }}</span>
-          <span>样本 {{ integer(card.sampleSize) }}</span>
-<!--         <div class="Main_FeaturedCards_Section_InlineMetrics">
-
-        </div> -->
+        <div class="Main_FeaturedCards_Section_InlineMetrics">
+          <span><b>{{ percent(card.usageRate) }}</b>使用</span>
+          <span><b>{{ percent(card.winRate) }}</b>胜率</span>
+          <span><b>{{ integer(card.sampleSize) }}</b>样本</span>
+        </div>
         <CommonMetricTags :tags="card.evidenceTags" />
       </article>
     </div>
@@ -117,18 +116,7 @@ defineProps<{
   --Main_FeaturedCards_Section_ImageColumn: 72px;
   --Main_FeaturedCards_Section_MetricColumn: 96px;
   --Main_FeaturedCards_Section_EvidenceColumnRatio: 1;
-
 }
-
-/* Rank 列宽。 */
-
-/* 单卡名称列宽。 */
-
-/* 图片列宽。 */
-
-/* 使用率、胜率、样本列宽。 */
-
-/* 指标依据列占比。 */
 
 /* 表格卡图尺寸。 */
 .Main_FeaturedCards_Section_Table :deep(.Common_ImageFrame) {
@@ -147,11 +135,6 @@ defineProps<{
   height: 64px;
 }
 
-/* 指标标签列最大宽度。 */
-/*.Main_FeaturedCards_Section_Table :deep(.Common_MetricTags) {
-  max-width: 320px;
-}
-*/
 /* 单卡名称，最多两行。 */
 .Main_FeaturedCards_Section_CardMain h3,
 .Main_FeaturedCards_Section_MobileRow h3 {
@@ -160,9 +143,6 @@ defineProps<{
   font-family: var(--font-serif);
   font-size: 19px;
   line-height: 1.25;
-  /*display: grid;*/
-/*  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;*/
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -204,18 +184,37 @@ defineProps<{
 /* 移动端指标和标签从第三列开始对齐。 */
 .Main_FeaturedCards_Section_MobileRow :deep(.Common_MetricTags),
 .Main_FeaturedCards_Section_InlineMetrics {
-  grid-column: 3 / -1;
+  grid-column: 1 / -1;
 }
 
 /* 移动端内联指标。 */
 .Main_FeaturedCards_Section_InlineMetrics {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  color: var(--color-brown-soft);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  color: var(--color-muted);
   font-family: var(--font-control);
   font-size: var(--font-size-sm);
   font-weight: 800;
+}
+
+.Main_FeaturedCards_Section_InlineMetrics span {
+  min-width: 0;
+  padding: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(216, 192, 151, 0.82);
+  background: rgba(255, 248, 235, 0.72);
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.Main_FeaturedCards_Section_InlineMetrics b {
+  display: block;
+  color: var(--color-brown);
+  font-family: var(--font-number);
+  font-size: 16px;
+  line-height: 1.15;
 }
 
 /* 手机端：隐藏桌面表格，显示卡片列表。 */
@@ -229,6 +228,10 @@ defineProps<{
   .Main_FeaturedCards_Section_MobileList {
     display: grid;
     gap: 12px;
+  }
+
+  .Main_FeaturedCards_Section_MobileRow h3 {
+    font-size: 16px;
   }
 }
 </style>

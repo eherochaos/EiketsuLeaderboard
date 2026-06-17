@@ -9,6 +9,7 @@ import {
   appendSiteAnalyticsEvent,
   readSiteAnalyticsSummary
 } from "./site-analytics.mjs";
+import { VERSION_MANIFEST_SCHEMA_VERSION, versionArtifactPath, versionEntry } from "./version-files.mjs";
 
 const DEFAULT_PORT = 8001;
 const DEFAULT_SNAPSHOT_FILE = resolve("apps/api/data/leaderboard-snapshot.json");
@@ -18,6 +19,7 @@ const DEFAULT_TIER_LIST_SNAPSHOT_FILE = resolve("apps/api/data/tier-list-snapsho
 const DEFAULT_TIER_LIST_CONFIGS_FILE = resolve("apps/api/data/tier-list-configs.json");
 const DEFAULT_BATTLE_FESTIVAL_SNAPSHOT_FILE = resolve("apps/api/data/battle-festival-snapshot.json");
 const DEFAULT_BATTLE_FESTIVAL_CONFIGS_FILE = resolve("apps/api/data/battle-festival-configs.json");
+const DEFAULT_VERSION_MANIFEST_FILE = resolve("apps/api/data/version-manifest.json");
 const DEFAULT_SITE_ANALYTICS_FILE = resolve("apps/api/data/site-analytics-events.jsonl");
 
 function jsonHeaders(extra = {}) {
@@ -39,6 +41,34 @@ function publicError(error, fallback = "leaderboard snapshot failed", missing = 
   }
 
   return fallback;
+}
+
+function firstText(...values) {
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function manifestFromSnapshot(snapshot) {
+  const metadata = snapshot?.metadata || {};
+  const targetVersion = String(metadata.targetVersion || "").trim();
+  const versions = targetVersion ? [{
+    targetVersion,
+    sourceRunId: Number(metadata.sourceRunId || 0),
+    dateFrom: String(metadata.dateFrom || ""),
+    dateTo: String(metadata.dateTo || ""),
+    updatedAt: String(metadata.updatedAt || ""),
+    sampleSize: Number(metadata.sampleSize || 0),
+    current: true
+  }] : [];
+
+  return {
+    schemaVersion: VERSION_MANIFEST_SCHEMA_VERSION,
+    currentTargetVersion: targetVersion,
+    versions
+  };
 }
 
 function createJsonFileCache(filePath) {
@@ -165,6 +195,8 @@ export function createLeaderboardSnapshotServer(options = {}) {
   const tierListConfigsFile = resolve(options.tierListConfigsFile || DEFAULT_TIER_LIST_CONFIGS_FILE);
   const battleFestivalSnapshotFile = resolve(options.battleFestivalSnapshotFile || DEFAULT_BATTLE_FESTIVAL_SNAPSHOT_FILE);
   const battleFestivalConfigsFile = resolve(options.battleFestivalConfigsFile || DEFAULT_BATTLE_FESTIVAL_CONFIGS_FILE);
+  const versionManifestFile = resolve(options.versionManifestFile || DEFAULT_VERSION_MANIFEST_FILE);
+  const versionOutputDir = resolve(options.versionOutputDir || resolve(dirname(snapshotFile), "versions"));
   const siteAnalyticsFile = resolve(options.siteAnalyticsFile || DEFAULT_SITE_ANALYTICS_FILE);
   const siteAnalyticsAdminToken = String(options.siteAnalyticsAdminToken || "");
   const snapshotCache = createStaticJsonFileCache(snapshotFile);
@@ -174,6 +206,9 @@ export function createLeaderboardSnapshotServer(options = {}) {
   const tierListConfigsCache = createParsedJsonFileCache(tierListConfigsFile);
   const battleFestivalSnapshotCache = createStaticJsonFileCache(battleFestivalSnapshotFile);
   const battleFestivalConfigsCache = createParsedJsonFileCache(battleFestivalConfigsFile);
+  const versionManifestCache = createParsedJsonFileCache(versionManifestFile);
+  const versionStaticCaches = new Map();
+  const versionParsedCaches = new Map();
 
   function writeStaticJson(request, response, entry) {
     const headers = {
@@ -210,9 +245,61 @@ export function createLeaderboardSnapshotServer(options = {}) {
     response.end(body);
   }
 
-  async function loadMatchSearchIndex(response) {
+  function staticCacheFor(filePath) {
+    const key = resolve(filePath);
+    if (!versionStaticCaches.has(key)) {
+      versionStaticCaches.set(key, createStaticJsonFileCache(key));
+    }
+    return versionStaticCaches.get(key);
+  }
+
+  function parsedCacheFor(filePath) {
+    const key = resolve(filePath);
+    if (!versionParsedCaches.has(key)) {
+      versionParsedCaches.set(key, createParsedJsonFileCache(key));
+    }
+    return versionParsedCaches.get(key);
+  }
+
+  async function loadVersionManifest() {
     try {
-      return await matchSearchIndexCache.load();
+      return await versionManifestCache.load();
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      const entry = await snapshotCache.load();
+      return manifestFromSnapshot(JSON.parse(entry.body.toString("utf8")));
+    }
+  }
+
+  async function versionedFilePath(targetVersion, response, fileName) {
+    const requested = String(targetVersion || "").trim();
+    if (!requested) return "";
+    const manifest = await loadVersionManifest();
+    const entry = versionEntry(manifest, requested);
+    if (!entry || entry.targetVersion !== requested) {
+      writeJson(response, 404, { error: "version is not available" });
+      return null;
+    }
+    return versionArtifactPath(versionOutputDir, entry.targetVersion, fileName);
+  }
+
+  async function loadVersionedStaticJson(response, targetVersion, defaultCache, fileName) {
+    const filePath = await versionedFilePath(targetVersion, response, fileName);
+    if (filePath === null) return null;
+    if (!filePath) return await defaultCache.load();
+    return await staticCacheFor(filePath).load();
+  }
+
+  async function loadVersionedParsedJson(response, targetVersion, defaultCache, fileName) {
+    const filePath = await versionedFilePath(targetVersion, response, fileName);
+    if (filePath === null) return null;
+    if (!filePath) return await defaultCache.load();
+    return await parsedCacheFor(filePath).load();
+  }
+
+  async function loadMatchSearchIndex(response, targetVersion = "") {
+    try {
+      return await loadVersionedParsedJson(response, targetVersion, matchSearchIndexCache, "match-search-index.json");
     } catch (error) {
       matchSearchIndexCache.clear();
       const message = publicError(error, "match search failed");
@@ -225,9 +312,23 @@ export function createLeaderboardSnapshotServer(options = {}) {
   const server = createServer(async (request, response) => {
     const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
 
+    if (request.method === "GET" && url.pathname === "/api/version-options") {
+      try {
+        writeJson(response, 200, await loadVersionManifest());
+      } catch (error) {
+        versionManifestCache.clear();
+        const message = publicError(error, "version options failed", "version options are not available");
+        console.error(message);
+        writeJson(response, 500, { error: message });
+      }
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/leaderboard-snapshot") {
       try {
-        writeStaticJson(request, response, await snapshotCache.load());
+        const entry = await loadVersionedStaticJson(response, url.searchParams.get("version"), snapshotCache, "leaderboard-snapshot.json");
+        if (!entry) return;
+        writeStaticJson(request, response, entry);
       } catch (error) {
         snapshotCache.clear();
         console.error(publicError(error));
@@ -238,7 +339,9 @@ export function createLeaderboardSnapshotServer(options = {}) {
 
     if (request.method === "GET" && url.pathname === "/api/tier-list-snapshot") {
       try {
-        writeStaticJson(request, response, await tierListSnapshotCache.load());
+        const entry = await loadVersionedStaticJson(response, url.searchParams.get("version"), tierListSnapshotCache, "tier-list-snapshot.json");
+        if (!entry) return;
+        writeStaticJson(request, response, entry);
       } catch (error) {
         tierListSnapshotCache.clear();
         const message = publicError(error, "tier list failed", "tier list data is not available");
@@ -268,7 +371,8 @@ export function createLeaderboardSnapshotServer(options = {}) {
           writeJson(response, 400, { error: "deckId is required" });
           return;
         }
-        const payload = await tierListConfigsCache.load();
+        const payload = await loadVersionedParsedJson(response, url.searchParams.get("version"), tierListConfigsCache, "tier-list-configs.json");
+        if (!payload) return;
         const configs = scope === "cluster" ? payload.clusterConfigs : payload.deckConfigs;
         const deckConfig = configs?.[deckId];
         if (!deckConfig) {
@@ -333,17 +437,18 @@ export function createLeaderboardSnapshotServer(options = {}) {
     }
 
     if (request.method === "GET" && url.pathname === "/api/match-search-options") {
-      const index = await loadMatchSearchIndex(response);
+      const index = await loadMatchSearchIndex(response, url.searchParams.get("version"));
       if (!index) return;
       writeJson(response, 200, matchSearchOptions(index));
       return;
     }
 
     if (request.method === "POST" && url.pathname === "/api/match-search") {
-      const index = await loadMatchSearchIndex(response);
-      if (!index) return;
       try {
         const payload = await readJsonBody(request);
+        const targetVersion = firstText(payload.targetVersion, url.searchParams.get("version"));
+        const index = await loadMatchSearchIndex(response, targetVersion);
+        if (!index) return;
         writeJson(response, 200, searchMatchIndex(index, payload));
       } catch (error) {
         const isBadRequest = error instanceof MatchSearchRequestError;
@@ -420,6 +525,12 @@ export function startLeaderboardSnapshotServer(options = {}) {
   const battleFestivalConfigsFile = options.battleFestivalConfigsFile || env.LEADERBOARD_BATTLE_FESTIVAL_CONFIGS_FILE || (
     snapshotFile ? resolve(dirname(resolve(snapshotFile)), "battle-festival-configs.json") : undefined
   );
+  const versionManifestFile = options.versionManifestFile || env.LEADERBOARD_VERSION_MANIFEST_FILE || (
+    snapshotFile ? resolve(dirname(resolve(snapshotFile)), "version-manifest.json") : undefined
+  );
+  const versionOutputDir = options.versionOutputDir || env.LEADERBOARD_VERSION_OUTPUT_DIR || (
+    snapshotFile ? resolve(dirname(resolve(snapshotFile)), "versions") : undefined
+  );
   const siteAnalyticsFile = options.siteAnalyticsFile || env.SITE_ANALYTICS_FILE || (
     snapshotFile ? resolve(dirname(resolve(snapshotFile)), "site-analytics-events.jsonl") : undefined
   );
@@ -432,6 +543,8 @@ export function startLeaderboardSnapshotServer(options = {}) {
     tierListConfigsFile,
     battleFestivalSnapshotFile,
     battleFestivalConfigsFile,
+    versionManifestFile,
+    versionOutputDir,
     siteAnalyticsFile,
     siteAnalyticsAdminToken
   });
