@@ -22,6 +22,7 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
             "log 'start leaderboard node api'",
             "log 'smoke check api routes'",
             "log 'install upload refresh worker'",
+            "log 'install version detect worker'",
             "log 'publish live frontend'",
             "log 'smoke check live routes'",
         )
@@ -134,6 +135,31 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
             "log 'start leaderboard node api'",
             "log 'smoke check api routes'",
             "log 'install upload refresh worker'",
+        )
+
+    def test_version_detect_worker_installs_jst_timer(self) -> None:
+        worker_install = self.function_body("install_version_detect_worker")
+        self.assertIn("detect_server_version.py", worker_install)
+        self.assertIn("set_server_share_config.py", worker_install)
+        self.assertIn("eiketsu-version-detect.service", worker_install)
+        self.assertIn("eiketsu-version-detect.timer", worker_install)
+        for hour in ("09", "12", "15", "18", "21"):
+            self.assertIn(f"OnCalendar=*-*-* {hour}:00:00 Asia/Tokyo", worker_install)
+        self.assertIn("Persistent=true", worker_install)
+
+    def test_version_detect_worker_force_refreshes_only_on_changed_status(self) -> None:
+        worker_install = self.function_body("install_version_detect_worker")
+        self.assertIn("detect_status", worker_install)
+        self.assertIn('[ "$detect_status" != "changed" ]', worker_install)
+        self.assertIn("--force-refresh", worker_install)
+        self.assertIn("server version changed", worker_install)
+        self.assertIn("upload_refresh_worker.py", worker_install)
+
+    def test_version_detect_worker_is_installed_after_upload_worker(self) -> None:
+        self.assert_order(
+            "log 'install upload refresh worker'",
+            "log 'install version detect worker'",
+            "log 'publish live frontend'",
         )
 
     def test_postgres_export_copies_through_host_temp_dir(self) -> None:
