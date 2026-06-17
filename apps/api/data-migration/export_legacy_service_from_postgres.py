@@ -26,6 +26,15 @@ SNAPSHOT_RUNTIME_TABLES = [
     "match_deck_units",
 ]
 
+DEFAULT_EXPORT_CHUNK_SIZE = 5000
+CHUNKED_EXPORT_TABLES = {
+    "server_leaderboard_rows",
+    "matches",
+    "match_decks",
+    "match_sides",
+    "match_deck_units",
+}
+
 TABLE_ORDER_COLUMNS = {
     "shared_contribution_packages": "package_id",
 }
@@ -37,16 +46,47 @@ def json_default(value: Any) -> str:
     return str(value)
 
 
-def export_table(session, table_name: str, output_path: Path) -> int:
+def write_jsonl_row(handle, row: Any) -> None:
+    handle.write(json.dumps(dict(row), ensure_ascii=False, default=json_default, separators=(",", ":")))
+    handle.write("\n")
+
+
+def export_table_simple(session, table_name: str, output_path: Path) -> int:
     count = 0
     order_column = TABLE_ORDER_COLUMNS.get(table_name, "id")
     with output_path.open("w", encoding="utf-8", newline="\n") as handle:
         rows = session.execute(text(f'SELECT * FROM "{table_name}" ORDER BY "{order_column}"')).mappings()
         for row in rows:
-            handle.write(json.dumps(dict(row), ensure_ascii=False, default=json_default, separators=(",", ":")))
-            handle.write("\n")
+            write_jsonl_row(handle, row)
             count += 1
     return count
+
+
+def export_table_chunked(session, table_name: str, output_path: Path, chunk_size: int = DEFAULT_EXPORT_CHUNK_SIZE) -> int:
+    count = 0
+    last_id = 0
+    statement = text(f'SELECT * FROM "{table_name}" WHERE "id" > :last_id ORDER BY "id" LIMIT :chunk_size')
+    with output_path.open("w", encoding="utf-8", newline="\n") as handle:
+        while True:
+            rows = list(session.execute(statement, {"last_id": last_id, "chunk_size": chunk_size}).mappings())
+            if not rows:
+                break
+            for row in rows:
+                write_jsonl_row(handle, row)
+                last_id = int(row["id"])
+                count += 1
+    return count
+
+
+def export_table(
+    session,
+    table_name: str,
+    output_path: Path,
+    chunk_size: int = DEFAULT_EXPORT_CHUNK_SIZE,
+) -> int:
+    if table_name in CHUNKED_EXPORT_TABLES:
+        return export_table_chunked(session, table_name, output_path, chunk_size)
+    return export_table_simple(session, table_name, output_path)
 
 
 def copy_card_file(
