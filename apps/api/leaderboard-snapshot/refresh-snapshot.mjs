@@ -1,10 +1,13 @@
-import { mkdir, readFile, rename, rm } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { buildLeaderboardSnapshot, writeLeaderboardSnapshot } from "./snapshot-builder.mjs";
+import { refreshMatchSearchIndex } from "./match-search-index.mjs";
+import { buildLeaderboardSnapshot, buildLeaderboardVersionManifest, writeLeaderboardSnapshot } from "./snapshot-builder.mjs";
 import { writeTierListSnapshotFiles } from "./tier-list-snapshot.mjs";
+import { versionArtifactPath } from "./version-files.mjs";
 
 const DEFAULT_SNAPSHOT_FILE = resolve("apps/api/data/leaderboard-snapshot.json");
+const DEFAULT_VERSION_MANIFEST_FILE = resolve("apps/api/data/version-manifest.json");
 
 function snapshotFileFromOptions(options = {}) {
   const env = typeof process !== "undefined" ? process.env : {};
@@ -36,8 +39,31 @@ function battleFestivalConfigsFileFromOptions(outputPath, options = {}) {
   return resolve(options.battleFestivalConfigsFile || env.LEADERBOARD_BATTLE_FESTIVAL_CONFIGS_FILE || resolve(dirname(outputPath), "battle-festival-configs.json"));
 }
 
+function versionManifestFileFromOptions(outputPath, options = {}) {
+  const env = typeof process !== "undefined" ? process.env : {};
+  return resolve(options.versionManifestFile || env.LEADERBOARD_VERSION_MANIFEST_FILE || resolve(dirname(outputPath), "version-manifest.json") || DEFAULT_VERSION_MANIFEST_FILE);
+}
+
+function versionOutputDirFromOptions(outputPath, options = {}) {
+  const env = typeof process !== "undefined" ? process.env : {};
+  return resolve(options.versionOutputDir || env.LEADERBOARD_VERSION_OUTPUT_DIR || resolve(dirname(outputPath), "versions"));
+}
+
 function tempSnapshotPath(outputPath) {
   return resolve(dirname(outputPath), `.${basename(outputPath)}.${Date.now()}.${process.pid}.tmp`);
+}
+
+async function writeJsonAtomically(outputPath, payload) {
+  const temporaryPath = tempSnapshotPath(outputPath);
+  await mkdir(dirname(outputPath), { recursive: true });
+  try {
+    await writeFile(temporaryPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+    JSON.parse(await readFile(temporaryPath, "utf8"));
+    await rename(temporaryPath, outputPath);
+  } catch (error) {
+    await rm(temporaryPath, { force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 function assertSnapshotShape(snapshot) {
@@ -151,6 +177,71 @@ async function refreshBattleFestivalSnapshot(outputPath, options = {}) {
   }
 }
 
+async function writeVersionedLeaderboardSnapshot(targetVersion, snapshotFile, options = {}) {
+  const temporaryPath = tempSnapshotPath(snapshotFile);
+  await mkdir(dirname(snapshotFile), { recursive: true });
+  try {
+    await writeLeaderboardSnapshot({
+      legacyRoot: legacyRootFromOptions(options),
+      outputPath: temporaryPath,
+      targetVersion,
+      logDiagnostics: options.logDiagnostics ?? false
+    });
+    const snapshot = JSON.parse(await readFile(temporaryPath, "utf8"));
+    assertSnapshotShape(snapshot);
+    await rename(temporaryPath, snapshotFile);
+    return snapshot;
+  } catch (error) {
+    await rm(temporaryPath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function refreshVersionedArtifacts(outputPath, options = {}) {
+  const manifestFile = versionManifestFileFromOptions(outputPath, options);
+  const versionOutputDir = versionOutputDirFromOptions(outputPath, options);
+  const manifest = await buildLeaderboardVersionManifest({
+    legacyRoot: legacyRootFromOptions(options),
+    logDiagnostics: false
+  });
+  await writeJsonAtomically(manifestFile, manifest);
+
+  const versions = [];
+  for (const entry of manifest.versions) {
+    const snapshotFile = versionArtifactPath(versionOutputDir, entry.targetVersion, "leaderboard-snapshot.json");
+    const tierListSnapshotFile = versionArtifactPath(versionOutputDir, entry.targetVersion, "tier-list-snapshot.json");
+    const tierListConfigsFile = versionArtifactPath(versionOutputDir, entry.targetVersion, "tier-list-configs.json");
+    const matchSearchIndexFile = versionArtifactPath(versionOutputDir, entry.targetVersion, "match-search-index.json");
+    const snapshot = await writeVersionedLeaderboardSnapshot(entry.targetVersion, snapshotFile, options);
+    const tierList = await writeTierListSnapshotFiles({
+      snapshot,
+      tierListSnapshotFile,
+      tierListConfigsFile
+    });
+    const matchSearch = await refreshMatchSearchIndex({
+      legacyRoot: legacyRootFromOptions(options),
+      snapshotFile,
+      outputPath: matchSearchIndexFile
+    });
+    versions.push({
+      targetVersion: entry.targetVersion,
+      snapshotFile,
+      tierListSnapshotFile,
+      tierListConfigsFile,
+      matchSearchIndexFile,
+      sourceRunId: snapshot.metadata.sourceRunId,
+      tierRows: tierList.tierRows,
+      matches: matchSearch.index.metadata.matchCount
+    });
+  }
+
+  return {
+    manifestFile,
+    versionOutputDir,
+    versions
+  };
+}
+
 export async function refreshLeaderboardSnapshot(options = {}) {
   const outputPath = snapshotFileFromOptions(options);
   const temporaryPath = tempSnapshotPath(outputPath);
@@ -171,7 +262,8 @@ export async function refreshLeaderboardSnapshot(options = {}) {
       tierListConfigsFile: tierListConfigsFileFromOptions(outputPath, options)
     });
     const battleFestival = await refreshBattleFestivalSnapshot(outputPath, { ...options, fallbackSnapshot: snapshot });
-    return { outputPath, snapshot, tierList, battleFestival };
+    const versionManifest = await refreshVersionedArtifacts(outputPath, options);
+    return { outputPath, snapshot, tierList, battleFestival, versionManifest };
   } catch (error) {
     await rm(temporaryPath, { force: true }).catch(() => {});
     throw error;
@@ -188,6 +280,7 @@ async function main() {
   );
   console.log(`tierListRows=${tierList.tierRows} tierListClusters=${tierList.clusterRows}`);
   console.log(`battleFestival=${battleFestival.status}`);
+  console.log(`versions=${versionManifest.versions.length} manifest=${versionManifest.manifestFile}`);
 }
 
 if (typeof process !== "undefined" && process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

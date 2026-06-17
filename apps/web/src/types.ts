@@ -10,6 +10,8 @@ export type {
   FactionShare,
   FeaturedCard,
   LeaderboardSnapshot,
+  LeaderboardVersionManifest,
+  LeaderboardVersionOption,
   NamingSource,
 } from "../../../packages/contracts/leaderboard-snapshot.js";
 

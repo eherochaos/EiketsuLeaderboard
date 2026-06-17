@@ -10,6 +10,7 @@ from pathlib import Path
 
 DEFAULT_AUTH_SOURCE = "auto"
 VERSION_START_DATES = {
+    "Ver.3.5.0C": "2026-06-17",
     "Ver.3.5.0B": "2026-05-27",
     "Ver.3.5.0A": "2026-05-20",
     "Ver.3.1.0H": "2026-04-22",

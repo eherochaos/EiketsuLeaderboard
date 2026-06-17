@@ -14,6 +14,10 @@ export default defineConfig(({ mode }) => {
       target: leaderboardApiOrigin,
       changeOrigin: true
     },
+    "/api/version-options": {
+      target: leaderboardApiOrigin,
+      changeOrigin: true
+    },
     "/api/tier-list-snapshot": {
       target: leaderboardApiOrigin,
       changeOrigin: true

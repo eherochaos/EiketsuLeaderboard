@@ -180,6 +180,7 @@ async function createLegacyFixture(root, options = {}) {
   const cardRoot = join(root, "cards");
   const includeBattleFestival = Boolean(options.includeBattleFestival);
   const includeBattleFestivalMatches = Boolean(options.includeBattleFestivalMatches);
+  const includeOldVersion = Boolean(options.includeOldVersion);
   const includeBattleFestivalCamp = options.includeBattleFestivalCamp !== false;
   const includeBattleFestivalMeritSamples = Boolean(options.includeBattleFestivalMeritSamples);
   const includeBattleFestivalOpenPeriodStartMatch = Boolean(options.includeBattleFestivalOpenPeriodStartMatch);
@@ -238,6 +239,19 @@ async function createLegacyFixture(root, options = {}) {
       updated_at: "2026-06-12T00:00:00"
     });
   }
+  if (includeOldVersion) {
+    runs.push({
+      id: 3,
+      status: "ready",
+      target_version: "Ver.old",
+      date_from: "2026-05-01",
+      date_to: "2026-05-10",
+      include_solo: 0,
+      include_battle_festival: 0,
+      generated_at: "2026-05-10T00:00:00",
+      updated_at: "2026-05-10T00:00:00"
+    });
+  }
   await writeJsonl(join(tableRoot, "server_leaderboard_runs.jsonl"), runs);
   const rows = [
     deckRow(1, deckA, [card("legacy-card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 1, 0, 1),
@@ -255,6 +269,14 @@ async function createLegacyFixture(root, options = {}) {
   ];
   if (includeBattleFestival) {
     rows.push(deckRow(6, deckA, [card("legacy-card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 1, 3, 1, 2));
+  }
+  if (includeOldVersion) {
+    rows.push(
+      deckRow(7, deckA, [card("legacy-card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 1, 2, 1, 3),
+      archetypeRow(8, "Old Cluster", [card("legacy-card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 1, 2, 1, deckA, [
+        { deck_fingerprint: deckA, sample_count: 3 }
+      ], 3)
+    );
   }
   await writeJsonl(join(tableRoot, "server_leaderboard_rows.jsonl"), rows);
   const matches = [
@@ -583,6 +605,32 @@ async function testRefreshWritesAtomicSnapshot() {
       .some((item) => item.highlightMatchUrl === "https://eiketsu.example.test/play/1"));
     assert.ok(output.home.tierRows.some((row) => row.deckConfig.strategies.length > 0));
     assert.equal(/token|cookie|secret|C:\\|E:\\/.test(outputText), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testRefreshWritesVersionedArtifacts() {
+  const root = await mkdtemp(join(tmpdir(), "leaderboard-version-refresh-"));
+  const legacyRoot = join(root, "legacy-service");
+  const outputPath = join(root, "published", "leaderboard-snapshot.json");
+
+  try {
+    await createLegacyFixture(legacyRoot, { includeOldVersion: true });
+    const { versionManifest } = await refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: false });
+    const manifest = JSON.parse(await readFile(join(root, "published", "version-manifest.json"), "utf8"));
+    const currentSnapshot = JSON.parse(await readFile(join(root, "published", "versions", "Ver.test", "leaderboard-snapshot.json"), "utf8"));
+    const oldSnapshot = JSON.parse(await readFile(join(root, "published", "versions", "Ver.old", "leaderboard-snapshot.json"), "utf8"));
+    const oldTierList = JSON.parse(await readFile(join(root, "published", "versions", "Ver.old", "tier-list-snapshot.json"), "utf8"));
+    const oldMatchSearch = JSON.parse(await readFile(join(root, "published", "versions", "Ver.old", "match-search-index.json"), "utf8"));
+
+    assert.equal(versionManifest.versions.length, 2);
+    assert.equal(manifest.currentTargetVersion, "Ver.test");
+    assert.deepEqual(manifest.versions.map((item) => item.targetVersion), ["Ver.test", "Ver.old"]);
+    assert.equal(currentSnapshot.metadata.targetVersion, "Ver.test");
+    assert.equal(oldSnapshot.metadata.targetVersion, "Ver.old");
+    assert.equal(oldTierList.metadata.targetVersion, "Ver.old");
+    assert.equal(oldMatchSearch.metadata.targetVersion, "Ver.old");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1045,6 +1093,7 @@ async function testRefreshWritesManifestOnlyBattleFestivalSnapshot() {
 }
 
 await testRefreshWritesAtomicSnapshot();
+await testRefreshWritesVersionedArtifacts();
 await testRefreshWritesBattleFestivalSnapshot();
 await testRefreshBuildsBattleFestivalSnapshotFromMatches();
 await testRefreshSkipsSingleDayBattleFestivalWithoutOfficialPeriod();

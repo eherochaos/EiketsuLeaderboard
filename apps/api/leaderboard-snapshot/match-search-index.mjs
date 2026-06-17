@@ -656,6 +656,7 @@ function normalizeSideRequest(value) {
 function normalizeSearchRequest(request = {}) {
   const payload = request && typeof request === "object" ? request : {};
   const normalized = {
+    targetVersion: firstText(payload.targetVersion),
     page: normalizePositiveInt(payload.page, 1),
     pageSize: normalizePositiveInt(payload.pageSize, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
     cardMatchMode: payload.cardMatchMode === "any" ? "any" : "all",

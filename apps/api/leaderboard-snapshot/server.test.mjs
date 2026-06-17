@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -123,10 +123,11 @@ async function testMissingBattleFestivalDataDoesNotExposePath() {
   }
 }
 
-function testSnapshot(sourceRunId, summary) {
+function testSnapshot(sourceRunId, summary, targetVersion = "Ver.test") {
   return {
     metadata: {
       sourceRunId,
+      targetVersion,
       dateFrom: "2026-05-20",
       dateTo: "2026-05-25",
       updatedAt: "2026-05-25T00:00:00",
@@ -206,11 +207,12 @@ function testMatchSearchIndex(matchId, weaponName = "孫子") {
   };
 }
 
-function testTierListSnapshot(sourceRunId, deckName) {
+function testTierListSnapshot(sourceRunId, deckName, targetVersion = "Ver.test") {
   return {
     schemaVersion: 1,
     metadata: {
       sourceRunId,
+      targetVersion,
       dateFrom: "2026-06-01",
       dateTo: "2026-06-02",
       updatedAt: "2026-06-02T00:00:00Z",
@@ -438,6 +440,96 @@ async function testMatchSearchEndpointsUseStaticIndex() {
   }
 }
 
+async function testVersionOptionsFallbackFromSnapshot() {
+  const root = await mkdtemp(join(tmpdir(), "version-options-fallback-"));
+  const snapshotFile = join(root, "leaderboard-snapshot.json");
+  const versionManifestFile = join(root, "missing-version-manifest.json");
+  const server = createLeaderboardSnapshotServer({ snapshotFile, versionManifestFile });
+
+  try {
+    await writeFile(snapshotFile, `${JSON.stringify(testSnapshot(7, "current", "Ver.current"))}\n`, "utf8");
+    const address = await listen(server);
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/version-options`);
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.currentTargetVersion, "Ver.current");
+    assert.equal(body.versions.length, 1);
+    assert.equal(body.versions[0].targetVersion, "Ver.current");
+  } finally {
+    await close(server);
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testVersionedEndpointsUseManifestArtifacts() {
+  const root = await mkdtemp(join(tmpdir(), "versioned-server-"));
+  const snapshotFile = join(root, "leaderboard-snapshot.json");
+  const tierListSnapshotFile = join(root, "tier-list-snapshot.json");
+  const tierListConfigsFile = join(root, "tier-list-configs.json");
+  const matchSearchIndexFile = join(root, "match-search-index.json");
+  const versionManifestFile = join(root, "version-manifest.json");
+  const versionOutputDir = join(root, "versions");
+  const oldVersionDir = join(versionOutputDir, "Ver.old");
+  const server = createLeaderboardSnapshotServer({
+    snapshotFile,
+    tierListSnapshotFile,
+    tierListConfigsFile,
+    matchSearchIndexFile,
+    versionManifestFile,
+    versionOutputDir
+  });
+
+  try {
+    await writeFile(snapshotFile, `${JSON.stringify(testSnapshot(10, "current", "Ver.current"))}\n`, "utf8");
+    await writeFile(tierListSnapshotFile, `${JSON.stringify(testTierListSnapshot(10, "Current Deck"))}\n`, "utf8");
+    await writeFile(tierListConfigsFile, `${JSON.stringify(testTierListConfigs())}\n`, "utf8");
+    await writeFile(matchSearchIndexFile, `${JSON.stringify(testMatchSearchIndex(10))}\n`, "utf8");
+    await writeFile(versionManifestFile, `${JSON.stringify({
+      schemaVersion: 1,
+      currentTargetVersion: "Ver.current",
+      versions: [
+        { targetVersion: "Ver.current", sourceRunId: 10, dateFrom: "2026-06-01", dateTo: "2026-06-02", updatedAt: "", sampleSize: 10, current: true },
+        { targetVersion: "Ver.old", sourceRunId: 3, dateFrom: "2026-05-01", dateTo: "2026-05-02", updatedAt: "", sampleSize: 4, current: false }
+      ]
+    })}\n`, "utf8");
+    await mkdir(oldVersionDir, { recursive: true });
+    await writeFile(join(oldVersionDir, "leaderboard-snapshot.json"), `${JSON.stringify(testSnapshot(3, "old", "Ver.old"))}\n`, "utf8");
+    await writeFile(join(oldVersionDir, "tier-list-snapshot.json"), `${JSON.stringify(testTierListSnapshot(3, "Old Deck", "Ver.old"))}\n`, "utf8");
+    await writeFile(join(oldVersionDir, "tier-list-configs.json"), `${JSON.stringify(testTierListConfigs())}\n`, "utf8");
+    const oldIndex = testMatchSearchIndex(3);
+    oldIndex.metadata.targetVersion = "Ver.old";
+    oldIndex.matches[0].version = "Ver.old";
+    await writeFile(join(oldVersionDir, "match-search-index.json"), `${JSON.stringify(oldIndex)}\n`, "utf8");
+
+    const address = await listen(server);
+    const leaderboard = await fetch(`http://127.0.0.1:${address.port}/api/leaderboard-snapshot?version=Ver.old`);
+    assert.equal((await leaderboard.json()).metadata.sourceRunId, 3);
+
+    const tierList = await fetch(`http://127.0.0.1:${address.port}/api/tier-list-snapshot?version=Ver.old`);
+    assert.equal((await tierList.json()).tierRows[0].deckName, "Old Deck");
+
+    const deckConfig = await fetch(`http://127.0.0.1:${address.port}/api/tier-list-deck-config?version=Ver.old&scope=deck&deckId=deck-a`);
+    assert.equal((await deckConfig.json()).metadata.sourceRunId, 1);
+
+    const options = await fetch(`http://127.0.0.1:${address.port}/api/match-search-options?version=Ver.old`);
+    assert.equal((await options.json()).metadata.targetVersion, "Ver.old");
+
+    const search = await fetch(`http://127.0.0.1:${address.port}/api/match-search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetVersion: "Ver.old", sideA: { cardIds: ["card-a"] } })
+    });
+    assert.equal((await search.json()).items[0].version, "Ver.old");
+
+    const missing = await fetch(`http://127.0.0.1:${address.port}/api/leaderboard-snapshot?version=Ver.missing`);
+    assert.equal(missing.status, 404);
+  } finally {
+    await close(server);
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 async function testMatchSearchIndexReplacementIsReloaded() {
   const root = await mkdtemp(join(tmpdir(), "match-search-reload-"));
   const matchSearchIndexFile = join(root, "match-search-index.json");
@@ -637,6 +729,8 @@ await testTierListDeckConfigEndpointUsesStaticConfigFile();
 await testBattleFestivalDeckConfigEndpointUsesStaticConfigFile();
 await testRefreshStatusFileReplacementIsReloaded();
 await testMatchSearchEndpointsUseStaticIndex();
+await testVersionOptionsFallbackFromSnapshot();
+await testVersionedEndpointsUseManifestArtifacts();
 await testMatchSearchIndexReplacementIsReloaded();
 await testSiteAnalyticsEventAndSummary();
 await testSiteAnalyticsRejectsInvalidEvent();
