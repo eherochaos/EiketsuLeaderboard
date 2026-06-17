@@ -546,6 +546,16 @@ refresh_public_run() {
   fi
 }
 
+set_server_share_config() {
+  if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -Fx "$DEPLOY_EXPORT_CONTAINER" >/dev/null 2>&1; then
+    docker cp apps/api/data-migration/set_server_share_config.py "$DEPLOY_EXPORT_CONTAINER:/tmp/set_server_share_config.py"
+    docker exec "$DEPLOY_EXPORT_CONTAINER" python /tmp/set_server_share_config.py
+    docker exec "$DEPLOY_EXPORT_CONTAINER" rm -f /tmp/set_server_share_config.py
+  else
+    python3 apps/api/data-migration/set_server_share_config.py
+  fi
+}
+
 ensure_battle_festival_scope() {
   if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -Fx "$DEPLOY_EXPORT_CONTAINER" >/dev/null 2>&1; then
     docker cp apps/api/data-migration/enable_battle_festival_scope.py "$DEPLOY_EXPORT_CONTAINER:/tmp/enable_battle_festival_scope.py"
@@ -643,6 +653,9 @@ fi
 if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ]; then
   log 'ensure battle festival schema'
   ensure_battle_festival_scope
+
+  log 'set server share config'
+  set_server_share_config
 
   log 'refresh leaderboard run'
   refresh_public_run

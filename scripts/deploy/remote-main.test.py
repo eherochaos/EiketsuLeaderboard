@@ -57,8 +57,22 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn("docker cp apps/api/data-migration/enable_battle_festival_scope.py", scope)
         self.assert_order(
             "log 'ensure battle festival schema'",
+            "log 'set server share config'",
             "log 'refresh leaderboard run'",
             "log 'refresh leaderboard snapshot'",
+        )
+
+    def test_deploy_sets_server_share_config_before_refresh(self) -> None:
+        setter = self.function_body("set_server_share_config")
+        self.assertIn("set_server_share_config.py", setter)
+        self.assertIn("docker cp apps/api/data-migration/set_server_share_config.py", setter)
+        self.assertIn("python /tmp/set_server_share_config.py", setter)
+        self.assertIn("python3 apps/api/data-migration/set_server_share_config.py", setter)
+        self.assert_order(
+            "log 'ensure battle festival schema'",
+            "log 'set server share config'",
+            "log 'refresh leaderboard run'",
+            "log 'export postgres data'",
         )
 
     def test_node_api_has_writable_analytics_data_mount(self) -> None:
