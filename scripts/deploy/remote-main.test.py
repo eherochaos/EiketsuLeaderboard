@@ -160,6 +160,17 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn('mv "$host_export_root" "$DATA_ROOT/legacy-service.next"', self.text)
         self.assertNotIn('docker cp "$DEPLOY_EXPORT_CONTAINER:$container_export_root" "$DATA_ROOT/legacy-service.next"', self.text)
 
+    def test_postgres_export_failure_logs_resource_diagnostics(self) -> None:
+        diagnostics = self.function_body("log_postgres_export_diagnostics")
+        container_export = self.function_body("run_postgres_export_in_container")
+        self.assertIn("free -h", diagnostics)
+        self.assertIn("df -h", diagnostics)
+        self.assertIn("docker ps -a --format", diagnostics)
+        self.assertIn("docker inspect -f", diagnostics)
+        self.assertIn("oomKilled", diagnostics)
+        self.assertIn("log_postgres_export_diagnostics", container_export)
+        self.assertIn("python /tmp/export_legacy_service_from_postgres.py", container_export)
+
     def test_postgres_export_reuses_existing_data_when_python_deps_are_missing(self) -> None:
         preflight = self.function_body("postgres_export_python_ready")
         self.assertIn("python -c 'import sqlalchemy'", preflight)

@@ -120,6 +120,36 @@ postgres_export_python_ready() {
   python3 -c 'import sqlalchemy' >/dev/null 2>&1
 }
 
+log_postgres_export_diagnostics() {
+  log 'postgres export diagnostics'
+  free -h || true
+  df -h || true
+  if command -v docker >/dev/null 2>&1; then
+    docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' || true
+    if [ -n "${DEPLOY_EXPORT_CONTAINER:-}" ]; then
+      docker inspect -f 'export_container={{.Name}} status={{.State.Status}} oomKilled={{.State.OOMKilled}} exitCode={{.State.ExitCode}}' "$DEPLOY_EXPORT_CONTAINER" || true
+    fi
+  fi
+}
+
+run_postgres_export_in_container() {
+  local container_export_root="$1"
+  local container_settings_root="$2"
+  if [ -d "$DEPLOY_EXPORT_ASSET_ROOT" ]; then
+    docker exec "$DEPLOY_EXPORT_CONTAINER" mkdir -p "$container_settings_root/assets"
+    docker cp "$DEPLOY_EXPORT_ASSET_ROOT/." "$DEPLOY_EXPORT_CONTAINER:$container_settings_root/assets"
+    if ! docker exec -e EIKETSU_ENV_ROOT="$container_settings_root" "$DEPLOY_EXPORT_CONTAINER" python /tmp/export_legacy_service_from_postgres.py --output "$container_export_root"; then
+      log_postgres_export_diagnostics
+      return 1
+    fi
+  else
+    if ! docker exec "$DEPLOY_EXPORT_CONTAINER" python /tmp/export_legacy_service_from_postgres.py --output "$container_export_root"; then
+      log_postgres_export_diagnostics
+      return 1
+    fi
+  fi
+}
+
 require_fastapi_container() {
   command -v docker >/dev/null 2>&1 || fail 'docker runtime is missing'
   docker_container_running "$DEPLOY_FASTAPI_CONTAINER" || fail 'fastapi container is not running'
@@ -684,20 +714,17 @@ if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ]; then
     mkdir -p "$host_export_root"
     docker exec "$DEPLOY_EXPORT_CONTAINER" rm -rf "$container_export_root" "$container_settings_root" /tmp/export_legacy_service_from_postgres.py
     docker cp apps/api/data-migration/export_legacy_service_from_postgres.py "$DEPLOY_EXPORT_CONTAINER:/tmp/export_legacy_service_from_postgres.py"
-    if [ -d "$DEPLOY_EXPORT_ASSET_ROOT" ]; then
-      docker exec "$DEPLOY_EXPORT_CONTAINER" mkdir -p "$container_settings_root/assets"
-      docker cp "$DEPLOY_EXPORT_ASSET_ROOT/." "$DEPLOY_EXPORT_CONTAINER:$container_settings_root/assets"
-      docker exec -e EIKETSU_ENV_ROOT="$container_settings_root" "$DEPLOY_EXPORT_CONTAINER" python /tmp/export_legacy_service_from_postgres.py --output "$container_export_root"
-    else
-      docker exec "$DEPLOY_EXPORT_CONTAINER" python /tmp/export_legacy_service_from_postgres.py --output "$container_export_root"
-    fi
+    run_postgres_export_in_container "$container_export_root" "$container_settings_root"
     docker cp "$DEPLOY_EXPORT_CONTAINER:$container_export_root/." "$host_export_root"
     docker exec "$DEPLOY_EXPORT_CONTAINER" rm -rf "$container_export_root" "$container_settings_root" /tmp/export_legacy_service_from_postgres.py
     ensure_deploy_owner "$host_export_root"
     mv "$host_export_root" "$DATA_ROOT/legacy-service.next"
     ensure_deploy_owner "$DATA_ROOT/legacy-service.next"
   else
-    python3 apps/api/data-migration/export_legacy_service_from_postgres.py --output "$DATA_ROOT/legacy-service.next"
+    if ! python3 apps/api/data-migration/export_legacy_service_from_postgres.py --output "$DATA_ROOT/legacy-service.next"; then
+      log_postgres_export_diagnostics
+      exit 1
+    fi
     ensure_deploy_owner "$DATA_ROOT/legacy-service.next"
   fi
   rm -rf "$DATA_ROOT/legacy-service.prev"
