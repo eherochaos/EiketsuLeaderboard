@@ -271,7 +271,7 @@ export async function refreshLeaderboardSnapshot(options = {}) {
 }
 
 async function main() {
-  const { outputPath, snapshot, tierList, battleFestival } = await refreshLeaderboardSnapshot();
+  const { outputPath, snapshot, tierList, battleFestival, versionManifest } = await refreshLeaderboardSnapshot();
   const sourceKind = snapshot.metadata.sourceKind || "analysis";
   const builtAt = new Date().toISOString();
   console.log(`snapshot=${outputPath}`);

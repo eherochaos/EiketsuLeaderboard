@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { refreshLeaderboardSnapshot } from "./refresh-snapshot.mjs";
 
 const deckA = "legacy-card-a1,card-a2";
@@ -20,6 +22,20 @@ async function writeJson(path, payload) {
 
 async function writeJsonl(path, rows) {
   await writeFile(path, rows.map((row) => JSON.stringify(row)).join("\n") + "\n", "utf8");
+}
+
+function execFileAsync(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { windowsHide: true, ...options }, (error, stdout, stderr) => {
+      if (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
 }
 
 function card(cardId, cardCode, name, extra = {}) {
@@ -636,6 +652,33 @@ async function testRefreshWritesVersionedArtifacts() {
   }
 }
 
+async function testRefreshCliPrintsVersionManifest() {
+  const root = await mkdtemp(join(tmpdir(), "leaderboard-refresh-cli-"));
+  const legacyRoot = join(root, "legacy-service");
+  const outputPath = join(root, "published", "leaderboard-snapshot.json");
+  const scriptPath = fileURLToPath(new URL("./refresh-snapshot.mjs", import.meta.url));
+
+  try {
+    await createLegacyFixture(legacyRoot, { includeOldVersion: true });
+    const { stdout } = await execFileAsync(process.execPath, [scriptPath], {
+      env: {
+        ...process.env,
+        LEADERBOARD_LEGACY_ROOT: legacyRoot,
+        LEADERBOARD_SNAPSHOT_FILE: outputPath,
+        LEADERBOARD_VERSION_MANIFEST_FILE: join(root, "published", "version-manifest.json"),
+        LEADERBOARD_VERSION_OUTPUT_DIR: join(root, "published", "versions")
+      },
+      maxBuffer: 1024 * 1024 * 16
+    });
+    const manifest = JSON.parse(await readFile(join(root, "published", "version-manifest.json"), "utf8"));
+
+    assert.match(stdout, /versions=2 manifest=/);
+    assert.equal(manifest.versions.length, 2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 async function testRefreshWritesBattleFestivalSnapshot() {
   const root = await mkdtemp(join(tmpdir(), "battle-festival-refresh-"));
   const legacyRoot = join(root, "legacy-service");
@@ -1094,6 +1137,7 @@ async function testRefreshWritesManifestOnlyBattleFestivalSnapshot() {
 
 await testRefreshWritesAtomicSnapshot();
 await testRefreshWritesVersionedArtifacts();
+await testRefreshCliPrintsVersionManifest();
 await testRefreshWritesBattleFestivalSnapshot();
 await testRefreshBuildsBattleFestivalSnapshotFromMatches();
 await testRefreshSkipsSingleDayBattleFestivalWithoutOfficialPeriod();
