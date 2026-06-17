@@ -227,7 +227,7 @@ function normalizeFaction(raw) {
 
 function cardName(cardId, cardCatalog) {
   const card = cardCatalog[cardId];
-  return String(card?.name || card?.card_code || cardId.slice(0, 8));
+  return realCardName(cardId, card?.name, card?.label, card?.imageAlt, card?.image_alt, card?.card_code) || String(cardId).slice(0, 8);
 }
 
 function shortName(value) {
@@ -237,7 +237,27 @@ function shortName(value) {
 function isPlaceholderCardName(value) {
   const text = String(value ?? "").trim();
   const name = shortName(text);
-  return name === "未识别" || name === "未识别卡";
+  return name === "未识别" || name === "未识别卡" || /^Unknown Card(?:\([^)]*\))?$/i.test(text);
+}
+
+function isHashFallbackCardName(value, cardId = "") {
+  const name = shortName(value).toLowerCase();
+  const hashPrefix = String(cardId || "").slice(0, 8).toLowerCase();
+  if (!name) return false;
+  if (hashPrefix && name === hashPrefix) return true;
+  return /^[a-f0-9]{7,8}$/i.test(name);
+}
+
+function isFallbackCardName(value, cardId = "") {
+  return isPlaceholderCardName(value) || isHashFallbackCardName(value, cardId);
+}
+
+function realCardName(cardId, ...values) {
+  for (const value of values) {
+    const name = labelName(value);
+    if (name && !isFallbackCardName(name, cardId)) return name;
+  }
+  return "";
 }
 
 function cardCodeFaction(cardCode) {
@@ -304,11 +324,12 @@ function cardViewMetadata(card) {
 
 function mergeNonEmptyCardData(baseCard, overrideCard) {
   const merged = { ...baseCard };
+  const cardId = cardHashIds(overrideCard)[0] || cardHashIds(baseCard)[0] || "";
   for (const [key, value] of Object.entries(overrideCard || {})) {
     if (value === "" || value === null || value === undefined) continue;
     if (Array.isArray(value) && value.length === 0) continue;
     if (key === "faction" && String(value).trim() === "unknown") continue;
-    if (["name", "imageAlt", "image_alt"].includes(key) && isPlaceholderCardName(value)) continue;
+    if (["name", "imageAlt", "image_alt", "label"].includes(key) && isFallbackCardName(value, cardId)) continue;
     merged[key] = value;
   }
   return merged;
@@ -426,9 +447,10 @@ function formalCardView(card, cardCatalog = {}) {
   const catalogCard = catalogCardFor(cardCatalog, cardId, card);
   const mergedCard = mergeNonEmptyCardData(catalogCard, card);
   const rawLabelName = labelName(card?.label);
-  const name = isPlaceholderCardName(rawLabelName)
-    ? firstText(mergedCard.name, mergedCard.card_code, String(card?.card_hash || "").slice(0, 8))
-    : rawLabelName || String(card?.card_hash || "").slice(0, 8);
+  const name = isFallbackCardName(rawLabelName, cardId)
+    ? realCardName(cardId, catalogCard.name, catalogCard.label, mergedCard.name, mergedCard.card_code)
+      || String(card?.card_hash || "").slice(0, 8)
+    : rawLabelName || realCardName(cardId, catalogCard.name, catalogCard.label, mergedCard.name, mergedCard.card_code) || String(card?.card_hash || "").slice(0, 8);
   return {
     cardId,
     name,
