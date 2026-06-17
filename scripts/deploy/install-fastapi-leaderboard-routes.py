@@ -160,6 +160,10 @@ ROUTE_BLOCK = f"""
     def api_leaderboard_refresh_status(request: _CodexRequest):
         return _codex_proxy_leaderboard_node_api("/api/leaderboard-refresh-status", forward_headers=request.headers)
 
+    @app.get("/api/version-options")
+    def api_version_options(request: _CodexRequest):
+        return _codex_proxy_leaderboard_node_api("/api/version-options", forward_headers=request.headers)
+
     @app.get("/api/leaderboard-snapshot")
     def api_leaderboard_snapshot(request: _CodexRequest):
         return _codex_proxy_leaderboard_node_api("/api/leaderboard-snapshot", forward_headers=request.headers)

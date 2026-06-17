@@ -480,6 +480,7 @@ smoke_check_api_routes() {
   local base="${DEPLOY_SMOKE_URL_BASE%/}"
   wait_for_live_health
   smoke_check_client_config
+  curl -fsS "$base/api/version-options" >/dev/null || fail 'version options api is not live'
   curl -fsS "$base/api/tier-list-snapshot" >/dev/null || fail 'tier list snapshot api is not live'
   local tier_deck_id
   tier_deck_id="$(tier_list_smoke_deck_id)"
@@ -543,6 +544,16 @@ refresh_public_run() {
     docker exec "$DEPLOY_EXPORT_CONTAINER" rm -f /tmp/refresh_public_leaderboard_run.py
   else
     python3 apps/api/data-migration/refresh_public_leaderboard_run.py
+  fi
+}
+
+set_server_share_config() {
+  if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -Fx "$DEPLOY_EXPORT_CONTAINER" >/dev/null 2>&1; then
+    docker cp apps/api/data-migration/set_server_share_config.py "$DEPLOY_EXPORT_CONTAINER:/tmp/set_server_share_config.py"
+    docker exec "$DEPLOY_EXPORT_CONTAINER" python /tmp/set_server_share_config.py
+    docker exec "$DEPLOY_EXPORT_CONTAINER" rm -f /tmp/set_server_share_config.py
+  else
+    python3 apps/api/data-migration/set_server_share_config.py
   fi
 }
 
@@ -643,6 +654,9 @@ fi
 if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ]; then
   log 'ensure battle festival schema'
   ensure_battle_festival_scope
+
+  log 'set server share config'
+  set_server_share_config
 
   log 'refresh leaderboard run'
   refresh_public_run
