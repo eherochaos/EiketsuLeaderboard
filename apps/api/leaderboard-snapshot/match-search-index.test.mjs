@@ -226,6 +226,7 @@ async function testBuildIndexAndSearchFilters() {
     assert.equal(strictSide.total, 0);
 
     const usedStrategy = searchMatchIndex(index, {
+      targetVersion: "Ver.test",
       cardMatchMode: "all",
       sideA: {
         cardIds: ["card-a"],

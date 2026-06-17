@@ -106,9 +106,9 @@ function deckImageCard(deck: DeckRow): CardView | null {
 .Main_Hero_Section {
   min-height: 0;
   display: grid;
-  grid-template-columns: 1fr 480px;
+  grid-template-columns: minmax(0, 1fr) 440px;
   gap: var(--space-lg);
-  padding: 28px 34px;
+  padding: 24px 32px;
   overflow: hidden;
   position: relative;
 }
@@ -119,8 +119,8 @@ function deckImageCard(deck: DeckRow): CardView | null {
   position: absolute;
   left: -8%;
   bottom: -30%;
-  width: 58%;
-  height: 72%;
+  width: 46%;
+  height: 58%;
   background:
     radial-gradient(ellipse at 25% 70%, rgba(75, 71, 66, 0.14), transparent 50%),
     linear-gradient(145deg, transparent 0 26%, rgba(70, 60, 48, 0.08) 26% 42%, transparent 42% 100%);
@@ -136,7 +136,7 @@ function deckImageCard(deck: DeckRow): CardView | null {
 /* Hero 摘要：限制宽度，避免文字拉得太长。 */
 .Main_Hero_Section_Lead {
   max-width: 620px;
-  margin-bottom: 22px;
+  margin-bottom: 16px;
   color: var(--color-brown-soft);
   font-size: 17px;
 }
@@ -145,8 +145,8 @@ function deckImageCard(deck: DeckRow): CardView | null {
 .Main_Hero_Section_Facts {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  margin-bottom: var(--space-lg);
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
 /* Hero 指标小面板：统一浅色底和细边框。 */
@@ -158,8 +158,8 @@ function deckImageCard(deck: DeckRow): CardView | null {
 
 /* Hero 信息卡的内部留白和高度。 */
 .Main_Hero_Section_Facts div {
-  min-height: 82px;
-  padding: 14px;
+  min-height: 72px;
+  padding: 12px;
 }
 
 /* Hero 指标标签文字。 */
@@ -189,6 +189,10 @@ function deckImageCard(deck: DeckRow): CardView | null {
   gap: var(--space-md);
 }
 
+.Main_Hero_Section_Actions .Common_ButtonPrimary {
+  min-height: 44px;
+}
+
 /* Hero 页内目录：弱化为文字链接。 */
 .Main_Hero_Section_SoftLinks {
   display: flex;
@@ -202,29 +206,32 @@ function deckImageCard(deck: DeckRow): CardView | null {
 
 /* Hero 目录链接下划线。 */
 .Main_Hero_Section_SoftLinks a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
   border-bottom: 1px solid rgba(117, 106, 91, 0.38);
 }
 
 /* 右侧榜首区域：当前第一、指标和 2~4 名纵向排列。 */
 .Main_Hero_Section_Rank {
   display: grid;
-  gap: var(--space-md);
+  gap: 12px;
   align-content: start;
 }
 
 /* 当前第一卡片：头像和卡组信息两列。 */
 .Main_Hero_Section_RankCard {
-  padding: 14px;
+  padding: 12px;
   display: grid;
-  grid-template-columns: 76px 1fr;
-  gap: var(--space-md);
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 12px;
   background: var(--color-panel-strong);
   border: 1px solid var(--color-border);
 }
 
 /* 当前第一头像尺寸。 */
 .Main_Hero_Section_RankCard :deep(.Common_ImageFrame) {
-  width: 76px;
+  width: 68px;
   height: auto;
 }
 
@@ -272,7 +279,7 @@ function deckImageCard(deck: DeckRow): CardView | null {
 
 /* Hero 指标格内边距。 */
 .Main_Hero_Section_Metrics div {
-  padding: 10px 12px;
+  padding: 8px 10px;
 }
 
 /* Hero 指标数字。 */
@@ -294,21 +301,28 @@ function deckImageCard(deck: DeckRow): CardView | null {
 /* 2~4 名单行：排名、头像、卡组信息。 */
 .Main_Hero_Section_Top3Row {
   display: grid;
-  /*  三列分别是：排名数字、卡图、卡组文字。
-    1fr 表示文字列吃掉剩余空间。*/
-  grid-template-columns: 42px 64px 1fr;
-  gap: var(--space-sm);
+  grid-template-columns: 56px 48px minmax(0, 1fr);
+  gap: 8px;
   align-items: center;
-  padding: 8px 10px;
+  padding: 6px 8px;
   border-top: 1px solid rgba(216, 192, 151, 0.72);
   background: rgba(255, 248, 235, 0.44);
 }
 
 /* 2~4 名头像尺寸。 */
-/*.Main_Hero_Section_Top3Row :deep(.Common_ImageFrame) {
-  width: 42px;
+.Main_Hero_Section_Top3Row :deep(.Common_ImageFrame) {
+  width: 48px;
   height: auto;
-}*/
+}
+
+.Main_Hero_Section_Top3Row .Main_Hero_Section_Metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.Main_Hero_Section_Top3Row .Main_Hero_Section_Metrics div {
+  padding: 6px 8px;
+}
 
 /* 2~4 名排名数字。 */
 .Main_Hero_Section_Top3Rank {
@@ -342,7 +356,11 @@ function deckImageCard(deck: DeckRow): CardView | null {
 
   /* 2~4 名行在平板下略收窄排名列。 */
   .Main_Hero_Section_Top3Row {
-    grid-template-columns: 36px 42px 1fr;
+    grid-template-columns: 52px 42px minmax(0, 1fr);
+  }
+
+  .Main_Hero_Section_Top3Row :deep(.Common_ImageFrame) {
+    width: 42px;
   }
 }
 
@@ -351,13 +369,22 @@ function deckImageCard(deck: DeckRow): CardView | null {
   /* 手机 Hero 间距。 */
   .Main_Hero_Section {
     gap: 12px;
-    padding: 20px 28px;
+    padding: 16px;
   }
 
   /* 手机摘要字号略小。 */
   .Main_Hero_Section_Lead {
     margin-bottom: 16px;
     font-size: 15px;
+  }
+
+  .Main_Hero_Section_Actions {
+    gap: 8px;
+  }
+
+  .Main_Hero_Section_SoftLinks {
+    gap: 4px;
+    font-size: 13px;
   }
 
   .Main_Hero_Section_Facts {
@@ -401,7 +428,11 @@ function deckImageCard(deck: DeckRow): CardView | null {
 
   /* 手机 2~4 名行列宽。 */
   .Main_Hero_Section_Top3Row {
-    grid-template-columns: 36px 42px 1fr;
+    grid-template-columns: 56px 48px minmax(0, 1fr);
+  }
+
+  .Main_Hero_Section_Top3Row :deep(.Common_ImageFrame) {
+    width: 48px;
   }
 }
 </style>

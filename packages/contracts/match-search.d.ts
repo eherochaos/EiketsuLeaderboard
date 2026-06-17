@@ -50,6 +50,7 @@ export interface MatchSearchSideRequest {
 }
 
 export interface MatchSearchRequest {
+  targetVersion?: string;
   page?: number;
   pageSize?: number;
   cardMatchMode?: MatchSearchCardMatchMode;
