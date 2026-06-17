@@ -29,6 +29,23 @@ class UploadRefreshWorkerTests(unittest.TestCase):
             self.assertEqual(result["uploadId"], 11)
             self.assertEqual(calls, ["refresh"])
 
+    def test_force_refresh_skips_upload_watermark_check(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(Path(temp_dir))
+            calls: list[str] = []
+
+            result = run_upload_refresh_once(
+                config,
+                latest_upload_reader=lambda: self.fail("latest upload should not be read"),
+                refresher=lambda: calls.append("refresh") or {"status": "completed", "reason": "server version changed"},
+                force_refresh=True,
+            )
+
+            self.assertEqual(result["status"], "completed")
+            self.assertTrue(result["forced"])
+            self.assertEqual(result["refreshReasons"], ["forced"])
+            self.assertEqual(calls, ["refresh"])
+
     def test_existing_upload_watermark_skips_refresh(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config = self._config(Path(temp_dir))

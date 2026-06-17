@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+import re
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,7 @@ DEFAULT_TARGET_VERSION = "Ver.3.5.0C"
 DEFAULT_DATE_FROM = "2026-06-17"
 DEFAULT_REPORT_FORMATS = ["md", "csv"]
 DEFAULT_REPORTS = ["overview", "deck", "card", "deck-version", "card-version"]
+TARGET_VERSION_RE = re.compile(r"^Ver\.(\d+)\.(\d+)\.(\d+)([A-Z])$")
 
 
 def _now() -> str:
@@ -58,6 +60,22 @@ def _config_values(target_version: str, date_from: str, date_to: str) -> dict[st
     }
 
 
+def _version_sort_key(target_version: str) -> tuple[int, int, int, int] | None:
+    match = TARGET_VERSION_RE.match(str(target_version or "").strip())
+    if not match:
+        return None
+    major, minor, patch, suffix = match.groups()
+    return (int(major), int(minor), int(patch), ord(suffix))
+
+
+def _is_newer_target_version(left: str, right: str) -> bool:
+    left_key = _version_sort_key(left)
+    right_key = _version_sort_key(right)
+    if left_key is None or right_key is None:
+        return False
+    return left_key > right_key
+
+
 def _latest_sqlite_config_id(connection: sqlite3.Connection, columns: set[str]) -> int | None:
     if "updated_at" in columns:
         order_by = "COALESCE(updated_at, '') DESC, id DESC"
@@ -81,6 +99,7 @@ def set_server_share_config_sqlite(
     target_version: str = DEFAULT_TARGET_VERSION,
     date_from: str = DEFAULT_DATE_FROM,
     date_to: str = "",
+    force: bool = False,
 ) -> dict[str, Any]:
     with closing(sqlite3.connect(db_path)) as connection:
         with connection:
@@ -91,6 +110,27 @@ def set_server_share_config_sqlite(
             writable = {key: value for key, value in values.items() if key in columns}
             config_id = _latest_sqlite_config_id(connection, columns)
             previous = _read_sqlite_config(connection, config_id, columns) if config_id is not None else {}
+            if (
+                not force
+                and previous.get("target_version")
+                and _is_newer_target_version(str(previous.get("target_version") or ""), str(target_version or ""))
+            ):
+                return {
+                    "status": "skipped",
+                    "reason": "current target version is newer",
+                    "configId": config_id,
+                    "updatedRows": 0,
+                    "previous": {
+                        "targetVersion": previous.get("target_version", ""),
+                        "dateFrom": previous.get("date_from", ""),
+                        "dateTo": previous.get("date_to", ""),
+                    },
+                    "current": {
+                        "targetVersion": previous.get("target_version", ""),
+                        "dateFrom": previous.get("date_from", ""),
+                        "dateTo": previous.get("date_to", ""),
+                    },
+                }
 
             if config_id is None:
                 insert_columns = list(writable)
@@ -132,6 +172,7 @@ def set_server_share_config_server(
     target_version: str = DEFAULT_TARGET_VERSION,
     date_from: str = DEFAULT_DATE_FROM,
     date_to: str = "",
+    force: bool = False,
 ) -> dict[str, Any]:
     from sqlalchemy import inspect, text
     from eiketsu_env.config import load_settings
@@ -147,6 +188,33 @@ def set_server_share_config_server(
         writable = {key: value for key, value in values.items() if key in columns}
         order_by = "COALESCE(updated_at, '') DESC, id DESC" if "updated_at" in columns else "id DESC"
         row = connection.execute(text(f"SELECT id FROM server_share_config ORDER BY {order_by} LIMIT 1")).mappings().first()
+        previous = {}
+        if row is not None:
+            config_id = row["id"]
+            selected = sorted(columns)
+            previous = dict(
+                connection.execute(
+                    text(f"SELECT {', '.join(selected)} FROM server_share_config WHERE id = :config_id"),
+                    {"config_id": config_id},
+                ).mappings().first()
+                or {}
+            )
+            if (
+                not force
+                and previous.get("target_version")
+                and _is_newer_target_version(str(previous.get("target_version") or ""), str(target_version or ""))
+            ):
+                return {
+                    "status": "skipped",
+                    "reason": "current target version is newer",
+                    "configId": int(config_id),
+                    "updatedRows": 0,
+                    "current": {
+                        "targetVersion": previous.get("target_version", ""),
+                        "dateFrom": previous.get("date_from", ""),
+                        "dateTo": previous.get("date_to", ""),
+                    },
+                }
         if row is None:
             insert_columns = list(writable)
             placeholders = ", ".join(f":{column}" for column in insert_columns)
@@ -156,7 +224,6 @@ def set_server_share_config_server(
             )
             config_id = connection.execute(text("SELECT max(id) AS id FROM server_share_config")).mappings().first()["id"]
         else:
-            config_id = row["id"]
             assignments = ", ".join(f"{column} = :{column}" for column in writable)
             connection.execute(
                 text(f"UPDATE server_share_config SET {assignments} WHERE id = :config_id"),
@@ -181,6 +248,7 @@ def main() -> int:
     parser.add_argument("--target-version", default=DEFAULT_TARGET_VERSION)
     parser.add_argument("--date-from", default=DEFAULT_DATE_FROM)
     parser.add_argument("--date-to", default="")
+    parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
     if args.sqlite_file is not None:
@@ -189,12 +257,14 @@ def main() -> int:
             target_version=args.target_version,
             date_from=args.date_from,
             date_to=args.date_to,
+            force=args.force,
         )
     else:
         result = set_server_share_config_server(
             target_version=args.target_version,
             date_from=args.date_from,
             date_to=args.date_to,
+            force=args.force,
         )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0
