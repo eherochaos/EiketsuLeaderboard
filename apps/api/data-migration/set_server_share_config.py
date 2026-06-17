@@ -85,6 +85,12 @@ def _latest_sqlite_config_id(connection: sqlite3.Connection, columns: set[str]) 
     return int(row[0]) if row else None
 
 
+def _latest_server_config_order_by(columns: set[str]) -> str:
+    if "updated_at" in columns:
+        return "updated_at DESC NULLS LAST, id DESC"
+    return "id DESC"
+
+
 def _read_sqlite_config(connection: sqlite3.Connection, config_id: int, columns: set[str]) -> dict[str, Any]:
     selected = sorted(columns)
     row = connection.execute(
@@ -186,7 +192,7 @@ def set_server_share_config_server(
             raise RuntimeError("server_share_config table is missing")
         columns = {column["name"] for column in inspector.get_columns("server_share_config")}
         writable = {key: value for key, value in values.items() if key in columns}
-        order_by = "COALESCE(updated_at, '') DESC, id DESC" if "updated_at" in columns else "id DESC"
+        order_by = _latest_server_config_order_by(columns)
         row = connection.execute(text(f"SELECT id FROM server_share_config ORDER BY {order_by} LIMIT 1")).mappings().first()
         previous = {}
         if row is not None:

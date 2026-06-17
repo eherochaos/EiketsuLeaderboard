@@ -22,6 +22,17 @@ def temporary_db_path() -> Iterator[Path]:
 
 
 class SetServerShareConfigTests(unittest.TestCase):
+    def test_server_order_uses_timestamp_safe_null_sort(self) -> None:
+        order_by = module._latest_server_config_order_by({"id", "updated_at"})
+
+        self.assertEqual(order_by, "updated_at DESC NULLS LAST, id DESC")
+        self.assertNotIn("''", order_by)
+
+    def test_server_order_without_updated_at_uses_id(self) -> None:
+        order_by = module._latest_server_config_order_by({"id"})
+
+        self.assertEqual(order_by, "id DESC")
+
     def test_updates_latest_config_row(self) -> None:
         with temporary_db_path() as db_path:
             self._create_database(db_path)
