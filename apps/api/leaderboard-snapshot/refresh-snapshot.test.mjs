@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 import { refreshLeaderboardSnapshot } from "./refresh-snapshot.mjs";
 
 const deckA = "legacy-card-a1,card-a2";
-const deckB = "card-b1,card-b2";
+const hashFallbackCard = "da2ee086e9a0f6810ad65262a7358ccb";
+const deckB = `card-b1,card-b2,${hashFallbackCard}`;
 const battleCardA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const battleCardB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const battleCardC = "cccccccccccccccccccccccccccccccc";
@@ -271,8 +272,16 @@ async function createLegacyFixture(root, options = {}) {
   await writeJsonl(join(tableRoot, "server_leaderboard_runs.jsonl"), runs);
   const rows = [
     deckRow(1, deckA, [card("legacy-card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 1, 0, 1),
-    deckRow(2, deckB, [card("card-b1", "緋001", "Gamma"), card("card-b2", "緋002", "Delta", { label: "未识别卡(card-b2)" })], 2, 1, 0),
-    archetypeRow(3, "Published Cluster", [card("card-b1", "緋001", "Gamma"), card("card-b2", "緋002", "Delta")], 1, 4, 1, deckB, [
+    deckRow(2, deckB, [
+      card("card-b1", "緋001", "Gamma"),
+      card("card-b2", "緋002", "Delta", { label: "未识别卡(card-b2)" }),
+      card(hashFallbackCard, "", "Official Hash", { faction: "unknown", label: `${hashFallbackCard.slice(0, 8)}(1.0 槍兵)` })
+    ], 2, 1, 0),
+    archetypeRow(3, "Published Cluster", [
+      card("card-b1", "緋001", "Gamma"),
+      card("card-b2", "緋002", "Delta"),
+      card(hashFallbackCard, "", "Official Hash", { faction: "unknown", label: "Unknown Card(da2ee086)" })
+    ], 1, 4, 1, deckB, [
       { deck_fingerprint: deckA, sample_count: 2 },
       { deck_fingerprint: deckB, sample_count: 3 }
     ]),
@@ -520,7 +529,8 @@ async function createLegacyFixture(root, options = {}) {
       officialGeneralRow("card-a1", "Alpha", 1, "0:1"),
       officialGeneralRow("card-a2", "Beta", 2),
       officialGeneralRow("card-b1", "Gamma", 3),
-      officialGeneralRow("card-b2", "Delta", 4)
+      officialGeneralRow("card-b2", "Delta", 4),
+      officialGeneralRow(hashFallbackCard, "Official Hash", 117, [], { 15: "0" })
     ]
   });
 }
@@ -604,6 +614,13 @@ async function testRefreshWritesAtomicSnapshot() {
     assert.equal(plCard.name, "Delta");
     assert.equal(plCard.imageAlt, "Delta");
     assert.equal(plCard.faction, "\u84bc");
+    const hashNamedCard = output.tierRows.flatMap((row) => row.deckCards).find((card) => card.cardId === hashFallbackCard);
+    assert.ok(hashNamedCard);
+    assert.equal(hashNamedCard.name, "Official Hash");
+    assert.equal(hashNamedCard.imageAlt, "Official Hash");
+    assert.equal(hashNamedCard.cost, "1.0");
+    assert.equal(hashNamedCard.unitType, "槍兵");
+    assert.equal(JSON.stringify(output).includes("Unknown Card"), false);
     assert.equal(unknownFactionCount(output), 0);
     assert.equal(unknownFactionCount(tierList), 0);
     assert.ok(output.tierRows.some((row) => row.deckConfig.strategies.length > 0));
