@@ -30,6 +30,7 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         api_smoke = self.function_body("smoke_check_api_routes")
         live_smoke = self.function_body("smoke_check_live_routes")
         self.assertIn("/api/tier-list-snapshot", api_smoke)
+        self.assertIn("/api/version-options", api_smoke)
         self.assertIn("/api/tier-list-deck-config?scope=deck&deckId=", api_smoke)
         self.assertIn("/api/battle-festival-snapshot", api_smoke)
         self.assertIn("/api/battle-festival-deck-config?scope=deck&deckId=", api_smoke)

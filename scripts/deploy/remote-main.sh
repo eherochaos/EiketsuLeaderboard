@@ -480,6 +480,7 @@ smoke_check_api_routes() {
   local base="${DEPLOY_SMOKE_URL_BASE%/}"
   wait_for_live_health
   smoke_check_client_config
+  curl -fsS "$base/api/version-options" >/dev/null || fail 'version options api is not live'
   curl -fsS "$base/api/tier-list-snapshot" >/dev/null || fail 'tier list snapshot api is not live'
   local tier_deck_id
   tier_deck_id="$(tier_list_smoke_deck_id)"
