@@ -376,115 +376,16 @@ EOF
   sudo -n systemctl start eiketsu-upload-refresh.service
 }
 
-install_version_detect_worker() {
-  command -v systemctl >/dev/null 2>&1 || fail 'systemd runtime is missing'
-  local worker_root="$DEPLOY_PATH/$DATA_ROOT"
-  local worker_script="$worker_root/run-version-detect-worker.sh"
-  ensure_writable_dir "$worker_root"
-  {
-    printf '#!/usr/bin/env bash\n'
-    printf 'set -euo pipefail\n'
-    printf 'cd %s\n' "$(shell_quote "$DEPLOY_PATH")"
-    printf 'node_api_container=%s\n' "$(shell_quote "$DEPLOY_NODE_API_CONTAINER")"
-    printf 'export_container=%s\n' "$(shell_quote "$DEPLOY_EXPORT_CONTAINER")"
-    printf 'wait_for_container() {\n'
-    printf '  local container="$1"\n'
-    printf '  local wait_seconds="${VERSION_DETECT_CONTAINER_WAIT_SECONDS:-120}"\n'
-    printf '  local deadline=$((SECONDS + wait_seconds))\n'
-    printf '  [ -n "$container" ] || return 0\n'
-    printf '  while [ "$SECONDS" -lt "$deadline" ]; do\n'
-    printf '    if [ "$(docker inspect -f "{{.State.Running}}" "$container" 2>/dev/null || true)" = "true" ]; then\n'
-    printf '      return 0\n'
-    printf '    fi\n'
-    printf '    sleep 2\n'
-    printf '  done\n'
-    printf '  printf "container %%s is not running after %%ss\\n" "$container" "$wait_seconds" >&2\n'
-    printf '  return 1\n'
-    printf '}\n'
-    printf 'run_version_detect() {\n'
-    printf '  if [ -n "$export_container" ] && command -v docker >/dev/null 2>&1 && docker ps --format '\''{{.Names}}'\'' | grep -Fx "$export_container" >/dev/null 2>&1; then\n'
-    printf '    docker cp apps/api/data-migration/detect_server_version.py "$export_container:/tmp/detect_server_version.py"\n'
-    printf '    docker cp apps/api/data-migration/set_server_share_config.py "$export_container:/tmp/set_server_share_config.py"\n'
-    printf '    set +e\n'
-    printf '    docker exec "$export_container" python /tmp/detect_server_version.py --max-players "${VERSION_DETECT_MAX_PLAYERS:-20}" --max-detail-pages "${VERSION_DETECT_MAX_DETAIL_PAGES:-12}"\n'
-    printf '    local status="$?"\n'
-    printf '    set -e\n'
-    printf '    docker exec "$export_container" rm -f /tmp/detect_server_version.py /tmp/set_server_share_config.py || true\n'
-    printf '    return "$status"\n'
-    printf '  fi\n'
-    printf '  python3 apps/api/data-migration/detect_server_version.py --max-players "${VERSION_DETECT_MAX_PLAYERS:-20}" --max-detail-pages "${VERSION_DETECT_MAX_DETAIL_PAGES:-12}"\n'
-    printf '}\n'
-    printf 'wait_for_container "$export_container"\n'
-    printf 'detect_output="$(run_version_detect)"\n'
-    printf 'printf '\''%%s\\n'\'' "$detect_output"\n'
-    printf "detect_status=\"\$(printf '%%s' \"\$detect_output\" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get(\"status\",\"\"))')\"\n"
-    printf 'if [ "$detect_status" != "changed" ]; then\n'
-    printf '  exit 0\n'
-    printf 'fi\n'
-    printf 'args=(\n'
-    printf '  --repo-root %s\n' "$(shell_quote "$DEPLOY_PATH")"
-    printf '  --legacy-root %s\n' "$(shell_quote "$LEGACY_ROOT")"
-    printf '  --snapshot-file %s\n' "$(shell_quote "$DATA_ROOT/leaderboard-snapshot.json")"
-    printf '  --match-search-index-file %s\n' "$(shell_quote "$MATCH_SEARCH_INDEX_FILE")"
-    printf '  --tier-list-snapshot-file %s\n' "$(shell_quote "$TIER_LIST_SNAPSHOT_FILE")"
-    printf '  --tier-list-configs-file %s\n' "$(shell_quote "$TIER_LIST_CONFIGS_FILE")"
-    printf '  --battle-festival-snapshot-file %s\n' "$(shell_quote "$BATTLE_FESTIVAL_SNAPSHOT_FILE")"
-    printf '  --battle-festival-configs-file %s\n' "$(shell_quote "$BATTLE_FESTIVAL_CONFIGS_FILE")"
-    printf '  --status-file %s\n' "$(shell_quote "$STATUS_FILE")"
-    printf '  --node-bin node\n'
-    printf '  --node-container %s\n' "$(shell_quote "$DEPLOY_NODE_API_CONTAINER")"
-    printf '  --postgres-container %s\n' "$(shell_quote "$DEPLOY_EXPORT_CONTAINER")"
-    printf '  --export-container %s\n' "$(shell_quote "$DEPLOY_EXPORT_CONTAINER")"
-    printf '  --refresh-reason %s\n' "$(shell_quote 'server version changed')"
-    printf '  --force-refresh\n'
-    printf ')\n'
-    if [ -n "$DEPLOY_EXPORT_ASSET_ROOT" ]; then
-      printf 'args+=(--export-asset-root %s)\n' "$(shell_quote "$DEPLOY_EXPORT_ASSET_ROOT")"
-    fi
-    if [ -n "$DEPLOY_LIVE_SNAPSHOT_FILE" ]; then
-      printf 'args+=(--live-snapshot-file %s)\n' "$(shell_quote "$DEPLOY_LIVE_SNAPSHOT_FILE")"
-    fi
-    if [ -n "$DEPLOY_LIVE_STATUS_FILE" ]; then
-      printf 'args+=(--live-status-file %s)\n' "$(shell_quote "$DEPLOY_LIVE_STATUS_FILE")"
-    fi
-    printf 'wait_for_container "$node_api_container"\n'
-    printf 'wait_for_container "$export_container"\n'
-    printf 'python3 apps/api/data-migration/upload_refresh_worker.py "${args[@]}"\n'
-  } > "$worker_script"
-  chmod +x "$worker_script"
-  ensure_deploy_owner "$worker_script"
-
-  sudo -n tee /etc/systemd/system/eiketsu-version-detect.service >/dev/null <<EOF
-[Unit]
-Description=Eiketsu server version detection
-After=docker.service
-
-[Service]
-Type=oneshot
-WorkingDirectory=$DEPLOY_PATH
-ExecStart=$worker_script
-EOF
-
-  sudo -n tee /etc/systemd/system/eiketsu-version-detect.timer >/dev/null <<EOF
-[Unit]
-Description=Eiketsu server version detection timer
-
-[Timer]
-OnCalendar=*-*-* 09:00:00 Asia/Tokyo
-OnCalendar=*-*-* 12:00:00 Asia/Tokyo
-OnCalendar=*-*-* 15:00:00 Asia/Tokyo
-OnCalendar=*-*-* 18:00:00 Asia/Tokyo
-OnCalendar=*-*-* 21:00:00 Asia/Tokyo
-AccuracySec=5min
-Persistent=true
-Unit=eiketsu-version-detect.service
-
-[Install]
-WantedBy=timers.target
-EOF
-
-  sudo -n systemctl daemon-reload
-  sudo -n systemctl enable --now eiketsu-version-detect.timer >/dev/null
+cleanup_version_detect_worker() {
+  local worker_script="$DEPLOY_PATH/$DATA_ROOT/run-version-detect-worker.sh"
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo -n systemctl disable --now eiketsu-version-detect.timer eiketsu-version-detect.service >/dev/null 2>&1 || true
+  fi
+  sudo -n rm -f /etc/systemd/system/eiketsu-version-detect.timer /etc/systemd/system/eiketsu-version-detect.service || true
+  rm -f "$worker_script"
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo -n systemctl daemon-reload || true
+  fi
 }
 
 restart_service() {
@@ -863,8 +764,8 @@ log 'smoke check api routes'
 smoke_check_api_routes
 log 'install upload refresh worker'
 install_upload_refresh_worker
-log 'install version detect worker'
-install_version_detect_worker
+log 'cleanup version detect worker'
+cleanup_version_detect_worker
 log 'publish live frontend'
 publish_live_frontend
 log 'publish frontend status asset'

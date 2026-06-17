@@ -123,22 +123,7 @@ def run_upload_refresh_once(
     config: UploadRefreshConfig,
     latest_upload_reader: LatestUploadReader | None = None,
     refresher: SnapshotRefresher | None = None,
-    force_refresh: bool = False,
 ) -> dict[str, Any]:
-    if force_refresh:
-        try:
-            refresh_result = (refresher or build_snapshot_refresher(config))()
-        except Exception as exc:
-            return _record_failure_status(config, f"forced upload refresh failed: {exc}")
-        refresh_status = str(refresh_result.get("status") or "completed")
-        return {
-            "status": refresh_status,
-            "reason": refresh_result.get("reason") or "",
-            "forced": True,
-            "refreshReasons": ["forced"],
-            "refresh": refresh_result,
-        }
-
     try:
         latest_state = (latest_upload_reader or build_latest_upload_reader(config))()
     except Exception as exc:
@@ -535,7 +520,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--export-container", default="")
     parser.add_argument("--export-asset-root", type=Path, default=None)
     parser.add_argument("--refresh-reason", default=DEFAULT_REFRESH_REASON)
-    parser.add_argument("--force-refresh", action="store_true")
     parser.add_argument("--loop", action="store_true")
     parser.add_argument("--interval-seconds", type=int, default=60)
     return parser
@@ -574,7 +558,7 @@ def main() -> int:
     config = config_from_args(args)
     exit_code = 0
     while True:
-        result = run_upload_refresh_once(config, force_refresh=args.force_refresh)
+        result = run_upload_refresh_once(config)
         print(json.dumps(result, ensure_ascii=False, default=_json_default, sort_keys=True))
         if result.get("status") == "failed":
             exit_code = 1
