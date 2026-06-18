@@ -148,7 +148,8 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
 
     def test_upload_worker_install_does_not_block_deploy_on_service_start(self) -> None:
         worker_install = self.function_body("install_upload_refresh_worker")
-        self.assertIn("systemctl enable --now eiketsu-upload-refresh.timer", worker_install)
+        self.assertIn("systemctl enable eiketsu-upload-refresh.timer", worker_install)
+        self.assertNotIn("systemctl enable --now eiketsu-upload-refresh.timer", worker_install)
         self.assertNotIn("systemctl start eiketsu-upload-refresh.service", worker_install)
 
     def test_version_detect_worker_is_cleaned_after_upload_worker(self) -> None:
