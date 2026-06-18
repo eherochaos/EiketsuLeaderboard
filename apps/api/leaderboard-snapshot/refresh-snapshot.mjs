@@ -49,6 +49,26 @@ function versionOutputDirFromOptions(outputPath, options = {}) {
   return resolve(options.versionOutputDir || env.LEADERBOARD_VERSION_OUTPUT_DIR || resolve(dirname(outputPath), "versions"));
 }
 
+function envFlag(value) {
+  const text = String(value || "").trim().toLowerCase();
+  return text === "1" || text === "true" || text === "yes" || text === "on";
+}
+
+function buildAllVersionArtifactsFromOptions(options = {}) {
+  const env = typeof process !== "undefined" ? process.env : {};
+  return Boolean(options.buildAllVersionArtifacts) || envFlag(env.LEADERBOARD_BUILD_ALL_VERSION_ARTIFACTS);
+}
+
+function currentOnlyManifest(manifest) {
+  const currentTargetVersion = String(manifest?.currentTargetVersion || "").trim();
+  const versions = Array.isArray(manifest?.versions) ? manifest.versions : [];
+  const currentEntry = versions.find((entry) => entry?.targetVersion === currentTargetVersion) || versions[0] || null;
+  return {
+    ...manifest,
+    versions: currentEntry ? [currentEntry] : []
+  };
+}
+
 function tempSnapshotPath(outputPath) {
   return resolve(dirname(outputPath), `.${basename(outputPath)}.${Date.now()}.${process.pid}.tmp`);
 }
@@ -204,10 +224,21 @@ async function refreshVersionedArtifacts(outputPath, options = {}) {
     legacyRoot: legacyRootFromOptions(options),
     logDiagnostics: false
   });
-  await writeJsonAtomically(manifestFile, manifest);
+  const buildAllVersionArtifacts = buildAllVersionArtifactsFromOptions(options);
+  const publishedManifest = buildAllVersionArtifacts ? manifest : currentOnlyManifest(manifest);
+  await writeJsonAtomically(manifestFile, publishedManifest);
+
+  if (!buildAllVersionArtifacts) {
+    return {
+      manifestFile,
+      versionOutputDir,
+      versions: publishedManifest.versions,
+      artifactMode: "current_only"
+    };
+  }
 
   const versions = [];
-  for (const entry of manifest.versions) {
+  for (const entry of publishedManifest.versions) {
     const snapshotFile = versionArtifactPath(versionOutputDir, entry.targetVersion, "leaderboard-snapshot.json");
     const tierListSnapshotFile = versionArtifactPath(versionOutputDir, entry.targetVersion, "tier-list-snapshot.json");
     const tierListConfigsFile = versionArtifactPath(versionOutputDir, entry.targetVersion, "tier-list-configs.json");

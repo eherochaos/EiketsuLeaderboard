@@ -503,6 +503,9 @@ async function testVersionedEndpointsUseManifestArtifacts() {
     await writeFile(join(oldVersionDir, "match-search-index.json"), `${JSON.stringify(oldIndex)}\n`, "utf8");
 
     const address = await listen(server);
+    const currentLeaderboard = await fetch(`http://127.0.0.1:${address.port}/api/leaderboard-snapshot?version=Ver.current`);
+    assert.equal((await currentLeaderboard.json()).metadata.sourceRunId, 10);
+
     const leaderboard = await fetch(`http://127.0.0.1:${address.port}/api/leaderboard-snapshot?version=Ver.old`);
     assert.equal((await leaderboard.json()).metadata.sourceRunId, 3);
 

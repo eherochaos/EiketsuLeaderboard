@@ -280,6 +280,9 @@ export function createLeaderboardSnapshotServer(options = {}) {
       writeJson(response, 404, { error: "version is not available" });
       return null;
     }
+    if (requested === String(manifest?.currentTargetVersion || "").trim()) {
+      return "";
+    }
     return versionArtifactPath(versionOutputDir, entry.targetVersion, fileName);
   }
 

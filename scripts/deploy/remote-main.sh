@@ -403,7 +403,6 @@ EOF
 
   sudo -n systemctl daemon-reload
   sudo -n systemctl enable --now eiketsu-upload-refresh.timer >/dev/null
-  sudo -n systemctl start eiketsu-upload-refresh.service
 }
 
 cleanup_version_detect_worker() {

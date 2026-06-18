@@ -643,7 +643,7 @@ async function testRefreshWritesAtomicSnapshot() {
   }
 }
 
-async function testRefreshWritesVersionedArtifacts() {
+async function testRefreshWritesCurrentVersionManifestByDefault() {
   const root = await mkdtemp(join(tmpdir(), "leaderboard-version-refresh-"));
   const legacyRoot = join(root, "legacy-service");
   const outputPath = join(root, "published", "leaderboard-snapshot.json");
@@ -651,6 +651,34 @@ async function testRefreshWritesVersionedArtifacts() {
   try {
     await createLegacyFixture(legacyRoot, { includeOldVersion: true });
     const { versionManifest } = await refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: false });
+    const manifest = JSON.parse(await readFile(join(root, "published", "version-manifest.json"), "utf8"));
+
+    assert.equal(versionManifest.versions.length, 1);
+    assert.equal(versionManifest.artifactMode, "current_only");
+    assert.equal(manifest.currentTargetVersion, "Ver.test");
+    assert.deepEqual(manifest.versions.map((item) => item.targetVersion), ["Ver.test"]);
+    await assert.rejects(
+      readFile(join(root, "published", "versions", "Ver.old", "leaderboard-snapshot.json"), "utf8"),
+      { code: "ENOENT" }
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testRefreshWritesAllVersionedArtifactsWhenEnabled() {
+  const root = await mkdtemp(join(tmpdir(), "leaderboard-version-refresh-all-"));
+  const legacyRoot = join(root, "legacy-service");
+  const outputPath = join(root, "published", "leaderboard-snapshot.json");
+
+  try {
+    await createLegacyFixture(legacyRoot, { includeOldVersion: true });
+    const { versionManifest } = await refreshLeaderboardSnapshot({
+      legacyRoot,
+      outputPath,
+      logDiagnostics: false,
+      buildAllVersionArtifacts: true
+    });
     const manifest = JSON.parse(await readFile(join(root, "published", "version-manifest.json"), "utf8"));
     const currentSnapshot = JSON.parse(await readFile(join(root, "published", "versions", "Ver.test", "leaderboard-snapshot.json"), "utf8"));
     const oldSnapshot = JSON.parse(await readFile(join(root, "published", "versions", "Ver.old", "leaderboard-snapshot.json"), "utf8"));
@@ -683,7 +711,8 @@ async function testRefreshCliPrintsVersionManifest() {
         LEADERBOARD_LEGACY_ROOT: legacyRoot,
         LEADERBOARD_SNAPSHOT_FILE: outputPath,
         LEADERBOARD_VERSION_MANIFEST_FILE: join(root, "published", "version-manifest.json"),
-        LEADERBOARD_VERSION_OUTPUT_DIR: join(root, "published", "versions")
+        LEADERBOARD_VERSION_OUTPUT_DIR: join(root, "published", "versions"),
+        LEADERBOARD_BUILD_ALL_VERSION_ARTIFACTS: "1"
       },
       maxBuffer: 1024 * 1024 * 16
     });
@@ -1153,7 +1182,8 @@ async function testRefreshWritesManifestOnlyBattleFestivalSnapshot() {
 }
 
 await testRefreshWritesAtomicSnapshot();
-await testRefreshWritesVersionedArtifacts();
+await testRefreshWritesCurrentVersionManifestByDefault();
+await testRefreshWritesAllVersionedArtifactsWhenEnabled();
 await testRefreshCliPrintsVersionManifest();
 await testRefreshWritesBattleFestivalSnapshot();
 await testRefreshBuildsBattleFestivalSnapshotFromMatches();
