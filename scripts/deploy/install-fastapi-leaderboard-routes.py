@@ -7,6 +7,8 @@ from pathlib import Path
 
 MARKER = "# BEGIN CODEX LEADERBOARD STATUS ROUTES"
 END_MARKER = "# END CODEX LEADERBOARD STATUS ROUTES"
+OLD_SNAPSHOT_NODE_URL = '"http://eiketsu-leaderboard-snapshot:8001/api/leaderboard-snapshot"'
+NEW_SNAPSHOT_NODE_URL = '"http://eiketsu-leaderboard-api:8001/api/leaderboard-snapshot"'
 
 ROUTE_BLOCK = f"""
     {MARKER}
@@ -132,6 +134,12 @@ ROUTE_BLOCK = f"""
         except _CodexURLError:
             raise HTTPException(status_code=502, detail="leaderboard api unavailable")
 
+    def _codex_path_with_query(request, path):
+        query = request.url.query
+        if query:
+            return f"{{path}}?{{query}}"
+        return path
+
     @app.get("/leaderboard-status")
     @app.get("/leaderboard-status/")
     def leaderboard_status_page():
@@ -166,19 +174,15 @@ ROUTE_BLOCK = f"""
 
     @app.get("/api/leaderboard-snapshot")
     def api_leaderboard_snapshot(request: _CodexRequest):
-        return _codex_proxy_leaderboard_node_api("/api/leaderboard-snapshot", forward_headers=request.headers)
+        return _codex_proxy_leaderboard_node_api(_codex_path_with_query(request, "/api/leaderboard-snapshot"), forward_headers=request.headers)
 
     @app.get("/api/tier-list-snapshot")
     def api_tier_list_snapshot(request: _CodexRequest):
-        return _codex_proxy_leaderboard_node_api("/api/tier-list-snapshot", forward_headers=request.headers)
+        return _codex_proxy_leaderboard_node_api(_codex_path_with_query(request, "/api/tier-list-snapshot"), forward_headers=request.headers)
 
     @app.get("/api/tier-list-deck-config")
     def api_tier_list_deck_config(request: _CodexRequest):
-        query = request.url.query
-        path = "/api/tier-list-deck-config"
-        if query:
-            path = f"{{path}}?{{query}}"
-        return _codex_proxy_leaderboard_node_api(path, forward_headers=request.headers)
+        return _codex_proxy_leaderboard_node_api(_codex_path_with_query(request, "/api/tier-list-deck-config"), forward_headers=request.headers)
 
     @app.get("/api/battle-festival-snapshot")
     def api_battle_festival_snapshot(request: _CodexRequest):
@@ -186,15 +190,11 @@ ROUTE_BLOCK = f"""
 
     @app.get("/api/battle-festival-deck-config")
     def api_battle_festival_deck_config(request: _CodexRequest):
-        query = request.url.query
-        path = "/api/battle-festival-deck-config"
-        if query:
-            path = f"{{path}}?{{query}}"
-        return _codex_proxy_leaderboard_node_api(path, forward_headers=request.headers)
+        return _codex_proxy_leaderboard_node_api(_codex_path_with_query(request, "/api/battle-festival-deck-config"), forward_headers=request.headers)
 
     @app.get("/api/match-search-options")
-    def api_match_search_options():
-        return _codex_proxy_leaderboard_node_api("/api/match-search-options")
+    def api_match_search_options(request: _CodexRequest):
+        return _codex_proxy_leaderboard_node_api(_codex_path_with_query(request, "/api/match-search-options"), forward_headers=request.headers)
 
     @app.post("/api/match-search")
     async def api_match_search(request: _CodexRequest):
@@ -210,13 +210,13 @@ ROUTE_BLOCK = f"""
 
     @app.get("/api/site-analytics-summary")
     def api_site_analytics_summary(request: _CodexRequest):
-        query = request.url.query
-        path = "/api/site-analytics-summary"
-        if query:
-            path = f"{{path}}?{{query}}"
-        return _codex_proxy_leaderboard_node_api(path, forward_headers=request.headers)
+        return _codex_proxy_leaderboard_node_api(_codex_path_with_query(request, "/api/site-analytics-summary"), forward_headers=request.headers)
     {END_MARKER}
 """
+
+
+def patch_existing_snapshot_upstream(text: str) -> str:
+    return text.replace(OLD_SNAPSHOT_NODE_URL, NEW_SNAPSHOT_NODE_URL)
 
 
 def main() -> int:
@@ -232,7 +232,7 @@ def main() -> int:
         return 1
 
     source_path = Path(source)
-    text = source_path.read_text(encoding="utf-8")
+    text = patch_existing_snapshot_upstream(source_path.read_text(encoding="utf-8"))
     marker_start = text.find(f"    {MARKER}")
     if marker_start >= 0:
         marker_end = text.find(f"    {END_MARKER}", marker_start)

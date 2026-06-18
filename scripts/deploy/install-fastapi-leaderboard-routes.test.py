@@ -31,10 +31,13 @@ class InstallFastApiLeaderboardRoutesTests(unittest.TestCase):
         self.assertIn("payload.setdefault(\"include_battle_festival\", False)", MODULE.ROUTE_BLOCK)
         self.assertIn("_codex_proxy_leaderboard_node_api(\"/api/leaderboard-refresh-status\"", MODULE.ROUTE_BLOCK)
         self.assertIn("_codex_proxy_leaderboard_node_api(\"/api/version-options\"", MODULE.ROUTE_BLOCK)
-        self.assertIn("_codex_proxy_leaderboard_node_api(\"/api/tier-list-snapshot\"", MODULE.ROUTE_BLOCK)
+        self.assertIn("_codex_path_with_query", MODULE.ROUTE_BLOCK)
+        self.assertIn("_codex_path_with_query(request, \"/api/leaderboard-snapshot\")", MODULE.ROUTE_BLOCK)
+        self.assertIn("_codex_path_with_query(request, \"/api/tier-list-snapshot\")", MODULE.ROUTE_BLOCK)
+        self.assertIn("_codex_path_with_query(request, \"/api/match-search-options\")", MODULE.ROUTE_BLOCK)
         self.assertIn("_codex_proxy_leaderboard_node_api(\"/api/battle-festival-snapshot\"", MODULE.ROUTE_BLOCK)
-        self.assertIn("path = \"/api/tier-list-deck-config\"", MODULE.ROUTE_BLOCK)
-        self.assertIn("path = \"/api/battle-festival-deck-config\"", MODULE.ROUTE_BLOCK)
+        self.assertIn("_codex_path_with_query(request, \"/api/tier-list-deck-config\")", MODULE.ROUTE_BLOCK)
+        self.assertIn("_codex_path_with_query(request, \"/api/battle-festival-deck-config\")", MODULE.ROUTE_BLOCK)
         self.assertIn("from fastapi import Request as _CodexRequest", MODULE.ROUTE_BLOCK)
         self.assertIn("globals()[\"_CodexRequest\"] = _CodexRequest", MODULE.ROUTE_BLOCK)
         self.assertIn("request: _CodexRequest", MODULE.ROUTE_BLOCK)
@@ -50,6 +53,17 @@ class InstallFastApiLeaderboardRoutesTests(unittest.TestCase):
         self.assertNotIn("_CodexBody", MODULE.ROUTE_BLOCK)
         self.assertNotIn("status file not found", MODULE.ROUTE_BLOCK)
         self.assertNotIn("leaderboard-refresh-status.json", MODULE.ROUTE_BLOCK)
+
+    def test_existing_snapshot_upstream_points_to_active_node_sidecar(self) -> None:
+        source = (
+            "LEADERBOARD_SNAPSHOT_NODE_URL = os.environ.get(\n"
+            "    \"LEADERBOARD_SNAPSHOT_NODE_URL\",\n"
+            "    \"http://eiketsu-leaderboard-snapshot:8001/api/leaderboard-snapshot\",\n"
+            ")\n"
+        )
+        patched = MODULE.patch_existing_snapshot_upstream(source)
+        self.assertIn("http://eiketsu-leaderboard-api:8001/api/leaderboard-snapshot", patched)
+        self.assertNotIn("http://eiketsu-leaderboard-snapshot:8001/api/leaderboard-snapshot", patched)
 
 
 if __name__ == "__main__":
