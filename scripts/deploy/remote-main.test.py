@@ -77,6 +77,15 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
             "log 'export postgres data'",
         )
 
+    def test_deploy_stops_node_api_before_heavy_work(self) -> None:
+        self.assert_order(
+            "log 'stop leaderboard node api before heavy deploy work'",
+            "log 'ensure battle festival schema'",
+            "log 'refresh leaderboard run'",
+            "log 'export postgres data'",
+            "log 'refresh leaderboard snapshot'",
+        )
+
     def test_node_api_has_writable_analytics_data_mount(self) -> None:
         start_node = self.function_body("start_leaderboard_node_api")
         self.assertIn('-v "$DEPLOY_PATH:/work:ro"', start_node)
@@ -136,6 +145,12 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
             "log 'smoke check api routes'",
             "log 'install upload refresh worker'",
         )
+
+    def test_upload_worker_install_does_not_block_deploy_on_service_start(self) -> None:
+        worker_install = self.function_body("install_upload_refresh_worker")
+        self.assertIn("systemctl enable eiketsu-upload-refresh.timer", worker_install)
+        self.assertNotIn("systemctl enable --now eiketsu-upload-refresh.timer", worker_install)
+        self.assertNotIn("systemctl start eiketsu-upload-refresh.service", worker_install)
 
     def test_version_detect_worker_is_cleaned_after_upload_worker(self) -> None:
         self.assert_order(
