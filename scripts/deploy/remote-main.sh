@@ -693,6 +693,8 @@ if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ] && ! postgres_export_python_ready; then
   log 'postgres export python dependencies missing; reuse existing exported data'
   DEPLOY_EXPORT_POSTGRES=0
 fi
+log 'stop leaderboard node api before heavy deploy work'
+stop_leaderboard_node_api
 if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ]; then
   log 'ensure battle festival schema'
   ensure_battle_festival_scope

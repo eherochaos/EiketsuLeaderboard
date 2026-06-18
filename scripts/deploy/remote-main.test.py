@@ -77,6 +77,15 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
             "log 'export postgres data'",
         )
 
+    def test_deploy_stops_node_api_before_heavy_work(self) -> None:
+        self.assert_order(
+            "log 'stop leaderboard node api before heavy deploy work'",
+            "log 'ensure battle festival schema'",
+            "log 'refresh leaderboard run'",
+            "log 'export postgres data'",
+            "log 'refresh leaderboard snapshot'",
+        )
+
     def test_node_api_has_writable_analytics_data_mount(self) -> None:
         start_node = self.function_body("start_leaderboard_node_api")
         self.assertIn('-v "$DEPLOY_PATH:/work:ro"', start_node)
