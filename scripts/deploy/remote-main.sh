@@ -402,7 +402,7 @@ WantedBy=timers.target
 EOF
 
   sudo -n systemctl daemon-reload
-  sudo -n systemctl enable eiketsu-upload-refresh.timer >/dev/null
+  sudo -n systemctl enable --now eiketsu-upload-refresh.timer >/dev/null
 }
 
 cleanup_version_detect_worker() {
