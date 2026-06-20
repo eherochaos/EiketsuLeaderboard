@@ -71,6 +71,7 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             self.assertEqual(result["status"], "completed")
             self.assertEqual(result["run"]["run_id"], 6)
             self.assertEqual(result["export"]["tables"]["server_leaderboard_rows"], 1)
+            self.assertEqual(result["export"]["cards"]["datalist_api_base"], True)
             self.assertEqual(result["snapshot"]["battleFestivalSnapshot"], "skipped_missing_official_period")
             self.assertTrue((legacy_root / "tables" / "server_leaderboard_rows.jsonl").is_file())
             self.assertTrue((legacy_root.with_name("legacy-service.prev") / "tables" / "old.jsonl").is_file())
@@ -80,6 +81,7 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             self.assertEqual(status["refresh"]["status"], "completed")
             self.assertEqual(status["refresh"]["reason"], "upload refresh completed")
             self.assertEqual(status["runRefresh"]["run_id"], 6)
+            self.assertEqual(status["export"]["cards"]["datalist_api_base"], True)
             self.assertEqual(status["snapshot"]["sourceRunId"], 7)
             self.assertEqual(status["battleFestivalSnapshot"]["refreshStatus"], "skipped_missing_official_period")
             self.assertEqual(live_status["snapshot"]["sourceRunId"], 7)
@@ -94,6 +96,76 @@ class RefreshStaticSnapshotAfterUploadTests(unittest.TestCase):
             self.assertEqual(calls[-1][1]["LEADERBOARD_SNAPSHOT_FILE"], str(snapshot_file))
             self.assertTrue(calls[-1][1]["LEADERBOARD_MATCH_SEARCH_INDEX_FILE"].endswith("match-search-index.json"))
             self.assertFalse(lock_file.exists())
+
+    def test_refresh_static_snapshot_preserves_official_card_data_from_previous_export(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            legacy_root = repo_root / "apps/api/data/legacy-service"
+            snapshot_file = repo_root / "apps/api/data/leaderboard-snapshot.json"
+            status_file = repo_root / "apps/api/data/leaderboard-refresh-status.json"
+            cached_card_data = '{"general":["da2ee086e9a0f6810ad65262a7358ccb"]}\n'
+            calls: list[list[str]] = []
+
+            (legacy_root / "cards").mkdir(parents=True)
+            (legacy_root / "cards" / "datalist_api_base.json").write_text(cached_card_data, encoding="utf-8")
+
+            def fake_exporter(output_dir: Path) -> dict:
+                (output_dir / "cards").mkdir(parents=True)
+                (output_dir / "tables").mkdir(parents=True)
+                (output_dir / "tables" / "server_leaderboard_rows.jsonl").write_text("{}\n", encoding="utf-8")
+                return {"tables": {"server_leaderboard_rows": 1}, "cards": {"card_catalog": True}}
+
+            def fake_runner(command: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+                calls.append(command)
+                if command[-1].endswith("refresh-snapshot.mjs"):
+                    snapshot_file.parent.mkdir(parents=True, exist_ok=True)
+                    snapshot_file.write_text(json.dumps({"metadata": {"sourceRunId": 11}}), encoding="utf-8")
+                    Path(env["LEADERBOARD_TIER_LIST_SNAPSHOT_FILE"]).write_text(
+                        json.dumps({"metadata": {"sourceRunId": 11}}),
+                        encoding="utf-8",
+                    )
+                if command[-1].endswith("match-search-index.mjs"):
+                    Path(env["LEADERBOARD_MATCH_SEARCH_INDEX_FILE"]).write_text(
+                        json.dumps({"metadata": {"sourceRunId": 11}}),
+                        encoding="utf-8",
+                    )
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            result = refresh_static_snapshot_after_upload(
+                repo_root=repo_root,
+                legacy_root=legacy_root,
+                snapshot_file=snapshot_file,
+                status_file=status_file,
+                exporter=fake_exporter,
+                runner=fake_runner,
+                refresh_run=False,
+            )
+
+            manifest = json.loads((legacy_root / "manifest.json").read_text(encoding="utf-8"))
+            status = json.loads(status_file.read_text(encoding="utf-8"))
+            self.assertEqual((legacy_root / "cards" / "datalist_api_base.json").read_text(encoding="utf-8"), cached_card_data)
+            self.assertEqual(result["export"]["cards"]["datalist_api_base"], True)
+            self.assertEqual(manifest["cards"]["datalist_api_base"], True)
+            self.assertEqual(status["export"]["cards"]["datalist_api_base"], True)
+            self.assertTrue(calls[0][1].endswith("refresh-official-card-data.mjs"))
+            self.assertTrue(calls[0][2].endswith("datalist_api_base.json"))
+
+    def test_refresh_official_card_data_runs_when_cache_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            legacy_root = repo_root / "apps/api/data/legacy-service"
+            calls: list[list[str]] = []
+
+            def fake_runner(command: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+                calls.append(command)
+                self.assertEqual(env["LEADERBOARD_LEGACY_ROOT"], str(legacy_root))
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            result = refresh_module._refresh_official_card_data(repo_root, legacy_root, "node", fake_runner)
+
+            self.assertEqual(result["status"], "completed")
+            self.assertTrue(calls[0][1].endswith("refresh-official-card-data.mjs"))
+            self.assertTrue(calls[0][2].endswith("datalist_api_base.json"))
 
     def test_refresh_static_snapshot_fails_on_run_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -150,6 +150,37 @@ run_postgres_export_in_container() {
   fi
 }
 
+preserve_official_card_cache() {
+  local next_root="$1"
+  local current_root="$2"
+  local source_file="$current_root/cards/datalist_api_base.json"
+  local target_file="$next_root/cards/datalist_api_base.json"
+  if [ ! -f "$target_file" ] && [ -f "$source_file" ]; then
+    mkdir -p "$next_root/cards"
+    cp "$source_file" "$target_file"
+  fi
+  if [ -f "$target_file" ]; then
+    python3 - "$next_root/manifest.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+except (FileNotFoundError, json.JSONDecodeError):
+    payload = {}
+cards = payload.get("cards") if isinstance(payload, dict) else {}
+if not isinstance(cards, dict):
+    cards = {}
+payload["cards"] = cards
+cards["datalist_api_base"] = True
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
+  fi
+}
+
 require_fastapi_container() {
   command -v docker >/dev/null 2>&1 || fail 'docker runtime is missing'
   docker_container_running "$DEPLOY_FASTAPI_CONTAINER" || fail 'fastapi container is not running'
@@ -728,6 +759,9 @@ if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ]; then
     fi
     ensure_deploy_owner "$DATA_ROOT/legacy-service.next"
   fi
+  log 'preserve official card data cache'
+  preserve_official_card_cache "$DATA_ROOT/legacy-service.next" "$LEGACY_ROOT"
+  ensure_deploy_owner "$DATA_ROOT/legacy-service.next"
   rm -rf "$DATA_ROOT/legacy-service.prev"
   if [ -d "$LEGACY_ROOT" ]; then
     mv "$LEGACY_ROOT" "$DATA_ROOT/legacy-service.prev"

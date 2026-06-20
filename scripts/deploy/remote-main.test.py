@@ -174,6 +174,20 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn('mv "$host_export_root" "$DATA_ROOT/legacy-service.next"', self.text)
         self.assertNotIn('docker cp "$DEPLOY_EXPORT_CONTAINER:$container_export_root" "$DATA_ROOT/legacy-service.next"', self.text)
 
+    def test_postgres_export_preserves_official_card_cache_before_replace(self) -> None:
+        preserve_cache = self.function_body("preserve_official_card_cache")
+        self.assertIn("cards/datalist_api_base.json", preserve_cache)
+        self.assertIn("datalist_api_base", preserve_cache)
+        self.assertIn('preserve_official_card_cache "$DATA_ROOT/legacy-service.next" "$LEGACY_ROOT"', self.text)
+        self.assert_order(
+            "log 'export postgres data'",
+            "log 'preserve official card data cache'",
+            'preserve_official_card_cache "$DATA_ROOT/legacy-service.next" "$LEGACY_ROOT"',
+            'rm -rf "$DATA_ROOT/legacy-service.prev"',
+            'mv "$DATA_ROOT/legacy-service.next" "$LEGACY_ROOT"',
+            "log 'refresh official card data'",
+        )
+
     def test_postgres_export_failure_logs_resource_diagnostics(self) -> None:
         diagnostics = self.function_body("log_postgres_export_diagnostics")
         container_export = self.function_body("run_postgres_export_in_container")
