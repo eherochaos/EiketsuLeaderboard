@@ -96,6 +96,68 @@ class UploadRefreshWorkerTests(unittest.TestCase):
             self.assertEqual(result["battleFestivalUploadId"], 74)
             self.assertEqual(result["battleFestivalSnapshotUploadId"], 74)
 
+    def test_old_version_battle_festival_upload_does_not_trigger_current_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(Path(temp_dir))
+            self._write_status(config.status_file, latest_upload_id=91)
+
+            result = run_upload_refresh_once(
+                config,
+                latest_upload_reader=lambda: {
+                    "latest_upload": {
+                        "id": 91,
+                        "status": "completed",
+                        "imported_match_count": 569,
+                        "target_version": "Ver.3.5.0C",
+                    },
+                    "latest_battle_festival_upload": {
+                        "id": 86,
+                        "status": "completed",
+                        "imported_match_count": 0,
+                        "mode_scope": "battle_festival",
+                        "target_version": "Ver.3.5.0B",
+                    },
+                },
+                refresher=lambda: self.fail("refresh should not run"),
+            )
+
+            self.assertEqual(result["status"], "skipped")
+            self.assertEqual(result["reason"], "upload already refreshed")
+            self.assertEqual(result["battleFestivalUploadId"], 0)
+            self.assertEqual(result["pendingUploads"], [])
+
+    def test_same_version_battle_festival_upload_still_triggers_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(Path(temp_dir))
+            self._write_status(config.status_file, latest_upload_id=91)
+            calls: list[str] = []
+
+            result = run_upload_refresh_once(
+                config,
+                latest_upload_reader=lambda: {
+                    "latest_upload": {
+                        "id": 91,
+                        "status": "completed",
+                        "imported_match_count": 569,
+                        "target_version": "Ver.3.5.0C",
+                    },
+                    "latest_battle_festival_upload": {
+                        "id": 90,
+                        "status": "completed",
+                        "imported_match_count": 0,
+                        "mode_scope": "battle_festival",
+                        "target_version": "Ver.3.5.0C",
+                    },
+                },
+                refresher=lambda: calls.append("refresh") or {"status": "completed", "reason": "upload refresh completed"},
+            )
+
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["battleFestivalUploadId"], 90)
+            self.assertEqual(result["battleFestivalSnapshotUploadId"], 0)
+            self.assertEqual(result["refreshReasons"], ["battle_festival"])
+            self.assertEqual(calls, ["refresh"])
+
     def test_missing_battle_festival_snapshot_triggers_refresh(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config = self._config(Path(temp_dir))

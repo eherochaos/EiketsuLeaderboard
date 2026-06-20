@@ -131,6 +131,7 @@ def run_upload_refresh_once(
 
     latest_upload = _latest_upload_from_state(latest_state)
     latest_battle_festival_upload = _latest_battle_festival_upload_from_state(latest_state)
+    latest_battle_festival_upload = _same_version_battle_festival_upload(latest_upload, latest_battle_festival_upload)
     if not _is_refreshable_upload(latest_upload) and not _is_refreshable_upload(latest_battle_festival_upload):
         return {"status": "skipped", "reason": "no new completed upload"}
 
@@ -414,6 +415,23 @@ def _latest_battle_festival_upload_from_state(state: dict[str, Any] | None) -> d
     if "latest_battle_festival_upload" in state:
         return None
     return state if str(state.get("mode_scope") or "") == "battle_festival" else None
+
+
+def _same_version_battle_festival_upload(
+    latest_upload: dict[str, Any] | None,
+    latest_battle_festival_upload: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    latest_version = _upload_target_version(latest_upload)
+    battle_festival_version = _upload_target_version(latest_battle_festival_upload)
+    if latest_version and battle_festival_version and latest_version != battle_festival_version:
+        return None
+    return latest_battle_festival_upload
+
+
+def _upload_target_version(upload: dict[str, Any] | None) -> str:
+    if not isinstance(upload, dict):
+        return ""
+    return str(upload.get("target_version") or upload.get("targetVersion") or "").strip()
 
 
 def _pending_refresh_uploads(
