@@ -22,6 +22,7 @@ DEFAULT_TIER_LIST_SNAPSHOT_FILE = Path("apps/api/data/tier-list-snapshot.json")
 DEFAULT_TIER_LIST_CONFIGS_FILE = Path("apps/api/data/tier-list-configs.json")
 DEFAULT_BATTLE_FESTIVAL_SNAPSHOT_FILE = Path("apps/api/data/battle-festival-snapshot.json")
 DEFAULT_BATTLE_FESTIVAL_CONFIGS_FILE = Path("apps/api/data/battle-festival-configs.json")
+OFFICIAL_CARD_DATA_FILE = "datalist_api_base.json"
 STATUS_SCHEMA_VERSION = 1
 RECENT_STATUS_LIMIT = 20
 DEFAULT_NODE_OPTIONS = "--max-old-space-size=4096"
@@ -180,6 +181,7 @@ def _refresh_legacy_export(legacy_root: Path, exporter: Exporter) -> dict[str, A
     prev_root = legacy_root.with_name(f"{legacy_root.name}.prev")
     shutil.rmtree(next_root, ignore_errors=True)
     manifest = exporter(next_root)
+    manifest = _preserve_official_card_data_cache(legacy_root, next_root, manifest)
 
     shutil.rmtree(prev_root, ignore_errors=True)
     moved_current = False
@@ -195,15 +197,43 @@ def _refresh_legacy_export(legacy_root: Path, exporter: Exporter) -> dict[str, A
     return manifest
 
 
+def _preserve_official_card_data_cache(
+    current_root: Path,
+    next_root: Path,
+    manifest: dict[str, Any],
+) -> dict[str, Any]:
+    target_file = next_root / "cards" / OFFICIAL_CARD_DATA_FILE
+    source_file = current_root / "cards" / OFFICIAL_CARD_DATA_FILE
+    if not target_file.is_file() and source_file.is_file():
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source_file, target_file)
+
+    updated_manifest = _set_card_manifest_entry(manifest, "datalist_api_base", target_file.is_file())
+    _write_export_manifest(next_root / "manifest.json", updated_manifest)
+    return updated_manifest
+
+
+def _set_card_manifest_entry(manifest: dict[str, Any], key: str, value: bool) -> dict[str, Any]:
+    updated_manifest = dict(manifest) if isinstance(manifest, dict) else {}
+    cards = updated_manifest.get("cards")
+    updated_cards = dict(cards) if isinstance(cards, dict) else {}
+    updated_cards[key] = bool(value)
+    updated_manifest["cards"] = updated_cards
+    return updated_manifest
+
+
+def _write_export_manifest(path: Path, manifest: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def _refresh_official_card_data(
     repo_root: Path,
     legacy_root: Path,
     node_bin: str,
     runner: CommandRunner,
 ) -> dict[str, Any]:
-    base_json = legacy_root / "cards" / "datalist_api_base.json"
-    if not base_json.is_file():
-        return {"status": "skipped", "reason": "datalist_api_base.json missing"}
+    base_json = legacy_root / "cards" / OFFICIAL_CARD_DATA_FILE
     command = [
         node_bin,
         str(repo_root / "apps/api/leaderboard-snapshot/refresh-official-card-data.mjs"),
