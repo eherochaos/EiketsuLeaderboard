@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_TARGET_VERSION = "Ver.3.5.0C"
-DEFAULT_DATE_FROM = "2026-06-17"
+DEFAULT_TARGET_VERSION = "Ver.3.5.0D"
+DEFAULT_DATE_FROM = "2026-07-01"
 DEFAULT_REPORT_FORMATS = ["md", "csv"]
 DEFAULT_REPORTS = ["overview", "deck", "card", "deck-version", "card-version"]
 TARGET_VERSION_RE = re.compile(r"^Ver\.(\d+)\.(\d+)\.(\d+)([A-Z])$")
