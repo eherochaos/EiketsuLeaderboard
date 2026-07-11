@@ -5,7 +5,7 @@ import { trackSiteEvent } from "../lib/siteAnalytics";
 import { readVersionParam, versionedPageHref } from "../lib/versionOptions";
 
 const props = defineProps<{
-  current: "home" | "tier" | "battleFestival" | "status" | "matchSearch" | "adminStats";
+  current: "home" | "tier" | "battleFestival" | "status" | "matchSearch" | "admin" | "adminStats";
 }>();
 
 const navItems = [
@@ -172,7 +172,8 @@ function trackNavClick(key: string, href: string): void {
   .Common_Header_Brand {
     flex: 0 1 auto;
     gap: 8px;
-    font-size: 15px;
+    flex-shrink: 0;
+    font-size: 14px;
   }
 
   .Common_Header_BrandSymbol {
