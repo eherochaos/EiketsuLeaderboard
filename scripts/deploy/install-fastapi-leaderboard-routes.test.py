@@ -20,6 +20,8 @@ class InstallFastApiLeaderboardRoutesTests(unittest.TestCase):
         self.assertIn("@app.get(\"/api/tier-list-snapshot\")", MODULE.ROUTE_BLOCK)
         self.assertIn("@app.get(\"/api/tier-list-deck-config\")", MODULE.ROUTE_BLOCK)
         self.assertIn("@app.get(\"/admin-stats/\")", MODULE.ROUTE_BLOCK)
+        self.assertIn("@app.get(\"/webmaster/\")", MODULE.ROUTE_BLOCK)
+        self.assertIn(' / "webmaster" / "index.html"', MODULE.ROUTE_BLOCK)
         self.assertIn("@app.get(\"/battle-festival/\")", MODULE.ROUTE_BLOCK)
         self.assertIn("@app.get(\"/api/battle-festival-snapshot\")", MODULE.ROUTE_BLOCK)
         self.assertIn("@app.get(\"/api/battle-festival-deck-config\")", MODULE.ROUTE_BLOCK)

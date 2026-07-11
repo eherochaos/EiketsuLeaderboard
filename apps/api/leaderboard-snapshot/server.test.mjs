@@ -590,6 +590,18 @@ async function testSiteAnalyticsEventAndSummary() {
     });
     assert.equal(event.status, 204);
 
+    const ownerEvent = await fetch(`http://127.0.0.1:${address.port}/api/site-analytics-event`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(testAnalyticsEventPayload({
+        visitorId: "visitor_owner123",
+        sessionId: "session_owner123",
+        page: "/tier-list/",
+        target: "tier-list"
+      }))
+    });
+    assert.equal(ownerEvent.status, 204);
+
     const fileText = await readFile(siteAnalyticsFile, "utf8");
     assert.equal(/secret|E:\\|token=|cookie/i.test(fileText), false);
     assert.equal(fileText.includes("\"eventType\":\"page_view\""), true);
@@ -602,10 +614,20 @@ async function testSiteAnalyticsEventAndSummary() {
     });
     const body = await summary.json();
     assert.equal(summary.status, 200);
-    assert.equal(body.totals.visitors, 1);
-    assert.equal(body.totals.pageViews, 1);
+    assert.equal(body.totals.visitors, 2);
+    assert.equal(body.totals.pageViews, 2);
     assert.equal(body.pages[0].page, "/leaderboard/");
     assert.equal(/secret|E:\\|token=|cookie/i.test(JSON.stringify(body)), false);
+
+    const externalSummary = await fetch(`http://127.0.0.1:${address.port}/api/site-analytics-summary?from=2026-06-01&to=2026-06-03&excludeVisitorId=visitor_owner123`, {
+      headers: { Authorization: "Bearer admin-token" }
+    });
+    const externalBody = await externalSummary.json();
+    assert.equal(externalSummary.status, 200);
+    assert.equal(externalBody.totals.visitors, 1);
+    assert.equal(externalBody.totals.pageViews, 1);
+    assert.equal(externalBody.pages.length, 1);
+    assert.equal(externalBody.pages[0].page, "/leaderboard/");
   } finally {
     await close(server);
     await rm(root, { recursive: true, force: true });

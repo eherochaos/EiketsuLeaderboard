@@ -39,6 +39,11 @@ function visitorId(): string {
   }
 }
 
+export function currentSiteVisitorId(): string {
+  if (!browserReady()) return "";
+  return visitorId();
+}
+
 function sessionId(): string {
   try {
     return storageId(window.sessionStorage, sessionKey, "session");
@@ -121,10 +126,18 @@ export function trackPageView(target = ""): void {
   trackSiteEvent("page_view", target || window.location.pathname || "unknown");
 }
 
-export async function loadSiteAnalyticsSummary(token: string, from: string, to: string): Promise<SiteAnalyticsSummary> {
+export async function loadSiteAnalyticsSummary(
+  token: string,
+  from: string,
+  to: string,
+  excludedVisitorIds: string[] = []
+): Promise<SiteAnalyticsSummary> {
   const params = new URLSearchParams();
   if (from) params.set("from", from);
   if (to) params.set("to", to);
+  for (const visitorId of excludedVisitorIds) {
+    if (visitorId) params.append("excludeVisitorId", visitorId);
+  }
   const response = await fetch(`${summaryUrl}?${params.toString()}`, {
     headers: {
       Authorization: `Bearer ${token}`,
