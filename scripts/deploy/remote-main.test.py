@@ -44,6 +44,7 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn("/tier-list/", live_smoke)
         self.assertIn("/battle-festival/", live_smoke)
         self.assertIn("/admin-stats/", live_smoke)
+        self.assertIn("/webmaster/", live_smoke)
         self.assertNotIn("/api/tier-list-snapshot", live_smoke)
 
     def test_client_config_smoke_requires_battle_festival_field(self) -> None:

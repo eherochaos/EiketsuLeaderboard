@@ -609,6 +609,7 @@ smoke_check_live_routes() {
   curl -fsS "$base/battle-festival/" >/dev/null || fail 'battle festival page is not live'
   curl -fsS "$base/match-search/" >/dev/null || fail 'match search page is not live'
   curl -fsS "$base/admin-stats/" >/dev/null || fail 'admin stats page is not live'
+  curl -fsS "$base/webmaster/" >/dev/null || fail 'webmaster page is not live'
 }
 
 refresh_public_run() {

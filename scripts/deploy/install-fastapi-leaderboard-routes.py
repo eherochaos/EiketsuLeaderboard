@@ -53,6 +53,8 @@ ROUTE_BLOCK = f"""
             "/match-search/",
             "/admin-stats",
             "/admin-stats/",
+            "/webmaster",
+            "/webmaster/",
             "/battle-festival",
             "/battle-festival/",
         }}:
@@ -156,6 +158,12 @@ ROUTE_BLOCK = f"""
     @app.get("/admin-stats/")
     def admin_stats_page():
         path = _codex_leaderboard_frontend_root() / "admin-stats" / "index.html"
+        return _codex_leaderboard_html_response(path)
+
+    @app.get("/webmaster")
+    @app.get("/webmaster/")
+    def webmaster_page():
+        path = _codex_leaderboard_frontend_root() / "webmaster" / "index.html"
         return _codex_leaderboard_html_response(path)
 
     @app.get("/battle-festival")
