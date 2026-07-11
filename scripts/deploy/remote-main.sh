@@ -357,6 +357,9 @@ install_upload_refresh_worker() {
     printf '#!/usr/bin/env bash\n'
     printf 'set -euo pipefail\n'
     printf 'cd %s\n' "$(shell_quote "$DEPLOY_PATH")"
+    printf 'if [ -z "${NODE_OPTIONS:-}" ]; then\n'
+    printf '  export NODE_OPTIONS="${UPLOAD_REFRESH_NODE_OPTIONS:---max-old-space-size=2048}"\n'
+    printf 'fi\n'
     printf 'node_api_container=%s\n' "$(shell_quote "$DEPLOY_NODE_API_CONTAINER")"
     printf 'export_container=%s\n' "$(shell_quote "$DEPLOY_EXPORT_CONTAINER")"
     printf 'wait_for_container() {\n'

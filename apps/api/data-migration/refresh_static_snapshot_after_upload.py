@@ -25,7 +25,7 @@ DEFAULT_BATTLE_FESTIVAL_CONFIGS_FILE = Path("apps/api/data/battle-festival-confi
 OFFICIAL_CARD_DATA_FILE = "datalist_api_base.json"
 STATUS_SCHEMA_VERSION = 1
 RECENT_STATUS_LIMIT = 20
-DEFAULT_NODE_OPTIONS = "--max-old-space-size=4096"
+DEFAULT_NODE_OPTIONS = "--max-old-space-size=2048"
 REFRESH_LOCK_STALE_SECONDS = 30 * 60
 
 

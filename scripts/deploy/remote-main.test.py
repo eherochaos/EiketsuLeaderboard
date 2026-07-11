@@ -139,6 +139,11 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
             worker_install.index('python3 apps/api/data-migration/upload_refresh_worker.py "${args[@]}"'),
         )
 
+    def test_upload_worker_uses_conservative_overridable_node_heap(self) -> None:
+        worker_install = self.function_body("install_upload_refresh_worker")
+        self.assertIn('if [ -z "${NODE_OPTIONS:-}" ]; then', worker_install)
+        self.assertIn('export NODE_OPTIONS="${UPLOAD_REFRESH_NODE_OPTIONS:---max-old-space-size=2048}"', worker_install)
+
     def test_upload_worker_starts_after_node_api_container(self) -> None:
         self.assert_order(
             "log 'start leaderboard node api'",
