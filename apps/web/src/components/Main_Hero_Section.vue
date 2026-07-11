@@ -133,6 +133,13 @@ function deckImageCard(deck: DeckRow): CardView | null {
   position: relative;
 }
 
+/* 桌面端让结论区与右侧榜单等高居中，避免首屏左下出现大块空白。 */
+@media (min-width: 1100px) {
+  .Main_Hero_Section_Copy {
+    align-self: center;
+  }
+}
+
 /* Hero 摘要：限制宽度，避免文字拉得太长。 */
 .Main_Hero_Section_Lead {
   max-width: 620px;
