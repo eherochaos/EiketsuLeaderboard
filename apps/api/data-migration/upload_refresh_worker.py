@@ -9,7 +9,7 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +21,8 @@ from refresh_static_snapshot_after_upload import (
 
 
 DEFAULT_REFRESH_REASON = "upload refresh completed"
+RETRY_DELAYS_SECONDS = (5 * 60, 15 * 60, 30 * 60)
+CIRCUIT_OPEN_AFTER_FAILURES = 3
 
 LatestUploadReader = Callable[[], dict[str, Any] | None]
 SnapshotRefresher = Callable[[], dict[str, Any]]
@@ -123,7 +125,9 @@ def run_upload_refresh_once(
     config: UploadRefreshConfig,
     latest_upload_reader: LatestUploadReader | None = None,
     refresher: SnapshotRefresher | None = None,
+    clock: Callable[[], datetime] | None = None,
 ) -> dict[str, Any]:
+    now = _normalise_utc((clock or _utc_now)())
     try:
         latest_state = (latest_upload_reader or build_latest_upload_reader(config))()
     except Exception as exc:
@@ -160,12 +164,42 @@ def run_upload_refresh_once(
             "pendingUploads": [],
         }
 
+    retry_state = _read_refresh_retry(config.status_file)
+    if _retry_is_active(retry_state, pending_uploads, now):
+        return {
+            "status": "skipped",
+            "reason": "refresh circuit open" if retry_state.get("mode") == "circuit_open" else "refresh backoff",
+            "uploadId": upload_id,
+            "uploadWatermark": watermark,
+            "battleFestivalUploadId": battle_festival_upload_id,
+            "battleFestivalSnapshotUploadId": battle_festival_snapshot_upload_id,
+            "pendingUploads": pending_uploads,
+            "refreshRetry": retry_state,
+        }
+
     try:
         refresh_result = (refresher or build_snapshot_refresher(config))()
     except Exception as exc:
-        return _record_failure_status(config, f"upload refresh failed: {exc}")
+        retry_state = _next_refresh_retry(retry_state, pending_uploads, now)
+        return _record_failure_status(config, f"upload refresh failed: {exc}", retry_state)
 
     refresh_status = str(refresh_result.get("status") or "completed")
+    if refresh_status == "failed":
+        retry_state = _next_refresh_retry(retry_state, pending_uploads, now)
+        reason = str(refresh_result.get("reason") or refresh_result.get("error") or "upload refresh failed")
+        _record_failure_status(config, reason, retry_state)
+        return {
+            "status": "failed",
+            "reason": _sanitize_text(reason),
+            "uploadId": upload_id,
+            "uploadWatermark": watermark,
+            "battleFestivalUploadId": battle_festival_upload_id,
+            "battleFestivalSnapshotUploadId": battle_festival_snapshot_upload_id,
+            "pendingUploads": pending_uploads,
+            "refreshReasons": [str(item.get("scope") or "") for item in pending_uploads],
+            "refresh": refresh_result,
+            "refreshRetry": retry_state,
+        }
     return {
         "status": refresh_status,
         "reason": refresh_result.get("reason") or "",
@@ -381,7 +415,11 @@ class DockerNodeRunner:
         return "/work" if not str(relative) else f"/work/{relative.as_posix()}"
 
 
-def _record_failure_status(config: UploadRefreshConfig, reason: str) -> dict[str, Any]:
+def _record_failure_status(
+    config: UploadRefreshConfig,
+    reason: str,
+    refresh_retry: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     write_refresh_status_only(
         repo_root=config.repo_root,
         legacy_root=config.legacy_root,
@@ -391,8 +429,72 @@ def _record_failure_status(config: UploadRefreshConfig, reason: str) -> dict[str
         live_status_file=config.live_status_file,
         refresh_status="failed",
         refresh_reason=reason,
+        refresh_retry=refresh_retry,
     )
-    return {"status": "failed", "reason": _sanitize_text(reason)}
+    result = {"status": "failed", "reason": _sanitize_text(reason)}
+    if refresh_retry:
+        result["refreshRetry"] = refresh_retry
+    return result
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _normalise_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _read_refresh_retry(status_file: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(status_file.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+    retry = payload.get("refreshRetry") if isinstance(payload, dict) else None
+    return retry if isinstance(retry, dict) else {}
+
+
+def _parse_retry_time(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return _normalise_utc(datetime.fromisoformat(text.replace("Z", "+00:00")))
+    except ValueError:
+        return None
+
+
+def _retry_is_active(
+    retry_state: dict[str, Any],
+    pending_uploads: list[dict[str, Any]],
+    now: datetime,
+) -> bool:
+    if retry_state.get("pendingUploads") != pending_uploads:
+        return False
+    next_retry_at = _parse_retry_time(retry_state.get("nextRetryAt"))
+    return next_retry_at is not None and next_retry_at > now
+
+
+def _next_refresh_retry(
+    retry_state: dict[str, Any],
+    pending_uploads: list[dict[str, Any]],
+    now: datetime,
+) -> dict[str, Any]:
+    previous_count = 0
+    if retry_state.get("pendingUploads") == pending_uploads:
+        previous_count = _to_int(retry_state.get("failureCount"))
+    failure_count = previous_count + 1
+    delay_seconds = RETRY_DELAYS_SECONDS[min(failure_count - 1, len(RETRY_DELAYS_SECONDS) - 1)]
+    return {
+        "mode": "circuit_open" if failure_count >= CIRCUIT_OPEN_AFTER_FAILURES else "backoff",
+        "pendingUploads": pending_uploads,
+        "failureCount": failure_count,
+        "lastFailedAt": now.isoformat(),
+        "nextRetryAt": (now + timedelta(seconds=delay_seconds)).isoformat(),
+        "delaySeconds": delay_seconds,
+    }
 
 
 def _latest_upload_from_state(state: dict[str, Any] | None) -> dict[str, Any] | None:

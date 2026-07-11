@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import unittest
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import upload_refresh_worker
@@ -205,6 +206,117 @@ class UploadRefreshWorkerTests(unittest.TestCase):
 
             self.assertEqual(result["status"], "completed")
             self.assertEqual(result["uploadId"], 11)
+            self.assertEqual(calls, ["refresh"])
+
+    def test_failed_refresh_writes_backoff_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(Path(temp_dir))
+            self._write_status(config.status_file, latest_upload_id=10)
+            now = datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc)
+
+            result = run_upload_refresh_once(
+                config,
+                latest_upload_reader=lambda: {"id": 11, "status": "completed", "imported_match_count": 3},
+                refresher=lambda: {"status": "failed", "error": "out of memory"},
+                clock=lambda: now,
+            )
+
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(result["refreshRetry"]["mode"], "backoff")
+            self.assertEqual(result["refreshRetry"]["failureCount"], 1)
+            self.assertEqual(result["refreshRetry"]["delaySeconds"], 300)
+            self.assertEqual(
+                json.loads(config.status_file.read_text(encoding="utf-8"))["refreshRetry"],
+                result["refreshRetry"],
+            )
+
+    def test_active_backoff_skips_refresh_without_new_upload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(Path(temp_dir))
+            now = datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc)
+            pending = [{"scope": "global", "uploadId": 11, "uploadWatermark": 0}]
+            retry = {
+                "mode": "backoff",
+                "pendingUploads": pending,
+                "failureCount": 1,
+                "nextRetryAt": (now + timedelta(minutes=4)).isoformat(),
+                "delaySeconds": 300,
+            }
+            self._write_status_payload(
+                config.status_file,
+                {"refresh": {"status": "failed"}, "refreshRetry": retry},
+            )
+            calls: list[str] = []
+
+            result = run_upload_refresh_once(
+                config,
+                latest_upload_reader=lambda: {"id": 11, "status": "completed", "imported_match_count": 3},
+                refresher=lambda: calls.append("refresh") or {"status": "completed"},
+                clock=lambda: now,
+            )
+
+            self.assertEqual(result["status"], "skipped")
+            self.assertEqual(result["reason"], "refresh backoff")
+            self.assertEqual(result["refreshRetry"], retry)
+            self.assertEqual(calls, [])
+
+    def test_third_failure_opens_circuit_with_capped_delay(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(Path(temp_dir))
+            now = datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc)
+            pending = [{"scope": "global", "uploadId": 11, "uploadWatermark": 0}]
+            self._write_status_payload(
+                config.status_file,
+                {
+                    "refresh": {"status": "failed"},
+                    "refreshRetry": {
+                        "mode": "backoff",
+                        "pendingUploads": pending,
+                        "failureCount": 2,
+                        "nextRetryAt": (now - timedelta(minutes=1)).isoformat(),
+                        "delaySeconds": 900,
+                    },
+                },
+            )
+
+            result = run_upload_refresh_once(
+                config,
+                latest_upload_reader=lambda: {"id": 11, "status": "completed", "imported_match_count": 3},
+                refresher=lambda: {"status": "failed", "error": "out of memory"},
+                clock=lambda: now,
+            )
+
+            self.assertEqual(result["refreshRetry"]["mode"], "circuit_open")
+            self.assertEqual(result["refreshRetry"]["failureCount"], 3)
+            self.assertEqual(result["refreshRetry"]["delaySeconds"], 1800)
+
+    def test_new_upload_bypasses_old_refresh_backoff(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(Path(temp_dir))
+            now = datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc)
+            self._write_status_payload(
+                config.status_file,
+                {
+                    "refresh": {"status": "failed"},
+                    "refreshRetry": {
+                        "mode": "circuit_open",
+                        "pendingUploads": [{"scope": "global", "uploadId": 11, "uploadWatermark": 0}],
+                        "failureCount": 3,
+                        "nextRetryAt": (now + timedelta(hours=1)).isoformat(),
+                        "delaySeconds": 1800,
+                    },
+                },
+            )
+            calls: list[str] = []
+
+            result = run_upload_refresh_once(
+                config,
+                latest_upload_reader=lambda: {"id": 12, "status": "completed", "imported_match_count": 3},
+                refresher=lambda: calls.append("refresh") or {"status": "completed"},
+                clock=lambda: now,
+            )
+
+            self.assertEqual(result["status"], "completed")
             self.assertEqual(calls, ["refresh"])
 
     def test_snapshot_run_mismatch_does_not_skip_upload(self) -> None:
