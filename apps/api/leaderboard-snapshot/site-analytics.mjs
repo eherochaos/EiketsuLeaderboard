@@ -206,6 +206,11 @@ export async function readSiteAnalyticsSummary(filePath, options = {}) {
   const defaultFrom = new Date(now.getTime() - 6 * DAY_MS);
   const fromDate = parseDateStart(options.from, defaultFrom);
   const toDate = parseDateEnd(options.to, now);
+  const excludedVisitorIds = new Set(
+    (Array.isArray(options.excludeVisitorIds) ? options.excludeVisitorIds : [])
+      .map((visitorId) => sanitizeId(visitorId))
+      .filter(Boolean)
+  );
   const retentionStart = new Date(now.getTime() - RETENTION_DAYS * DAY_MS);
   let text = "";
 
@@ -238,6 +243,7 @@ export async function readSiteAnalyticsSummary(filePath, options = {}) {
     } catch {
       continue;
     }
+    if (excludedVisitorIds.has(sanitizeId(event.visitorId))) continue;
     const occurredAt = normalizeDate(event.occurredAt, event.receivedAt || now);
     if (occurredAt < retentionStart || occurredAt < fromDate || occurredAt > toDate) continue;
     if (event.page === "/deploy-smoke") continue;

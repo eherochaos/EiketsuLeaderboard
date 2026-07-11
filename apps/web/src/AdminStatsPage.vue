@@ -2,22 +2,32 @@
 import { computed, onMounted, ref } from "vue";
 import CommonHeader from "./components/Common_Header.vue";
 import { dateTime, integer } from "./lib/format";
-import { loadSiteAnalyticsSummary } from "./lib/siteAnalytics";
+import { currentSiteVisitorId, loadSiteAnalyticsSummary } from "./lib/siteAnalytics";
 import type { SiteAnalyticsSummary } from "./types";
 
 const tokenStorageKey = "eiketsu.adminStats.token";
+const aliasStorageKey = "eiketsu.adminStats.visitorAliases";
+const embedded = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("embed") === "1";
 const summary = ref<SiteAnalyticsSummary | null>(null);
 const token = ref("");
 const fromDate = ref(defaultFromDate());
 const toDate = ref(todayDate());
 const loading = ref(false);
 const error = ref("");
+const currentVisitorId = ref("");
+const excludeSelf = ref(true);
+const visitorAliases = ref<Record<string, string>>({});
 
 const hasToken = computed(() => token.value.trim().length > 0);
 const totals = computed(() => summary.value?.totals ?? null);
 const generatedAt = computed(() => summary.value ? dateTime(summary.value.generatedAt) : "-");
+const excludedVisitorIds = computed(() => (
+  excludeSelf.value && currentVisitorId.value ? [currentVisitorId.value] : []
+));
 
 onMounted(() => {
+  currentVisitorId.value = currentSiteVisitorId();
+  visitorAliases.value = loadVisitorAliases();
   token.value = window.sessionStorage.getItem(tokenStorageKey) || "";
   if (hasToken.value) {
     void refreshSummary();
@@ -44,7 +54,12 @@ async function refreshSummary(): Promise<void> {
   error.value = "";
   try {
     window.sessionStorage.setItem(tokenStorageKey, token.value.trim());
-    summary.value = await loadSiteAnalyticsSummary(token.value.trim(), fromDate.value, toDate.value);
+    summary.value = await loadSiteAnalyticsSummary(
+      token.value.trim(),
+      fromDate.value,
+      toDate.value,
+      excludedVisitorIds.value
+    );
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : "站长统计读取失败";
   } finally {
@@ -57,16 +72,60 @@ function clearToken(): void {
   token.value = "";
   summary.value = null;
 }
+
+function refreshWhenReady(): void {
+  if (hasToken.value) void refreshSummary();
+}
+
+function loadVisitorAliases(): Record<string, string> {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(aliasStorageKey) || "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+
+    const aliases: Record<string, string> = {};
+    for (const [visitorId, label] of Object.entries(parsed)) {
+      if (!/^[A-Za-z0-9_-]{8,80}$/.test(visitorId) || typeof label !== "string") continue;
+      const normalized = label.trim().slice(0, 32);
+      if (normalized) aliases[visitorId] = normalized;
+    }
+    return aliases;
+  } catch {
+    return {};
+  }
+}
+
+function isCurrentVisitor(visitorId: string): boolean {
+  return Boolean(currentVisitorId.value) && visitorId === currentVisitorId.value;
+}
+
+function visitorLabel(visitorId: string): string {
+  if (isCurrentVisitor(visitorId)) return "站长本机";
+  return visitorAliases.value[visitorId] || "匿名访客";
+}
+
+function updateVisitorAlias(visitorId: string, event: Event): void {
+  const label = (event.currentTarget as HTMLInputElement).value.trim().slice(0, 32);
+  const aliases = { ...visitorAliases.value };
+  if (label) aliases[visitorId] = label;
+  else delete aliases[visitorId];
+  visitorAliases.value = aliases;
+
+  try {
+    window.localStorage.setItem(aliasStorageKey, JSON.stringify(aliases));
+  } catch {
+    // 浏览器禁用存储时仍保留当前页面内的备注。
+  }
+}
 </script>
 
 <template>
-  <CommonHeader current="adminStats" />
-  <main class="Common_PageShell AdminStatsPage">
+  <CommonHeader v-if="!embedded" current="adminStats" />
+  <main class="Common_PageShell AdminStatsPage" :class="{ AdminStatsPage_Embedded: embedded }">
     <section class="AdminStatsPage_Hero" aria-labelledby="admin-stats-title">
       <div>
         <p class="Common_Eyebrow">Admin</p>
-        <h1 id="admin-stats-title">站长统计</h1>
-        <p>匿名访客行为统计，不展示 token、cookie、原始 IP 或完整来源 URL。</p>
+        <h1 id="admin-stats-title">用户行为</h1>
+        <p>区分站长本机与匿名访客，不展示 token、cookie、原始 IP 或完整来源 URL。</p>
       </div>
       <strong v-if="summary">{{ generatedAt }}</strong>
     </section>
@@ -88,6 +147,21 @@ function clearToken(): void {
       <button type="button" class="AdminStatsPage_SecondaryButton" @click="clearToken">清除密钥</button>
     </section>
 
+    <section class="AdminStatsPage_Identity" aria-label="站长本机身份">
+      <div>
+        <span>当前浏览器</span>
+        <strong>站长本机</strong>
+      </div>
+      <code>{{ currentVisitorId || "未生成 visitorId" }}</code>
+      <label>
+        <input v-model="excludeSelf" type="checkbox" @change="refreshWhenReady" />
+        <span>
+          <strong>汇总排除本机</strong>
+          <small>只统计外部访客</small>
+        </span>
+      </label>
+    </section>
+
     <section v-if="error" class="Common_StatusPanel Common_StatusPanel_Error">{{ error }}</section>
     <section v-else-if="loading" class="Common_StatusPanel">正在读取站长统计...</section>
 
@@ -96,7 +170,7 @@ function clearToken(): void {
         <article>
           <span>访客</span>
           <strong>{{ integer(totals.visitors) }}</strong>
-          <small>匿名 visitorId</small>
+          <small>{{ excludeSelf ? "已排除站长本机" : "包含站长本机" }}</small>
         </article>
         <article>
           <span>会话</span>
@@ -179,6 +253,7 @@ function clearToken(): void {
           <table class="Common_TableLayout AdminStatsPage_Table">
             <thead>
               <tr>
+                <th>身份 / 备注</th>
                 <th>visitorId</th>
                 <th>事件</th>
                 <th>会话</th>
@@ -188,6 +263,20 @@ function clearToken(): void {
             </thead>
             <tbody>
               <tr v-for="item in summary.visitors" :key="item.visitorId">
+                <td>
+                  <div class="AdminStatsPage_IdentityCell">
+                    <strong :data-self="isCurrentVisitor(item.visitorId)">{{ visitorLabel(item.visitorId) }}</strong>
+                    <input
+                      v-if="!isCurrentVisitor(item.visitorId)"
+                      :value="visitorAliases[item.visitorId] || ''"
+                      type="text"
+                      maxlength="32"
+                      :aria-label="`备注 ${item.visitorId}`"
+                      placeholder="添加本地备注"
+                      @change="updateVisitorAlias(item.visitorId, $event)"
+                    />
+                  </div>
+                </td>
                 <td class="AdminStatsPage_Mono">{{ item.visitorId }}</td>
                 <td>{{ integer(item.events) }}</td>
                 <td>{{ integer(item.sessions) }}</td>
@@ -210,6 +299,7 @@ function clearToken(): void {
             <thead>
               <tr>
                 <th>时间</th>
+                <th>身份</th>
                 <th>事件</th>
                 <th>页面</th>
                 <th>目标</th>
@@ -218,6 +308,7 @@ function clearToken(): void {
             <tbody>
               <tr v-for="item in summary.recent" :key="`${item.occurredAt}-${item.visitorId}-${item.eventType}`">
                 <td>{{ dateTime(item.occurredAt) }}</td>
+                <td>{{ visitorLabel(item.visitorId) }}</td>
                 <td>{{ item.eventType }}</td>
                 <td>{{ item.page }}</td>
                 <td>{{ item.target || "-" }}</td>
@@ -252,6 +343,13 @@ function clearToken(): void {
 <style scoped>
 .AdminStatsPage {
   padding-top: 18px;
+}
+
+.AdminStatsPage_Embedded {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding-top: 0;
 }
 
 .AdminStatsPage_Hero {
@@ -336,6 +434,60 @@ function clearToken(): void {
   background: #fffaf0 !important;
 }
 
+.AdminStatsPage_Identity {
+  margin-top: var(--space-sm);
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-panel);
+}
+
+.AdminStatsPage_Identity > div span,
+.AdminStatsPage_Identity > div strong,
+.AdminStatsPage_Identity label span,
+.AdminStatsPage_Identity label small {
+  display: block;
+}
+
+.AdminStatsPage_Identity > div span,
+.AdminStatsPage_Identity label small {
+  color: var(--color-muted);
+  font-family: var(--font-control);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.AdminStatsPage_Identity > div strong,
+.AdminStatsPage_Identity label strong {
+  color: var(--color-brown);
+  font-family: var(--font-control);
+}
+
+.AdminStatsPage_Identity code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.AdminStatsPage_Identity label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  cursor: pointer;
+}
+
+.AdminStatsPage_Identity label input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--color-primary);
+}
+
 .AdminStatsPage_SummaryGrid {
   margin-top: var(--space-md);
   display: grid;
@@ -401,6 +553,35 @@ function clearToken(): void {
   font-size: 12px;
 }
 
+.AdminStatsPage_IdentityCell {
+  display: grid;
+  gap: 6px;
+}
+
+.AdminStatsPage_IdentityCell strong {
+  color: var(--color-brown);
+  font-family: var(--font-control);
+}
+
+.AdminStatsPage_IdentityCell strong[data-self="true"] {
+  color: var(--color-primary);
+}
+
+.AdminStatsPage_IdentityCell input {
+  width: 150px;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--color-border);
+  color: var(--color-ink);
+  background: var(--color-panel-strong);
+  font-family: var(--font-control);
+}
+
+.AdminStatsPage_IdentityCell input:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 1px;
+}
+
 .AdminStatsPage_DeviceGrid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -411,7 +592,8 @@ function clearToken(): void {
   .AdminStatsPage_Control,
   .AdminStatsPage_SummaryGrid,
   .AdminStatsPage_Grid,
-  .AdminStatsPage_DeviceGrid {
+  .AdminStatsPage_DeviceGrid,
+  .AdminStatsPage_Identity {
     grid-template-columns: 1fr;
   }
 
