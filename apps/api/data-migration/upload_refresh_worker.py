@@ -128,10 +128,11 @@ def run_upload_refresh_once(
     clock: Callable[[], datetime] | None = None,
 ) -> dict[str, Any]:
     now = _normalise_utc((clock or _utc_now)())
+    retry_state = _read_refresh_retry(config.status_file)
     try:
         latest_state = (latest_upload_reader or build_latest_upload_reader(config))()
     except Exception as exc:
-        return _record_failure_status(config, f"upload refresh check failed: {exc}")
+        return _record_failure_status(config, f"upload refresh check failed: {exc}", retry_state)
 
     latest_upload = _latest_upload_from_state(latest_state)
     latest_battle_festival_upload = _latest_battle_festival_upload_from_state(latest_state)
@@ -164,7 +165,6 @@ def run_upload_refresh_once(
             "pendingUploads": [],
         }
 
-    retry_state = _read_refresh_retry(config.status_file)
     if _retry_is_active(retry_state, pending_uploads, now):
         return {
             "status": "skipped",

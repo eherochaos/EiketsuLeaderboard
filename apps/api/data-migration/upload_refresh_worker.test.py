@@ -436,6 +436,32 @@ class UploadRefreshWorkerTests(unittest.TestCase):
             status = json.loads(status_text)
             self.assertEqual(status["refresh"]["status"], "failed")
 
+    def test_reader_failure_preserves_existing_refresh_backoff(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = self._config(root)
+            retry = {
+                "mode": "circuit_open",
+                "pendingUploads": [{"scope": "global", "uploadId": 11, "uploadWatermark": 0}],
+                "failureCount": 3,
+                "nextRetryAt": "2026-07-11T13:00:00+00:00",
+                "delaySeconds": 1800,
+            }
+            self._write_status_payload(
+                config.status_file,
+                {"refresh": {"status": "failed"}, "refreshRetry": retry},
+            )
+
+            result = run_upload_refresh_once(
+                config,
+                latest_upload_reader=lambda: (_ for _ in ()).throw(RuntimeError("database unavailable")),
+                clock=lambda: datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc),
+            )
+
+            self.assertEqual(result["status"], "failed")
+            status = json.loads(config.status_file.read_text(encoding="utf-8"))
+            self.assertEqual(status["refreshRetry"], retry)
+
     def test_snapshot_refresher_passes_tier_list_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
