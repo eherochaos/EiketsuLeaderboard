@@ -490,7 +490,8 @@ export function createLeaderboardSnapshotServer(options = {}) {
       try {
         writeJson(response, 200, await readSiteAnalyticsSummary(siteAnalyticsFile, {
           from: url.searchParams.get("from") || "",
-          to: url.searchParams.get("to") || ""
+          to: url.searchParams.get("to") || "",
+          excludeVisitorIds: url.searchParams.getAll("excludeVisitorId")
         }));
       } catch (error) {
         console.error(publicError(error, "site analytics failed"));

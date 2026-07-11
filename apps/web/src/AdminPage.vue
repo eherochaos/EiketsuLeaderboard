@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import CommonHeader from "./components/Common_Header.vue";
 import { dateOnly, dateTime, integer } from "./lib/format";
 import {
@@ -38,6 +38,52 @@ interface AdminSourceCard {
   error: string;
 }
 
+type AdminSection = "overview" | "invites" | "updates" | "behavior";
+
+interface AdminTab {
+  key: AdminSection;
+  label: string;
+  eyebrow: string;
+  description: string;
+  frameSrc?: string;
+}
+
+const ADMIN_TABS: AdminTab[] = [
+  {
+    key: "overview",
+    label: "运维总览",
+    eyebrow: "Overview",
+    description: "查看公开数据源、刷新结果与索引覆盖情况。",
+  },
+  {
+    key: "invites",
+    label: "邀请码",
+    eyebrow: "Invites",
+    description: "创建、停用并查看邀请码使用状态。",
+    frameSrc: "/admin/invites",
+  },
+  {
+    key: "updates",
+    label: "数据更新",
+    eyebrow: "Updates",
+    description: "进入服务器已有的数据更新与维护操作。",
+    frameSrc: "/admin/updates",
+  },
+  {
+    key: "behavior",
+    label: "用户行为",
+    eyebrow: "Behavior",
+    description: "识别站长本机，并查看匿名访客的页面与操作记录。",
+    frameSrc: "/admin-stats/?embed=1",
+  },
+];
+
+function initialSection(): AdminSection {
+  if (typeof window === "undefined") return "overview";
+  const requested = new URLSearchParams(window.location.search).get("section");
+  return ADMIN_TABS.some((tab) => tab.key === requested) ? requested as AdminSection : "overview";
+}
+
 function initialSource<T>(): AdminSourceState<T> {
   return { data: null, loading: true, error: "" };
 }
@@ -50,6 +96,11 @@ const sources = reactive({
   matchSearch: initialSource<MatchSearchOptions>(),
   refresh: initialSource<LeaderboardRefreshStatus>(),
 });
+const activeSection = ref<AdminSection>(initialSection());
+const frameLoaded = ref(false);
+const frameRevision = ref(0);
+const activeTab = computed(() => ADMIN_TABS.find((tab) => tab.key === activeSection.value) || ADMIN_TABS[0]);
+const activeFrameSrc = computed(() => activeTab.value.frameSrc || "");
 
 const isLoading = computed(() => Object.values(sources).some((source) => source.loading));
 const refreshStatus = computed(() => sources.refresh.data);
@@ -161,6 +212,25 @@ async function refreshAll(): Promise<void> {
   ]);
 }
 
+function selectSection(section: AdminSection): void {
+  activeSection.value = section;
+  frameLoaded.value = false;
+
+  const url = new URL(window.location.href);
+  if (section === "overview") {
+    url.searchParams.delete("section");
+    if (sources.versionOptions.loading) void refreshAll();
+  } else {
+    url.searchParams.set("section", section);
+  }
+  window.history.replaceState({}, "", url);
+}
+
+function reloadFrame(): void {
+  frameLoaded.value = false;
+  frameRevision.value += 1;
+}
+
 function sourcePresentation<T>(source: AdminSourceState<T>, detail: string, meta: string): Omit<AdminSourceCard, "key" | "label" | "endpoint"> {
   if (source.loading) {
     return { status: "读取中", tone: "neutral", detail: "读取中", meta: "正在请求数据", error: "" };
@@ -214,7 +284,7 @@ function uploadUserLabel(upload: LeaderboardRefreshUpload): string {
 }
 
 onMounted(() => {
-  void refreshAll();
+  if (activeSection.value === "overview") void refreshAll();
 });
 </script>
 
@@ -223,21 +293,41 @@ onMounted(() => {
   <main class="Common_PageShell AdminPage">
     <section class="AdminPage_Intro" aria-labelledby="admin-page-title">
       <div>
-        <p class="Common_Eyebrow">Admin / Maintenance</p>
-        <h1 id="admin-page-title">运维总览</h1>
-        <p class="AdminPage_IntroNote">集中查看公开数据源、刷新结果与索引覆盖情况。</p>
+        <p class="Common_Eyebrow">Webmaster / Maintenance</p>
+        <h1 id="admin-page-title">站长管理</h1>
+        <p class="AdminPage_IntroNote">数据维护、邀请码、更新与用户行为统一入口。</p>
       </div>
-      <div class="AdminPage_RefreshStatus" :data-tone="refreshTone" aria-live="polite">
+      <div v-if="activeSection === 'overview'" class="AdminPage_RefreshStatus" :data-tone="refreshTone" aria-live="polite">
         <span>刷新状态</span>
         <strong>{{ refreshLabel }}</strong>
         <small>{{ refreshMeta }}</small>
       </div>
-      <button class="AdminPage_RefreshButton" type="button" :disabled="isLoading" @click="refreshAll">
+      <div v-else class="AdminPage_RefreshStatus" data-tone="neutral">
+        <span>当前模块</span>
+        <strong>{{ activeTab.label }}</strong>
+        <small>维护操作由服务器管理员会话保护</small>
+      </div>
+      <button v-if="activeSection === 'overview'" class="AdminPage_RefreshButton" type="button" :disabled="isLoading" @click="refreshAll">
         {{ isLoading ? "读取中..." : "重新读取" }}
       </button>
+      <a v-else class="AdminPage_RefreshButton" :href="activeFrameSrc" target="_blank" rel="noreferrer">新窗口打开</a>
     </section>
 
-    <section class="AdminPage_MetricGrid" aria-label="核心数据">
+    <nav class="AdminPage_Tabs" aria-label="站长管理模块">
+      <button
+        v-for="tab in ADMIN_TABS"
+        :key="tab.key"
+        type="button"
+        :aria-current="activeSection === tab.key ? 'page' : undefined"
+        @click="selectSection(tab.key)"
+      >
+        <small>{{ tab.eyebrow }}</small>
+        <strong>{{ tab.label }}</strong>
+      </button>
+    </nav>
+
+    <template v-if="activeSection === 'overview'">
+      <section class="AdminPage_MetricGrid" aria-label="核心数据">
       <article class="AdminPage_Metric" :aria-busy="sources.versionOptions.loading">
         <span>当前版本</span>
         <strong>{{ displayValue(sources.versionOptions, currentVersion) }}</strong>
@@ -258,9 +348,9 @@ onMounted(() => {
         <strong>{{ displayValue(sources.matchSearch, integer(matchCount)) }}</strong>
         <small>含视频 {{ integer(videoMatchCount) }} 场</small>
       </article>
-    </section>
+      </section>
 
-    <section class="Common_SectionBlock AdminPage_Section" aria-labelledby="source-title">
+      <section class="Common_SectionBlock AdminPage_Section" aria-labelledby="source-title">
       <div class="Common_SectionHeading">
         <div>
           <p class="Common_Eyebrow">Data Sources</p>
@@ -282,9 +372,9 @@ onMounted(() => {
           <p v-if="card.error" class="AdminPage_SourceError">{{ card.error }}</p>
         </article>
       </div>
-    </section>
+      </section>
 
-    <section class="Common_TableCard AdminPage_Section" aria-labelledby="operation-title">
+      <section class="Common_TableCard AdminPage_Section" aria-labelledby="operation-title">
       <div class="Common_SectionHeading">
         <div>
           <p class="Common_Eyebrow">Recent Operations</p>
@@ -349,9 +439,9 @@ onMounted(() => {
           <p v-if="!recentRuns.length" class="AdminPage_Empty">暂无 Run 记录</p>
         </div>
       </div>
-    </section>
+      </section>
 
-    <section class="Common_SectionBlock AdminPage_Section" aria-labelledby="quick-link-title">
+      <section class="Common_SectionBlock AdminPage_Section" aria-labelledby="quick-link-title">
       <div class="Common_SectionHeading">
         <div>
           <p class="Common_Eyebrow">Quick Links</p>
@@ -364,6 +454,30 @@ onMounted(() => {
           <span aria-hidden="true">↗</span>
         </a>
       </nav>
+      </section>
+    </template>
+
+    <section v-else class="Common_SectionBlock AdminPage_FrameSection" aria-labelledby="admin-frame-title">
+      <div class="Common_SectionHeading">
+        <div>
+          <p class="Common_Eyebrow">{{ activeTab.eyebrow }}</p>
+          <h2 id="admin-frame-title">{{ activeTab.label }}</h2>
+        </div>
+        <button class="AdminPage_FrameReload" type="button" @click="reloadFrame">重新加载</button>
+      </div>
+      <p class="AdminPage_FrameNote">{{ activeTab.description }} 未登录时会先显示服务器管理员登录页。</p>
+      <div class="AdminPage_FrameShell" :aria-busy="!frameLoaded">
+        <p v-if="!frameLoaded" class="AdminPage_FrameLoading">正在载入 {{ activeTab.label }}...</p>
+        <iframe
+          :key="frameRevision"
+          :src="activeFrameSrc"
+          :title="`${activeTab.label}服务器管理页`"
+          @load="frameLoaded = true"
+        />
+      </div>
+      <p class="AdminPage_FrameFallback">
+        页面若被浏览器拦截，请使用上方“新窗口打开”；登录和写入仍由服务器端校验。
+      </p>
     </section>
   </main>
 </template>
@@ -434,12 +548,16 @@ onMounted(() => {
 .AdminPage_RefreshButton {
   min-height: 44px;
   padding: 0 var(--space-lg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--color-primary);
   border-radius: var(--radius-md);
   color: var(--color-panel-strong);
   background: var(--color-primary);
   font-family: var(--font-control);
   font-weight: 700;
+  text-decoration: none;
   white-space: nowrap;
 }
 
@@ -457,9 +575,63 @@ onMounted(() => {
 }
 
 .AdminPage_RefreshButton:focus-visible,
-.AdminPage_QuickLink:focus-visible {
+.AdminPage_QuickLink:focus-visible,
+.AdminPage_Tabs button:focus-visible,
+.AdminPage_FrameReload:focus-visible {
   outline: 2px solid var(--color-gold);
   outline-offset: 2px;
+}
+
+.AdminPage_Tabs {
+  margin-top: var(--space-md);
+  padding: var(--space-xs);
+  display: flex;
+  gap: var(--space-xs);
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  background: var(--color-panel);
+  box-shadow: var(--shadow-tight);
+}
+
+.AdminPage_Tabs button {
+  min-width: 132px;
+  min-height: 58px;
+  padding: var(--space-sm) var(--space-md);
+  flex: 1 0 132px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  color: var(--color-muted);
+  background: transparent;
+  text-align: left;
+}
+
+.AdminPage_Tabs button:hover {
+  color: var(--color-brown);
+  background: var(--color-panel-strong);
+}
+
+.AdminPage_Tabs button[aria-current="page"] {
+  border-bottom-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-panel-strong);
+}
+
+.AdminPage_Tabs small,
+.AdminPage_Tabs strong {
+  display: block;
+  font-family: var(--font-control);
+}
+
+.AdminPage_Tabs small {
+  margin-bottom: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.AdminPage_Tabs strong {
+  font-size: var(--font-size-md);
 }
 
 .AdminPage_MetricGrid {
@@ -673,6 +845,69 @@ onMounted(() => {
   background: var(--color-panel-strong);
 }
 
+.AdminPage_FrameSection {
+  margin-top: var(--space-lg);
+}
+
+.AdminPage_FrameNote,
+.AdminPage_FrameFallback {
+  color: var(--color-muted);
+}
+
+.AdminPage_FrameNote {
+  margin: 0 0 var(--space-md);
+}
+
+.AdminPage_FrameFallback {
+  margin: var(--space-sm) 0 0;
+  font-size: var(--font-size-sm);
+}
+
+.AdminPage_FrameReload {
+  min-height: 42px;
+  padding: 0 var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-brown);
+  background: var(--color-panel);
+  font-family: var(--font-control);
+  font-weight: 700;
+}
+
+.AdminPage_FrameReload:hover {
+  border-color: var(--color-gold);
+  color: var(--color-primary);
+}
+
+.AdminPage_FrameShell {
+  position: relative;
+  min-height: 760px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  background: var(--color-panel-strong);
+}
+
+.AdminPage_FrameShell iframe {
+  width: 100%;
+  height: 760px;
+  display: block;
+  border: 0;
+  background: var(--color-panel-strong);
+}
+
+.AdminPage_FrameLoading {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  color: var(--color-muted);
+  background: var(--color-panel-strong);
+  font-family: var(--font-control);
+  font-weight: 700;
+}
+
 @media (max-width: 1024px) {
   .AdminPage_Intro {
     grid-template-columns: minmax(0, 1fr) 190px;
@@ -719,6 +954,28 @@ onMounted(() => {
   .AdminPage_Metric strong {
     font-size: var(--font-size-lg);
   }
+
+  .AdminPage_Tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    overflow: visible;
+  }
+
+  .AdminPage_Tabs button {
+    min-width: 0;
+    padding: var(--space-sm) 5px;
+    font-size: 14px;
+  }
+
+  .AdminPage_Tabs small {
+    font-size: 9px;
+    letter-spacing: 0.02em;
+  }
+
+  .AdminPage_FrameShell,
+  .AdminPage_FrameShell iframe {
+    min-height: 680px;
+    height: 680px;
+  }
 }
 </style>
-

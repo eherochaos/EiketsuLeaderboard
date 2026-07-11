@@ -45,9 +45,9 @@ export const REVIEW_PAGES = [
     scenarios: [{ id: "top", label: "首屏" }]
   },
   {
-    id: "admin",
-    label: "管理员运维总览",
-    path: "/admin/",
+    id: "webmaster",
+    label: "站长管理",
+    path: "/webmaster/",
     scenarios: [{ id: "top", label: "首屏" }]
   }
 ];
