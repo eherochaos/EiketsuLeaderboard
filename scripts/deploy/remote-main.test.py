@@ -123,17 +123,17 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn("--battle-festival-configs-file", worker_install)
         self.assertIn("BATTLE_FESTIVAL_SNAPSHOT_FILE", worker_install)
         self.assertIn("BATTLE_FESTIVAL_CONFIGS_FILE", worker_install)
-        self.assertIn("--node-container", worker_install)
-        self.assertIn("DEPLOY_NODE_API_CONTAINER", worker_install)
+        self.assertIn("--node-isolated", worker_install)
+        self.assertIn("--node-memory-limit", worker_install)
+        self.assertIn("UPLOAD_REFRESH_NODE_MEMORY_LIMIT", worker_install)
 
     def test_upload_worker_waits_for_dependency_containers(self) -> None:
         worker_install = self.function_body("install_upload_refresh_worker")
         self.assertIn("wait_for_container", worker_install)
         self.assertIn("UPLOAD_REFRESH_CONTAINER_WAIT_SECONDS:-120", worker_install)
-        self.assertIn("DEPLOY_NODE_API_CONTAINER", worker_install)
         self.assertIn("DEPLOY_EXPORT_CONTAINER", worker_install)
-        self.assertIn('wait_for_container "$node_api_container"', worker_install)
         self.assertIn('wait_for_container "$export_container"', worker_install)
+        self.assertNotIn('wait_for_container "$node_api_container"', worker_install)
         self.assertLess(
             worker_install.index('wait_for_container "$export_container"'),
             worker_install.index('python3 apps/api/data-migration/upload_refresh_worker.py "${args[@]}"'),
@@ -144,7 +144,7 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn('if [ -z "${NODE_OPTIONS:-}" ]; then', worker_install)
         self.assertIn('export NODE_OPTIONS="${UPLOAD_REFRESH_NODE_OPTIONS:---max-old-space-size=2048}"', worker_install)
 
-    def test_upload_worker_starts_after_node_api_container(self) -> None:
+    def test_upload_worker_installs_after_api_smoke(self) -> None:
         self.assert_order(
             "log 'start leaderboard node api'",
             "log 'smoke check api routes'",

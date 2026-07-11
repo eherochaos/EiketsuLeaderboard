@@ -566,6 +566,35 @@ class UploadRefreshWorkerTests(unittest.TestCase):
             self.assertIn("NODE_OPTIONS=--max-old-space-size=4096", captured["command"])
             self.assertNotIn("NODE_OPTIONS=/work/--max-old-space-size=4096", captured["command"])
 
+    def test_docker_node_runner_isolates_node_process_with_memory_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            captured: dict[str, list[str]] = {}
+            original_run_checked = upload_refresh_worker._run_checked
+
+            def fake_run_checked(command: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
+                captured["command"] = command
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            upload_refresh_worker._run_checked = fake_run_checked
+            try:
+                runner = upload_refresh_worker.DockerNodeRunner(
+                    root,
+                    node_container="online-node-api",
+                    isolated=True,
+                    memory_limit="2g",
+                )
+                runner(
+                    ["node", str(root / "apps/api/leaderboard-snapshot/refresh-snapshot.mjs")],
+                    {"NODE_OPTIONS": "--max-old-space-size=2048"},
+                )
+            finally:
+                upload_refresh_worker._run_checked = original_run_checked
+
+            self.assertEqual(captured["command"][:5], ["docker", "run", "--rm", "--memory", "2g"])
+            self.assertNotIn("online-node-api", captured["command"])
+            self.assertIn("node:22-alpine", captured["command"])
+
     def _config(self, root: Path) -> UploadRefreshConfig:
         return UploadRefreshConfig(
             repo_root=root,

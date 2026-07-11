@@ -115,6 +115,8 @@ class UploadRefreshConfig:
     live_status_file: Path | None = None
     node_bin: str = "node"
     node_container: str = ""
+    node_isolated: bool = False
+    node_memory_limit: str = ""
     postgres_container: str = ""
     export_container: str = ""
     export_asset_root: Path | None = None
@@ -274,7 +276,12 @@ def read_latest_upload_from_local_postgres() -> dict[str, Any] | None:
 def build_snapshot_refresher(config: UploadRefreshConfig) -> SnapshotRefresher:
     exporter = build_docker_exporter(config) if config.export_container else None
     run_refresher = build_docker_run_refresher(config) if config.export_container else None
-    runner = DockerNodeRunner(config.repo_root, node_container=config.node_container)
+    runner = DockerNodeRunner(
+        config.repo_root,
+        node_container=config.node_container,
+        isolated=config.node_isolated,
+        memory_limit=config.node_memory_limit,
+    )
 
     def refresh() -> dict[str, Any]:
         return refresh_static_snapshot_after_upload(
@@ -359,12 +366,20 @@ def build_docker_run_refresher(config: UploadRefreshConfig) -> Callable[[], dict
 
 
 class DockerNodeRunner:
-    def __init__(self, repo_root: Path, node_container: str = "") -> None:
+    def __init__(
+        self,
+        repo_root: Path,
+        node_container: str = "",
+        isolated: bool = False,
+        memory_limit: str = "",
+    ) -> None:
         self.repo_root = repo_root.resolve()
         self.node_container = node_container
+        self.isolated = isolated
+        self.memory_limit = str(memory_limit or "").strip()
 
     def __call__(self, command: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-        if shutil.which(command[0]):
+        if not self.isolated and shutil.which(command[0]):
             completed = subprocess.run(command, check=False, env=env, text=True, capture_output=True)
             if completed.returncode != 0:
                 raise RuntimeError(_format_command_failure(command, completed))
@@ -377,7 +392,7 @@ class DockerNodeRunner:
                 docker_env[key] = value
             elif key.startswith("LEADERBOARD_"):
                 docker_env[key] = self._to_work_path(value)
-        if self.node_container:
+        if self.node_container and not self.isolated:
             docker_command = ["docker", "exec", "-w", "/work"]
             for key, value in docker_env.items():
                 docker_command.extend(["-e", f"{key}={value}"])
@@ -388,13 +403,18 @@ class DockerNodeRunner:
             "docker",
             "run",
             "--rm",
-            "--user",
-            f"{os.getuid()}:{os.getgid()}",
-            "-v",
-            f"{self.repo_root}:/work",
-            "-w",
-            "/work",
         ]
+        if self.memory_limit:
+            docker_command.extend(["--memory", self.memory_limit])
+        docker_command.extend(
+            [
+                *_docker_user_args(),
+                "-v",
+                f"{self.repo_root}:/work",
+                "-w",
+                "/work",
+            ]
+        )
         for key, value in docker_env.items():
             docker_command.extend(["-e", f"{key}={value}"])
         docker_command.extend(["node:22-alpine", "node", *docker_args])
@@ -601,6 +621,14 @@ def _run_checked(command: list[str], check: bool = True) -> subprocess.Completed
     return completed
 
 
+def _docker_user_args() -> list[str]:
+    getuid = getattr(os, "getuid", None)
+    getgid = getattr(os, "getgid", None)
+    if not callable(getuid) or not callable(getgid):
+        return []
+    return ["--user", f"{getuid()}:{getgid()}"]
+
+
 def _format_command_failure(command: list[str], completed: subprocess.CompletedProcess[str]) -> str:
     return (
         f"command failed with exit code {completed.returncode}; "
@@ -636,6 +664,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--live-status-file", type=Path, default=None)
     parser.add_argument("--node-bin", default="node")
     parser.add_argument("--node-container", default="")
+    parser.add_argument("--node-isolated", action="store_true")
+    parser.add_argument("--node-memory-limit", default="")
     parser.add_argument("--postgres-container", default="")
     parser.add_argument("--export-container", default="")
     parser.add_argument("--export-asset-root", type=Path, default=None)
@@ -662,6 +692,8 @@ def config_from_args(args: argparse.Namespace) -> UploadRefreshConfig:
         live_status_file=_resolve(repo_root, args.live_status_file) if args.live_status_file else None,
         node_bin=args.node_bin,
         node_container=args.node_container,
+        node_isolated=args.node_isolated,
+        node_memory_limit=args.node_memory_limit,
         postgres_container=args.postgres_container,
         export_container=export_container,
         export_asset_root=args.export_asset_root,
