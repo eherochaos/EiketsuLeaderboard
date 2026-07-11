@@ -357,7 +357,9 @@ install_upload_refresh_worker() {
     printf '#!/usr/bin/env bash\n'
     printf 'set -euo pipefail\n'
     printf 'cd %s\n' "$(shell_quote "$DEPLOY_PATH")"
-    printf 'node_api_container=%s\n' "$(shell_quote "$DEPLOY_NODE_API_CONTAINER")"
+    printf 'if [ -z "${NODE_OPTIONS:-}" ]; then\n'
+    printf '  export NODE_OPTIONS="${UPLOAD_REFRESH_NODE_OPTIONS:---max-old-space-size=2048}"\n'
+    printf 'fi\n'
     printf 'export_container=%s\n' "$(shell_quote "$DEPLOY_EXPORT_CONTAINER")"
     printf 'wait_for_container() {\n'
     printf '  local container="$1"\n'
@@ -384,7 +386,8 @@ install_upload_refresh_worker() {
     printf '  --battle-festival-configs-file %s\n' "$(shell_quote "$BATTLE_FESTIVAL_CONFIGS_FILE")"
     printf '  --status-file %s\n' "$(shell_quote "$STATUS_FILE")"
     printf '  --node-bin node\n'
-    printf '  --node-container %s\n' "$(shell_quote "$DEPLOY_NODE_API_CONTAINER")"
+    printf '  --node-isolated\n'
+    printf '  --node-memory-limit %s\n' "$(shell_quote "${UPLOAD_REFRESH_NODE_MEMORY_LIMIT:-2g}")"
     printf '  --postgres-container %s\n' "$(shell_quote "$DEPLOY_EXPORT_CONTAINER")"
     printf '  --export-container %s\n' "$(shell_quote "$DEPLOY_EXPORT_CONTAINER")"
     printf '  --refresh-reason %s\n' "$(shell_quote 'upload refresh completed')"
@@ -398,7 +401,6 @@ install_upload_refresh_worker() {
     if [ -n "$DEPLOY_LIVE_STATUS_FILE" ]; then
       printf 'args+=(--live-status-file %s)\n' "$(shell_quote "$DEPLOY_LIVE_STATUS_FILE")"
     fi
-    printf 'wait_for_container "$node_api_container"\n'
     printf 'wait_for_container "$export_container"\n'
     printf 'python3 apps/api/data-migration/upload_refresh_worker.py "${args[@]}"\n'
   } > "$worker_script"

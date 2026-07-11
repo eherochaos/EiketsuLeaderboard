@@ -9,7 +9,7 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +21,8 @@ from refresh_static_snapshot_after_upload import (
 
 
 DEFAULT_REFRESH_REASON = "upload refresh completed"
+RETRY_DELAYS_SECONDS = (5 * 60, 15 * 60, 30 * 60)
+CIRCUIT_OPEN_AFTER_FAILURES = 3
 
 LatestUploadReader = Callable[[], dict[str, Any] | None]
 SnapshotRefresher = Callable[[], dict[str, Any]]
@@ -113,6 +115,8 @@ class UploadRefreshConfig:
     live_status_file: Path | None = None
     node_bin: str = "node"
     node_container: str = ""
+    node_isolated: bool = False
+    node_memory_limit: str = ""
     postgres_container: str = ""
     export_container: str = ""
     export_asset_root: Path | None = None
@@ -123,11 +127,14 @@ def run_upload_refresh_once(
     config: UploadRefreshConfig,
     latest_upload_reader: LatestUploadReader | None = None,
     refresher: SnapshotRefresher | None = None,
+    clock: Callable[[], datetime] | None = None,
 ) -> dict[str, Any]:
+    now = _normalise_utc((clock or _utc_now)())
+    retry_state = _read_refresh_retry(config.status_file)
     try:
         latest_state = (latest_upload_reader or build_latest_upload_reader(config))()
     except Exception as exc:
-        return _record_failure_status(config, f"upload refresh check failed: {exc}")
+        return _record_failure_status(config, f"upload refresh check failed: {exc}", retry_state)
 
     latest_upload = _latest_upload_from_state(latest_state)
     latest_battle_festival_upload = _latest_battle_festival_upload_from_state(latest_state)
@@ -160,12 +167,41 @@ def run_upload_refresh_once(
             "pendingUploads": [],
         }
 
+    if _retry_is_active(retry_state, pending_uploads, now):
+        return {
+            "status": "skipped",
+            "reason": "refresh circuit open" if retry_state.get("mode") == "circuit_open" else "refresh backoff",
+            "uploadId": upload_id,
+            "uploadWatermark": watermark,
+            "battleFestivalUploadId": battle_festival_upload_id,
+            "battleFestivalSnapshotUploadId": battle_festival_snapshot_upload_id,
+            "pendingUploads": pending_uploads,
+            "refreshRetry": retry_state,
+        }
+
     try:
         refresh_result = (refresher or build_snapshot_refresher(config))()
     except Exception as exc:
-        return _record_failure_status(config, f"upload refresh failed: {exc}")
+        retry_state = _next_refresh_retry(retry_state, pending_uploads, now)
+        return _record_failure_status(config, f"upload refresh failed: {exc}", retry_state)
 
     refresh_status = str(refresh_result.get("status") or "completed")
+    if refresh_status == "failed":
+        retry_state = _next_refresh_retry(retry_state, pending_uploads, now)
+        reason = str(refresh_result.get("reason") or refresh_result.get("error") or "upload refresh failed")
+        _record_failure_status(config, reason, retry_state)
+        return {
+            "status": "failed",
+            "reason": _sanitize_text(reason),
+            "uploadId": upload_id,
+            "uploadWatermark": watermark,
+            "battleFestivalUploadId": battle_festival_upload_id,
+            "battleFestivalSnapshotUploadId": battle_festival_snapshot_upload_id,
+            "pendingUploads": pending_uploads,
+            "refreshReasons": [str(item.get("scope") or "") for item in pending_uploads],
+            "refresh": refresh_result,
+            "refreshRetry": retry_state,
+        }
     return {
         "status": refresh_status,
         "reason": refresh_result.get("reason") or "",
@@ -240,7 +276,12 @@ def read_latest_upload_from_local_postgres() -> dict[str, Any] | None:
 def build_snapshot_refresher(config: UploadRefreshConfig) -> SnapshotRefresher:
     exporter = build_docker_exporter(config) if config.export_container else None
     run_refresher = build_docker_run_refresher(config) if config.export_container else None
-    runner = DockerNodeRunner(config.repo_root, node_container=config.node_container)
+    runner = DockerNodeRunner(
+        config.repo_root,
+        node_container=config.node_container,
+        isolated=config.node_isolated,
+        memory_limit=config.node_memory_limit,
+    )
 
     def refresh() -> dict[str, Any]:
         return refresh_static_snapshot_after_upload(
@@ -325,12 +366,20 @@ def build_docker_run_refresher(config: UploadRefreshConfig) -> Callable[[], dict
 
 
 class DockerNodeRunner:
-    def __init__(self, repo_root: Path, node_container: str = "") -> None:
+    def __init__(
+        self,
+        repo_root: Path,
+        node_container: str = "",
+        isolated: bool = False,
+        memory_limit: str = "",
+    ) -> None:
         self.repo_root = repo_root.resolve()
         self.node_container = node_container
+        self.isolated = isolated
+        self.memory_limit = str(memory_limit or "").strip()
 
     def __call__(self, command: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-        if shutil.which(command[0]):
+        if not self.isolated and shutil.which(command[0]):
             completed = subprocess.run(command, check=False, env=env, text=True, capture_output=True)
             if completed.returncode != 0:
                 raise RuntimeError(_format_command_failure(command, completed))
@@ -343,7 +392,7 @@ class DockerNodeRunner:
                 docker_env[key] = value
             elif key.startswith("LEADERBOARD_"):
                 docker_env[key] = self._to_work_path(value)
-        if self.node_container:
+        if self.node_container and not self.isolated:
             docker_command = ["docker", "exec", "-w", "/work"]
             for key, value in docker_env.items():
                 docker_command.extend(["-e", f"{key}={value}"])
@@ -354,13 +403,18 @@ class DockerNodeRunner:
             "docker",
             "run",
             "--rm",
-            "--user",
-            f"{os.getuid()}:{os.getgid()}",
-            "-v",
-            f"{self.repo_root}:/work",
-            "-w",
-            "/work",
         ]
+        if self.memory_limit:
+            docker_command.extend(["--memory", self.memory_limit])
+        docker_command.extend(
+            [
+                *_docker_user_args(),
+                "-v",
+                f"{self.repo_root}:/work",
+                "-w",
+                "/work",
+            ]
+        )
         for key, value in docker_env.items():
             docker_command.extend(["-e", f"{key}={value}"])
         docker_command.extend(["node:22-alpine", "node", *docker_args])
@@ -381,7 +435,11 @@ class DockerNodeRunner:
         return "/work" if not str(relative) else f"/work/{relative.as_posix()}"
 
 
-def _record_failure_status(config: UploadRefreshConfig, reason: str) -> dict[str, Any]:
+def _record_failure_status(
+    config: UploadRefreshConfig,
+    reason: str,
+    refresh_retry: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     write_refresh_status_only(
         repo_root=config.repo_root,
         legacy_root=config.legacy_root,
@@ -391,8 +449,72 @@ def _record_failure_status(config: UploadRefreshConfig, reason: str) -> dict[str
         live_status_file=config.live_status_file,
         refresh_status="failed",
         refresh_reason=reason,
+        refresh_retry=refresh_retry,
     )
-    return {"status": "failed", "reason": _sanitize_text(reason)}
+    result = {"status": "failed", "reason": _sanitize_text(reason)}
+    if refresh_retry:
+        result["refreshRetry"] = refresh_retry
+    return result
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _normalise_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _read_refresh_retry(status_file: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(status_file.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+    retry = payload.get("refreshRetry") if isinstance(payload, dict) else None
+    return retry if isinstance(retry, dict) else {}
+
+
+def _parse_retry_time(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return _normalise_utc(datetime.fromisoformat(text.replace("Z", "+00:00")))
+    except ValueError:
+        return None
+
+
+def _retry_is_active(
+    retry_state: dict[str, Any],
+    pending_uploads: list[dict[str, Any]],
+    now: datetime,
+) -> bool:
+    if retry_state.get("pendingUploads") != pending_uploads:
+        return False
+    next_retry_at = _parse_retry_time(retry_state.get("nextRetryAt"))
+    return next_retry_at is not None and next_retry_at > now
+
+
+def _next_refresh_retry(
+    retry_state: dict[str, Any],
+    pending_uploads: list[dict[str, Any]],
+    now: datetime,
+) -> dict[str, Any]:
+    previous_count = 0
+    if retry_state.get("pendingUploads") == pending_uploads:
+        previous_count = _to_int(retry_state.get("failureCount"))
+    failure_count = previous_count + 1
+    delay_seconds = RETRY_DELAYS_SECONDS[min(failure_count - 1, len(RETRY_DELAYS_SECONDS) - 1)]
+    return {
+        "mode": "circuit_open" if failure_count >= CIRCUIT_OPEN_AFTER_FAILURES else "backoff",
+        "pendingUploads": pending_uploads,
+        "failureCount": failure_count,
+        "lastFailedAt": now.isoformat(),
+        "nextRetryAt": (now + timedelta(seconds=delay_seconds)).isoformat(),
+        "delaySeconds": delay_seconds,
+    }
 
 
 def _latest_upload_from_state(state: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -499,6 +621,14 @@ def _run_checked(command: list[str], check: bool = True) -> subprocess.Completed
     return completed
 
 
+def _docker_user_args() -> list[str]:
+    getuid = getattr(os, "getuid", None)
+    getgid = getattr(os, "getgid", None)
+    if not callable(getuid) or not callable(getgid):
+        return []
+    return ["--user", f"{getuid()}:{getgid()}"]
+
+
 def _format_command_failure(command: list[str], completed: subprocess.CompletedProcess[str]) -> str:
     return (
         f"command failed with exit code {completed.returncode}; "
@@ -534,6 +664,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--live-status-file", type=Path, default=None)
     parser.add_argument("--node-bin", default="node")
     parser.add_argument("--node-container", default="")
+    parser.add_argument("--node-isolated", action="store_true")
+    parser.add_argument("--node-memory-limit", default="")
     parser.add_argument("--postgres-container", default="")
     parser.add_argument("--export-container", default="")
     parser.add_argument("--export-asset-root", type=Path, default=None)
@@ -560,6 +692,8 @@ def config_from_args(args: argparse.Namespace) -> UploadRefreshConfig:
         live_status_file=_resolve(repo_root, args.live_status_file) if args.live_status_file else None,
         node_bin=args.node_bin,
         node_container=args.node_container,
+        node_isolated=args.node_isolated,
+        node_memory_limit=args.node_memory_limit,
         postgres_container=args.postgres_container,
         export_container=export_container,
         export_asset_root=args.export_asset_root,

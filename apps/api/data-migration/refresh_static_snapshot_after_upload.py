@@ -25,7 +25,7 @@ DEFAULT_BATTLE_FESTIVAL_CONFIGS_FILE = Path("apps/api/data/battle-festival-confi
 OFFICIAL_CARD_DATA_FILE = "datalist_api_base.json"
 STATUS_SCHEMA_VERSION = 1
 RECENT_STATUS_LIMIT = 20
-DEFAULT_NODE_OPTIONS = "--max-old-space-size=4096"
+DEFAULT_NODE_OPTIONS = "--max-old-space-size=2048"
 REFRESH_LOCK_STALE_SECONDS = 30 * 60
 
 
@@ -164,6 +164,7 @@ def write_refresh_status_only(
     live_status_file: Path | None = None,
     refresh_status: str = "completed",
     refresh_reason: str = "status updated",
+    refresh_retry: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     root = (repo_root or Path.cwd()).resolve()
     legacy = _resolve(root, legacy_root or DEFAULT_LEGACY_ROOT)
@@ -172,7 +173,16 @@ def write_refresh_status_only(
     status_path = _resolve(root, status_file or DEFAULT_STATUS_FILE)
     live_status = _resolve(root, live_status_file) if live_status_file else None
     result = {"status": refresh_status, "reason": _sanitize_text(refresh_reason)}
-    _write_refresh_status(status_path, live_status, legacy, snapshot, battle_festival_snapshot, result, finished_at=_utc_now())
+    _write_refresh_status(
+        status_path,
+        live_status,
+        legacy,
+        snapshot,
+        battle_festival_snapshot,
+        result,
+        finished_at=_utc_now(),
+        refresh_retry=refresh_retry,
+    )
     return result
 
 
@@ -367,6 +377,7 @@ def _write_refresh_status(
     finished_at: str = "",
     export_manifest: dict[str, Any] | None = None,
     run_result: dict[str, Any] | None = None,
+    refresh_retry: dict[str, Any] | None = None,
 ) -> None:
     payload = _build_refresh_status(
         legacy_root,
@@ -377,6 +388,7 @@ def _write_refresh_status(
         finished_at=finished_at,
         export_manifest=export_manifest,
         run_result=run_result,
+        refresh_retry=refresh_retry,
     )
     _atomic_write_json(status_file, payload)
     if live_status_file:
@@ -393,6 +405,7 @@ def _build_refresh_status(
     finished_at: str = "",
     export_manifest: dict[str, Any] | None = None,
     run_result: dict[str, Any] | None = None,
+    refresh_retry: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     generated_at = finished_at or _utc_now()
     safe_refresh = _sanitize_json(refresh_result)
@@ -417,7 +430,7 @@ def _build_refresh_status(
     if battle_festival_refresh_status:
         battle_festival_snapshot["refreshStatus"] = battle_festival_refresh_status
 
-    return {
+    payload = {
         "schemaVersion": STATUS_SCHEMA_VERSION,
         "generatedAt": generated_at,
         "refresh": refresh,
@@ -430,6 +443,9 @@ def _build_refresh_status(
         "latestUpload": recent_uploads[0] if recent_uploads else None,
         "recentUploads": recent_uploads,
     }
+    if refresh_retry:
+        payload["refreshRetry"] = _sanitize_json(refresh_retry)
+    return payload
 
 
 def _read_snapshot_summary(snapshot_file: Path) -> dict[str, Any]:
