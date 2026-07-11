@@ -488,7 +488,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 
           <div class="MatchSearch_SelectedList">
             <article v-for="card in selectedCards(sideForms[sideKey])" :key="card.cardId" class="MatchSearch_SelectedCard">
-              <CommonImageFrame :src="card.imageUrl" :alt="card.imageAlt" :card="card" show-overlays density="compact" ratio="portrait" />
+              <CommonImageFrame :src="card.imageUrl" :alt="card.imageAlt" :card="card" show-details density="compact" ratio="portrait" />
               <div>
                 <strong>{{ card.name }}</strong>
                 <small>{{ card.cardCode || "-" }} / {{ card.unitType || "-" }}</small>
@@ -792,7 +792,6 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 
 .MatchSearch_SideHead button {
   min-width: 60px;
-  min-height: 36px;
   border: 1px solid rgba(185, 133, 36, 0.52);
   background: rgba(255, 244, 217, 0.72);
 }
@@ -984,9 +983,8 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 }
 
 .MatchSearch_SelectedCard button {
-  width: 36px;
-  min-height: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   border: 1px solid rgba(185, 133, 36, 0.52);
   color: var(--color-primary);
   background: #fffaf0;
@@ -1044,9 +1042,8 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 }
 
 .MatchSearch_CardPickerHead button {
-  width: 36px;
-  min-height: 36px;
-  height: 36px;
+  width: 30px;
+  height: 30px;
   font-size: 18px;
   line-height: 1;
 }
@@ -1071,7 +1068,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 .MatchSearch_CardPickerControls input,
 .MatchSearch_CardPickerControls select {
   width: 100%;
-  min-height: 36px;
+  min-height: 32px;
   border: 1px solid var(--color-border);
   color: var(--color-brown);
   background: #fffaf0;
@@ -1104,7 +1101,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 
 .MatchSearch_CardPickerSelected button {
   flex: 0 0 auto;
-  min-height: 36px;
+  min-height: 24px;
   padding: 0 7px;
   font-size: 12px;
 }
@@ -1422,14 +1419,14 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   }
 
   .MatchSearch_Segmented {
-    flex: 0 0 88px;
-    width: 88px;
-    grid-template-columns: repeat(2, 44px);
+    flex: 0 0 84px;
+    width: 84px;
+    grid-template-columns: repeat(2, 42px);
   }
 
   .MatchSearch_Segmented button,
   .MatchSearch_SearchButton {
-    min-height: 44px;
+    min-height: 32px;
     font-size: 11px;
   }
 
@@ -1480,7 +1477,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 
   .MatchSearch_SideHead button {
     min-width: 46px;
-    min-height: 44px;
+    min-height: 28px;
     font-size: 11px;
   }
 
@@ -1510,7 +1507,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   .MatchSearch_FieldBlock select,
   .MatchSearch_FieldBlock input,
   .MatchSearch_SelectedCard select {
-    min-height: 44px;
+    min-height: 30px;
     font-size: 12px;
   }
 
@@ -1545,7 +1542,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 
   .MatchSearch_SelectedCard {
     padding: 3px 4px;
-    grid-template-columns: minmax(0, 1fr) 70px 44px;
+    grid-template-columns: minmax(0, 1fr) 66px 22px;
     gap: 4px;
   }
 
@@ -1577,14 +1574,14 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   }
 
   .MatchSearch_SelectedCard select {
+    min-height: 24px;
     padding: 0 2px;
     font-size: 10px;
   }
 
   .MatchSearch_SelectedCard button {
-    width: 44px;
-    min-height: 44px;
-    height: 44px;
+    width: 22px;
+    height: 22px;
     border-color: rgba(185, 133, 36, 0.38);
     font-size: 13px;
   }
@@ -1616,9 +1613,8 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   }
 
   .MatchSearch_CardPickerHead button {
-    width: 44px;
-    min-height: 44px;
-    height: 44px;
+    width: 30px;
+    height: 30px;
   }
 
   .MatchSearch_CardPickerControls {
@@ -1635,7 +1631,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 
   .MatchSearch_CardPickerControls input,
   .MatchSearch_CardPickerControls select {
-    min-height: 44px;
+    min-height: 30px;
     font-size: 11px;
   }
 
@@ -1653,10 +1649,6 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   .MatchSearch_CardPickerSelected span,
   .MatchSearch_CardPickerSelected button {
     font-size: 10px;
-  }
-
-  .MatchSearch_CardPickerSelected button {
-    min-height: 44px;
   }
 
   .MatchSearch_CardPickerGrid {
@@ -1743,7 +1735,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 
   .MatchSearch_CardPickerFoot button {
     width: 100%;
-    min-height: 44px;
+    min-height: 34px;
   }
 
   .MatchSearch_ResultPanel {
@@ -1803,7 +1795,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
   }
 
   .MatchSearch_ResultHead a {
-    min-height: 44px;
+    min-height: 24px;
     padding: 0 7px;
     justify-content: center;
     font-size: 10px;
@@ -1899,7 +1891,7 @@ function sideHitNote(item: MatchSearchItem, sideKey: SideKey): string {
 
   .MatchSearch_Pager button {
     min-width: 76px;
-    min-height: 44px;
+    min-height: 30px;
   }
 }
 </style>
