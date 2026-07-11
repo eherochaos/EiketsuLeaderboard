@@ -66,6 +66,7 @@ export default defineConfig(({ mode }) => {
           main: resolve(__dirname, "index.html"),
           leaderboard: resolve(__dirname, "leaderboard/index.html"),
           leaderboardStatus: resolve(__dirname, "leaderboard-status/index.html"),
+          admin: resolve(__dirname, "admin/index.html"),
           adminStats: resolve(__dirname, "admin-stats/index.html"),
           matchSearch: resolve(__dirname, "match-search/index.html"),
           tierList: resolve(__dirname, "tier-list/index.html"),
