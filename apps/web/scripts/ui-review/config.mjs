@@ -43,6 +43,12 @@ export const REVIEW_PAGES = [
     label: "数据状态",
     path: "/leaderboard-status/",
     scenarios: [{ id: "top", label: "首屏" }]
+  },
+  {
+    id: "admin",
+    label: "管理员运维总览",
+    path: "/admin/",
+    scenarios: [{ id: "top", label: "首屏" }]
   }
 ];
 
