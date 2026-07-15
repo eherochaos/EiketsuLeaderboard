@@ -688,7 +688,11 @@ async function testRefreshWritesAllVersionedArtifactsWhenEnabled() {
     assert.equal(versionManifest.versions.length, 2);
     assert.equal(manifest.currentTargetVersion, "Ver.test");
     assert.deepEqual(manifest.versions.map((item) => item.targetVersion), ["Ver.test", "Ver.old"]);
+    assert.equal(currentSnapshot.metadata.sourceRunId, 1);
+    assert.equal(currentSnapshot.tierRows.length, 2);
     assert.equal(currentSnapshot.metadata.targetVersion, "Ver.test");
+    assert.equal(oldSnapshot.metadata.sourceRunId, 3);
+    assert.equal(oldSnapshot.tierRows.length, 1);
     assert.equal(oldSnapshot.metadata.targetVersion, "Ver.old");
     assert.equal(oldTierList.metadata.targetVersion, "Ver.old");
     assert.equal(oldMatchSearch.metadata.targetVersion, "Ver.old");

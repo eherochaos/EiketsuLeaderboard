@@ -2461,7 +2461,13 @@ async function buildSnapshotFromData(options = {}) {
   });
 
   if (formalRun) {
-    const formalRows = await readJsonl(resolve(legacyRoot, "tables/server_leaderboard_rows.jsonl"));
+    const formalRows = await readJsonl(
+      resolve(legacyRoot, "tables/server_leaderboard_rows.jsonl"),
+      (row) => row.run_id === formalRun.id && row.rank_scope === "all" && (
+        (row.row_type === "deck" && toNumber(row.cluster_enabled) === 0) ||
+        (row.row_type === "archetype" && toNumber(row.cluster_enabled) === 1)
+      )
+    );
     const cardCatalog = await loadCardCatalog();
     const strategyTypes = await readOptionalJson(resolve(legacyRoot, "cards/card_strategy_types.json"), []);
     const snapshot = await buildFormalSnapshot(formalRun, formalRows, cardCatalog, strategyTypes, {
