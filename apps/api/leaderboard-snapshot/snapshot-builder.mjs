@@ -46,6 +46,8 @@ const BATTLE_FESTIVAL_PLAYER_DECK_LIMIT = 5;
 const BATTLE_FESTIVAL_FIRST_MATCH_MINUTES = 3;
 const FESTIVAL_PERIOD_SOURCE_OFFICIAL = "official";
 const BATTLE_FESTIVAL_MODES = new Set(["戦祭り", "戦祭", "戰祭", "战祭"]);
+const VARIANT_BASE_CARD_CODE_FIELDS = ["variant_base_card_code", "variantBaseCardCode"];
+const VARIANT_KIND_FIELDS = ["variant_kind", "variantKind"];
 
 function csvParts(row) {
   return String(row || "").split(",");
@@ -72,14 +74,34 @@ function officialDatalistCardCode(fields, colorLabels) {
   return prefix ? `${prefix}${serial.padStart(3, "0")}` : "";
 }
 
+function officialVariantMatchKey(fields) {
+  const extraSkills = fields.slice(19, 22)
+    .map((value) => String(value || "").trim())
+    .filter((value) => value && value !== "-1")
+    .sort();
+  return [
+    fields[16],
+    fields[3],
+    fields[5],
+    fields[6],
+    fields[13],
+    fields[15],
+    fields[17],
+    fields[18],
+    extraSkills.join(":"),
+    fields[22]
+  ].map((value) => String(value || "").trim()).join("\u0000");
+}
+
 function officialDatalistCards(data) {
   const colorLabels = indexedLabels(data?.color);
   const periodLabels = indexedLabels(data?.period);
   const costLabels = indexedLabels(data?.cost);
   const unitTypeLabels = indexedLabels(data?.unitType);
   const skillLabels = indexedLabels(data?.skill);
+  const cardTypeLabels = indexedLabels(data?.cardType);
 
-  return (data?.general || []).map((row) => {
+  const entries = (data?.general || []).map((row) => {
     const fields = csvParts(row);
     const card = { hash_id: fields[0] || "" };
     const values = {
@@ -103,8 +125,35 @@ function officialDatalistCards(data) {
       card_ds: fields[1] || "",
       card_face: fields[2] || ""
     };
-    return card;
-  }).filter((card) => card.hash_id);
+    return {
+      card,
+      cardType: cardTypeLabels[toNumber(fields[11])] || "",
+      variantMatchKey: officialVariantMatchKey(fields)
+    };
+  }).filter((entry) => entry.card.hash_id);
+
+  const baseCardsByKey = new Map();
+  const baseCardTypePriority = new Map([["通常", 0], ["スターター", 1]]);
+  for (const entry of entries) {
+    if (!baseCardTypePriority.has(entry.cardType)) continue;
+    if (!baseCardsByKey.has(entry.variantMatchKey)) baseCardsByKey.set(entry.variantMatchKey, []);
+    baseCardsByKey.get(entry.variantMatchKey).push(entry);
+  }
+
+  for (const entry of entries) {
+    if (entry.cardType !== "EX" && entry.cardType !== "PL") continue;
+    const base = (baseCardsByKey.get(entry.variantMatchKey) || [])
+      .slice()
+      .sort((left, right) => {
+        return baseCardTypePriority.get(left.cardType) - baseCardTypePriority.get(right.cardType)
+          || left.card.card_code.localeCompare(right.card.card_code, "ja");
+      })[0];
+    if (!base || base.card.card_code === entry.card.card_code) continue;
+    entry.card.variant_base_card_code = base.card.card_code;
+    entry.card.variant_kind = "reskin";
+  }
+
+  return entries.map((entry) => entry.card);
 }
 
 function toNumber(value) {
@@ -194,6 +243,22 @@ function cardCatalogKeys(card) {
   return Array.from(new Set(keys));
 }
 
+function hasOwnCardField(card, fields) {
+  return fields.some((field) => Object.prototype.hasOwnProperty.call(card || {}, field));
+}
+
+function cardDeclaresVariantMetadata(card) {
+  return hasOwnCardField(card, [...VARIANT_BASE_CARD_CODE_FIELDS, ...VARIANT_KIND_FIELDS]);
+}
+
+function mergeExplicitCardData(baseCard, overrideCard) {
+  const merged = mergeNonEmptyCardData(baseCard, overrideCard);
+  for (const field of [...VARIANT_BASE_CARD_CODE_FIELDS, ...VARIANT_KIND_FIELDS]) {
+    if (Object.prototype.hasOwnProperty.call(overrideCard || {}, field)) merged[field] = overrideCard[field];
+  }
+  return merged;
+}
+
 async function loadCardCatalog() {
   const base = await readJson(resolve(legacyRoot, "cards/card_catalog.json"));
   const overlay = await readJson(resolve(legacyRoot, "cards/card_catalog_overlay.json"));
@@ -201,9 +266,23 @@ async function loadCardCatalog() {
   const officialCards = officialDatalist ? officialDatalistCards(officialDatalist) : [];
   const byHash = new Map();
 
-  for (const card of [...(base.cards || []), ...(overlay.cards || []), ...officialCards]) {
+  for (const card of [...(base.cards || []), ...(overlay.cards || [])]) {
     for (const key of cardCatalogKeys(card)) {
-      byHash.set(key, mergeNonEmptyCardData(byHash.get(key) || {}, card));
+      byHash.set(key, mergeExplicitCardData(byHash.get(key) || {}, card));
+    }
+  }
+
+  for (const card of officialCards) {
+    const inferredCard = { ...card };
+    const hasExplicitVariantMetadata = cardCatalogKeys(card)
+      .some((key) => cardDeclaresVariantMetadata(byHash.get(key)));
+    if (hasExplicitVariantMetadata) {
+      for (const field of [...VARIANT_BASE_CARD_CODE_FIELDS, ...VARIANT_KIND_FIELDS]) {
+        delete inferredCard[field];
+      }
+    }
+    for (const key of cardCatalogKeys(card)) {
+      byHash.set(key, mergeNonEmptyCardData(byHash.get(key) || {}, inferredCard));
     }
   }
 
@@ -1502,18 +1581,31 @@ function addDeckConfigSource(sourceRowsByKey, key, row) {
 function deckConfigSourceRowsByKey(rows) {
   const sourceRowsByKey = new Map();
   for (const row of rows || []) {
-    addDeckConfigSource(sourceRowsByKey, `name:${row.deckName}`, row);
     addDeckConfigSource(sourceRowsByKey, `category:${row.categoryId}`, row);
     addDeckConfigSource(sourceRowsByKey, `deck:${row.deckId}`, row);
   }
   return sourceRowsByKey;
 }
 
-function clusterDeckConfigSourceRows(sourceRowsByKey, row, fallbackRows) {
-  return sourceRowsByKey.get(`name:${row.deckName}`)
-    || sourceRowsByKey.get(`category:${row.categoryId}`)
-    || sourceRowsByKey.get(`deck:${row.deckId}`)
-    || fallbackRows;
+function clusterDeckConfigSourceRows(sourceRowsByKey, clusterRows) {
+  const sourceRows = [];
+  const seen = new Set();
+  for (const row of clusterRows) {
+    const categoryId = String(row.categoryId || "").trim();
+    const keys = [
+      ...(categoryId && categoryId !== "unclassified" ? [`category:${categoryId}`] : []),
+      `deck:${row.configSourceDeckId || ""}`,
+      `deck:${row.deckId}`
+    ];
+    for (const key of keys) {
+      for (const sourceRow of sourceRowsByKey.get(key) || []) {
+        if (seen.has(sourceRow)) continue;
+        seen.add(sourceRow);
+        sourceRows.push(sourceRow);
+      }
+    }
+  }
+  return sourceRows.length ? sourceRows : clusterRows;
 }
 
 function clusterVariantRow(row) {
@@ -1540,7 +1632,9 @@ function clusterVariantRow(row) {
 function mergeSameNameClusterRows(rows, configSourceRowsByKey = new Map()) {
   const byName = new Map();
   for (const row of rows) {
-    const key = row.deckName || row.deckId;
+    const displayName = row.deckName || row.deckId;
+    const cardIdentity = row.sameNameClusterIdentity || `category:${row.categoryId || row.deckId}`;
+    const key = `${displayName}\u0000${cardIdentity}`;
     if (!byName.has(key)) byName.set(key, []);
     byName.get(key).push(row);
   }
@@ -1552,11 +1646,15 @@ function mergeSameNameClusterRows(rows, configSourceRowsByKey = new Map()) {
       const sampleSize = ordered.reduce((sum, row) => sum + toNumber(row.sampleSize), 0);
       const sourceRank = Math.min(...ordered.map((row) => sourceRankTie(row)));
       const mergedSourceRank = sourceRank < Number.MAX_SAFE_INTEGER ? sourceRank : base.sourceRank;
-      const configSourceRows = clusterDeckConfigSourceRows(configSourceRowsByKey, base, ordered);
+      const configSourceRows = clusterDeckConfigSourceRows(configSourceRowsByKey, ordered);
       const configSampleSize = configSourceRows.reduce((sum, row) => sum + toNumber(row.sampleSize), 0) || sampleSize;
+      const baseRow = { ...base };
+      delete baseRow.sameNameClusterIdentity;
+      delete baseRow.configSourceDeckId;
+      const outputCategoryId = String(base.categoryId || "").trim();
       const merged = {
-        ...base,
-        deckId: base.categoryId || base.deckId,
+        ...baseRow,
+        deckId: outputCategoryId && outputCategoryId !== "unclassified" ? outputCategoryId : base.deckId,
         rankScore: 0,
         sourceRank: mergedSourceRank,
         winRate: weightedRowPercent(ordered, "winRate", sampleSize),
@@ -1579,9 +1677,55 @@ function mergeSameNameClusterRows(rows, configSourceRowsByKey = new Map()) {
     .sort((left, right) => sourceRankTie(left) - sourceRankTie(right) || right.sampleSize - left.sampleSize || right.winRate - left.winRate);
 }
 
+function variantBaseCardCodesByGameplayHash(cardCatalog = {}) {
+  const byGameplayHash = new Map();
+  for (const card of Object.values(cardCatalog)) {
+    const variantKind = firstText(card?.variant_kind, card?.variantKind);
+    if (variantKind && variantKind !== "reskin") continue;
+    const gameplayHash = firstText(card?.gameplay_hash, card?.gameplayHash);
+    const variantBaseCardCode = firstText(card?.variant_base_card_code, card?.variantBaseCardCode);
+    if (!gameplayHash || !variantBaseCardCode) continue;
+    if (!byGameplayHash.has(gameplayHash)) byGameplayHash.set(gameplayHash, new Set());
+    byGameplayHash.get(gameplayHash).add(variantBaseCardCode);
+  }
+  return byGameplayHash;
+}
+
+function sameNameClusterIdentity(card, cardCatalog = {}, variantBaseByGameplayHash = new Map()) {
+  const cardId = String(card?.cardId || "").trim();
+  const catalogCard = catalogCardFor(cardCatalog, cardId, card);
+  const variantKind = firstText(catalogCard.variant_kind, catalogCard.variantKind);
+  const variantBaseCardCode = !variantKind || variantKind === "reskin" ? firstText(
+    catalogCard.variant_base_card_code,
+    catalogCard.variantBaseCardCode
+  ) : "";
+  const cardCode = firstText(
+    catalogCard.card_code,
+    catalogCard.cardCode,
+    card?.cardCode
+  );
+  if (variantBaseCardCode) return `card-code:${variantBaseCardCode}`;
+  if (cardDeclaresVariantMetadata(catalogCard)) {
+    return cardCode ? `card-code:${cardCode}` : `card-id:${cardId}`;
+  }
+
+  const gameplayHash = firstText(catalogCard.gameplay_hash, catalogCard.gameplayHash);
+  const inferredVariantBaseCardCodes = variantBaseByGameplayHash.get(gameplayHash);
+  if (cardCode && inferredVariantBaseCardCodes?.has(cardCode)) return `card-code:${cardCode}`;
+  if (inferredVariantBaseCardCodes?.size === 1) {
+    return `card-code:${Array.from(inferredVariantBaseCardCodes)[0]}`;
+  }
+  if (inferredVariantBaseCardCodes?.size > 1) {
+    return cardCode ? `card-code:${cardCode}` : `card-id:${cardId}`;
+  }
+  if (gameplayHash) return `gameplay:${gameplayHash}`;
+  return cardCode ? `card-code:${cardCode}` : `card-id:${cardId}`;
+}
+
 function buildFormalClusterRows(archetypeRows, classification, totalSamples, configSourceRows = [], cardCatalog = {}) {
   const { byDeck } = categoryLookup(classification);
   const configSourceRowsByKey = deckConfigSourceRowsByKey(configSourceRows);
+  const variantBaseByGameplayHash = variantBaseCardCodesByGameplayHash(cardCatalog);
   const tierRowsByDeckId = new Map((configSourceRows || [])
     .map((row) => [String(row.deckId || "").trim(), row])
     .filter(([deckId]) => deckId));
@@ -1618,7 +1762,9 @@ function buildFormalClusterRows(archetypeRows, classification, totalSamples, con
         imageUrl: primaryCard?.imageUrl || cards[0]?.imageUrl || "",
         imageAlt: primaryCard?.name || deckName,
         deckCards: cards,
-        deckConfig: formalDeckConfig(json.behavior_stats, emptyAuxiliaryStats(), deckId, cards, sampleSize)
+        deckConfig: formalDeckConfig(json.behavior_stats, emptyAuxiliaryStats(), deckId, cards, sampleSize),
+        sameNameClusterIdentity: sameNameClusterIdentity(primaryCard, cardCatalog, variantBaseByGameplayHash),
+        configSourceDeckId: representativeDeckId
       };
       return result;
     })
