@@ -48,6 +48,10 @@ CARD_LOOKUP_FIELDS = [
     "cost",
     "unitType",
     "image_keys",
+    "reuse_code",
+    "gameplay_hash",
+    "variant_base_card_code",
+    "variant_kind",
 ]
 
 SERVER_API_TOKEN_COLUMNS = {

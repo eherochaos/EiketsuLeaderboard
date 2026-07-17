@@ -39,6 +39,10 @@ class LegacyServiceMigrationTests(unittest.TestCase):
                                 "cost": "2.0",
                                 "unitType": "spear",
                                 "image_keys": {"card_small": "card-a"},
+                                "reuse_code": "official_personal:1",
+                                "gameplay_hash": "gameplay-a",
+                                "variant_base_card_code": "A000",
+                                "variant_kind": "reskin",
                                 "secret_note": "do-not-export",
                             }
                         ]
@@ -92,6 +96,10 @@ class LegacyServiceMigrationTests(unittest.TestCase):
 
             card_catalog = json.loads((output_dir / "cards" / "card_catalog.json").read_text(encoding="utf-8"))
             self.assertEqual(card_catalog["cards"][0]["hash_id"], "card-a")
+            self.assertEqual(card_catalog["cards"][0]["reuse_code"], "official_personal:1")
+            self.assertEqual(card_catalog["cards"][0]["gameplay_hash"], "gameplay-a")
+            self.assertEqual(card_catalog["cards"][0]["variant_base_card_code"], "A000")
+            self.assertEqual(card_catalog["cards"][0]["variant_kind"], "reskin")
             self.assertNotIn("secret_note", card_catalog["cards"][0])
 
             card_overlay = json.loads((output_dir / "cards" / "card_catalog_overlay.json").read_text(encoding="utf-8"))

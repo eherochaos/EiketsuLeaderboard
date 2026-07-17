@@ -16,6 +16,10 @@ const battleCardD = "dddddddddddddddddddddddddddddddd";
 const battleDeckA = `${battleCardA},${battleCardB}`;
 const battleDeckB = `${battleCardC},${battleCardD}`;
 const battleCampKey = "\u6240\u5c5e\u9663\u55b6";
+const sameNameBaseCard = "1a77c61bcc768b64be1acad848186a64";
+const sameNameReskinCard = "8672f243febe9423fdfd9faf7c58ae1d";
+const sameNameDistinctCard = "47ed07df5d2c441760a1451172fa3768";
+const sameNameConflictingReskinCard = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 
 async function writeJson(path, payload) {
   await writeFile(path, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
@@ -201,6 +205,7 @@ async function createLegacyFixture(root, options = {}) {
   const includeBattleFestivalCamp = options.includeBattleFestivalCamp !== false;
   const includeBattleFestivalMeritSamples = Boolean(options.includeBattleFestivalMeritSamples);
   const includeBattleFestivalOpenPeriodStartMatch = Boolean(options.includeBattleFestivalOpenPeriodStartMatch);
+  const includeSameNameCardClusters = Boolean(options.includeSameNameCardClusters);
   const battleFestivalUploadScope = options.battleFestivalUploadScope || null;
   const battleFestivalUploadScopes = options.battleFestivalUploadScopes || (battleFestivalUploadScope ? [battleFestivalUploadScope] : []);
   await mkdir(tableRoot, { recursive: true });
@@ -292,6 +297,16 @@ async function createLegacyFixture(root, options = {}) {
       { deck_fingerprint: deckA, sample_count: 10 }
     ])
   ];
+  if (includeSameNameCardClusters) {
+    rows.push(
+      deckRow(20, sameNameBaseCard, [card(sameNameBaseCard, "紫084", "足利尊氏")], 3, 4, 1),
+      deckRow(21, sameNameReskinCard, [card(sameNameReskinCard, "EX197", "足利尊氏")], 4, 2, 1),
+      deckRow(22, sameNameDistinctCard, [card(sameNameDistinctCard, "PL108", "足利尊氏")], 5, 1, 3),
+      archetypeRow(23, "足利尊氏", [card(sameNameBaseCard, "紫084", "足利尊氏")], 3, 3, 1, sameNameBaseCard),
+      archetypeRow(24, "足利尊氏", [card(sameNameReskinCard, "EX197", "足利尊氏")], 4, 2, 1, sameNameReskinCard),
+      archetypeRow(25, "足利尊氏", [card(sameNameDistinctCard, "PL108", "足利尊氏")], 5, 1, 2, sameNameDistinctCard)
+    );
+  }
   if (includeBattleFestival) {
     rows.push(deckRow(6, deckA, [card("legacy-card-a1", "蒼001", "Alpha"), card("card-a2", "蒼002", "Beta")], 1, 3, 1, 2));
   }
@@ -315,6 +330,37 @@ async function createLegacyFixture(root, options = {}) {
       replay_id: "fixture-replay-1"
     }
   ];
+  if (includeSameNameCardClusters) {
+    matches.push(
+      {
+        id: 20,
+        version: "Ver.test",
+        played_at: "2026-05-22 12:00",
+        created_at: "2026-05-22 12:00",
+        play_url: "https://eiketsu.example.test/play/same-name-base",
+        detail_url: "https://eiketsu.example.test/detail/same-name-base",
+        replay_id: "same-name-base"
+      },
+      {
+        id: 21,
+        version: "Ver.test",
+        played_at: "2026-05-23 12:00",
+        created_at: "2026-05-23 12:00",
+        play_url: "https://eiketsu.example.test/play/same-name-reskin",
+        detail_url: "https://eiketsu.example.test/detail/same-name-reskin",
+        replay_id: "same-name-reskin"
+      },
+      {
+        id: 22,
+        version: "Ver.test",
+        played_at: "2026-05-24 12:00",
+        created_at: "2026-05-24 12:00",
+        play_url: "https://eiketsu.example.test/play/same-name-distinct",
+        detail_url: "https://eiketsu.example.test/detail/same-name-distinct",
+        replay_id: "same-name-distinct"
+      }
+    );
+  }
   if (includeBattleFestivalMatches) {
     matches.push({
       id: 2,
@@ -408,6 +454,16 @@ async function createLegacyFixture(root, options = {}) {
     { id: 1, match_id: 1, side_index: 0, deck_fingerprint: deckA },
     { id: 2, match_id: 1, side_index: 1, deck_fingerprint: deckB }
   ];
+  if (includeSameNameCardClusters) {
+    matchDecks.push(
+      { id: 100, match_id: 20, side_index: 0, deck_fingerprint: sameNameBaseCard },
+      { id: 101, match_id: 20, side_index: 1, deck_fingerprint: deckA },
+      { id: 102, match_id: 21, side_index: 0, deck_fingerprint: sameNameReskinCard },
+      { id: 103, match_id: 21, side_index: 1, deck_fingerprint: deckA },
+      { id: 104, match_id: 22, side_index: 0, deck_fingerprint: sameNameDistinctCard },
+      { id: 105, match_id: 22, side_index: 1, deck_fingerprint: deckA }
+    );
+  }
   if (includeBattleFestivalMatches) {
     matchDecks.push(
       { id: 3, match_id: 2, side_index: 0, deck_fingerprint: battleDeckA },
@@ -441,6 +497,16 @@ async function createLegacyFixture(root, options = {}) {
     matchSide(1, 1, 0, "loss", "alice"),
     matchSide(2, 1, 1, "win", "bob")
   ];
+  if (includeSameNameCardClusters) {
+    matchSides.push(
+      matchSide(100, 20, 0, "win", "same-name-base"),
+      matchSide(101, 20, 1, "loss", "base-opponent"),
+      matchSide(102, 21, 0, "win", "same-name-reskin"),
+      matchSide(103, 21, 1, "loss", "reskin-opponent"),
+      matchSide(104, 22, 0, "loss", "same-name-distinct"),
+      matchSide(105, 22, 1, "win", "distinct-opponent")
+    );
+  }
   if (includeBattleFestivalMatches) {
     const campProfiles = includeBattleFestivalCamp
       ? [{ [battleCampKey]: "\u6bb7\u8ecd" }, { [battleCampKey]: "\u5468\u8ecd" }]
@@ -481,6 +547,16 @@ async function createLegacyFixture(root, options = {}) {
     { id: 3, deck_id: 2, slot: 1, card_hash: "card-b1" },
     { id: 4, deck_id: 2, slot: 2, card_hash: "card-b2" }
   ];
+  if (includeSameNameCardClusters) {
+    matchDeckUnits.push(
+      ...deckUnitRows(100, 100, sameNameBaseCard),
+      ...deckUnitRows(110, 101, deckA),
+      ...deckUnitRows(120, 102, sameNameReskinCard),
+      ...deckUnitRows(130, 103, deckA),
+      ...deckUnitRows(140, 104, sameNameDistinctCard),
+      ...deckUnitRows(150, 105, deckA)
+    );
+  }
   if (includeBattleFestivalMatches) {
     matchDeckUnits.push(
       ...deckUnitRows(5, 3, battleDeckA),
@@ -515,22 +591,81 @@ async function createLegacyFixture(root, options = {}) {
       { hash_id: "card-a1", card_code: "蒼001", name: "Alpha", faction: "蒼", cost: "1.0", unitType: "妲嶅叺" },
       { hash_id: "card-a2", card_code: "蒼002", name: "Beta", faction: "蒼", cost: "1.0", unitType: "妲嶅叺" },
       { hash_id: "card-b1", card_code: "緋001", name: "Gamma", faction: "緋", cost: "1.0", unitType: "妲嶅叺" },
-      { hash_id: "card-b2", card_code: "緋002", name: "Delta", faction: "緋", cost: "1.0", unitType: "妲嶅叺" }
+      { hash_id: "card-b2", card_code: "緋002", name: "Delta", faction: "緋", cost: "1.0", unitType: "妲嶅叺" },
+      ...(includeSameNameCardClusters ? [
+        {
+          hash_id: sameNameBaseCard,
+          card_code: "紫084",
+          name: "足利尊氏",
+          faction: "紫",
+          cost: "3.5",
+          unitType: "騎兵",
+          gameplay_hash: "ashikaga-084"
+        },
+        {
+          hash_id: sameNameReskinCard,
+          card_code: "EX197",
+          name: "足利尊氏",
+          faction: "紫",
+          cost: "3.5",
+          unitType: "騎兵",
+          gameplay_hash: "ashikaga-084"
+        },
+        {
+          hash_id: sameNameDistinctCard,
+          card_code: "PL108",
+          name: "足利尊氏",
+          faction: "紫",
+          cost: "3.5",
+          unitType: "剣豪",
+          gameplay_hash: "ashikaga-084",
+          variant_base_card_code: null,
+          variant_kind: null
+        },
+        {
+          hash_id: sameNameConflictingReskinCard,
+          card_code: "EX998",
+          name: "足利尊氏",
+          faction: "紫",
+          cost: "3.5",
+          unitType: "騎兵",
+          gameplay_hash: "ashikaga-084",
+          variant_base_card_code: "PL108",
+          variant_kind: "reskin"
+        }
+      ] : [])
     ]
   });
   await writeJson(join(cardRoot, "card_catalog_overlay.json"), { cards: [] });
   await writeJson(join(cardRoot, "datalist_api_base.json"), {
-    color: ["color-a,蒼,30,60,160"],
+    color: ["color-a,蒼,30,60,160", "color-b,紫,140,0,120"],
     period: ["period-a,戦国"],
-    cost: ["cost-a,1.0,10"],
+    cost: ["cost-a,1.0,10", "cost-b,3.5,35"],
     skill: ["skill-a,伏兵,伏,hidden,0", "skill-b,気合,気,grit,0"],
     unitType: ["unit-a,槍兵"],
+    cardType: [
+      "card-type-normal,通常,通常",
+      "card-type-ex,EX,EX",
+      "card-type-pl,PL,PL",
+      "card-type-starter,スターター,ST"
+    ],
     general: [
       officialGeneralRow("card-a1", "Alpha", 1, "0:1"),
       officialGeneralRow("card-a2", "Beta", 2),
       officialGeneralRow("card-b1", "Gamma", 3),
       officialGeneralRow("card-b2", "Delta", 4),
-      officialGeneralRow(hashFallbackCard, "Official Hash", 117, [], { 15: "0" })
+      officialGeneralRow(hashFallbackCard, "Official Hash", 117, [], { 15: "0" }),
+      ...(includeSameNameCardClusters ? [
+        officialGeneralRow(sameNameBaseCard, "足利尊氏", 84, [], {
+          5: "1", 8: "1", 11: "0", 13: "1", 15: "0", 16: "934", 17: "10", 18: "8", 22: "966"
+        }),
+        officialGeneralRow(sameNameReskinCard, "足利尊氏", 197, [], {
+          5: "1", 8: "EX", 11: "1", 13: "1", 15: "0", 16: "934", 17: "10", 18: "8", 22: "966"
+        }),
+        officialGeneralRow(sameNameDistinctCard, "足利尊氏", 108, [], {
+          5: "1", 8: "PL", 11: "2", 13: "1", 15: "0", 16: "934", 17: "10", 18: "8", 22: "966"
+        })
+      ] : [])
     ]
   });
 }
@@ -661,6 +796,46 @@ async function testRefreshWritesCurrentVersionManifestByDefault() {
       readFile(join(root, "published", "versions", "Ver.old", "leaderboard-snapshot.json"), "utf8"),
       { code: "ENOENT" }
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function testRefreshSeparatesDistinctSameNameCards() {
+  const root = await mkdtemp(join(tmpdir(), "leaderboard-same-name-cluster-"));
+  const legacyRoot = join(root, "legacy-service");
+  const outputPath = join(root, "published", "leaderboard-snapshot.json");
+
+  try {
+    await createLegacyFixture(legacyRoot, { includeSameNameCardClusters: true });
+    await refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: false });
+    const output = JSON.parse(await readFile(outputPath, "utf8"));
+    const sameNameRows = output.clusterRows.filter((row) => row.deckName.startsWith("足利尊氏"));
+
+    assert.equal(sameNameRows.length, 2);
+    const reskinRow = sameNameRows.find((row) => row.clusterVariants.some((variant) => variant.deckCards[0].cardId === sameNameReskinCard));
+    const distinctRow = sameNameRows.find((row) => row.clusterVariants.some((variant) => variant.deckCards[0].cardId === sameNameDistinctCard));
+    assert.ok(reskinRow);
+    assert.ok(distinctRow);
+    assert.notEqual(reskinRow.deckId, distinctRow.deckId);
+    assert.equal(reskinRow.sampleSize, 7);
+    assert.deepEqual(
+      reskinRow.clusterVariants.map((variant) => variant.deckCards[0].cardId).sort(),
+      [sameNameBaseCard, sameNameReskinCard].sort()
+    );
+    assert.equal(distinctRow.sampleSize, 3);
+    assert.deepEqual(
+      distinctRow.clusterVariants.map((variant) => variant.deckCards[0].cardId),
+      [sameNameDistinctCard]
+    );
+
+    const reskinStrategyCardIds = reskinRow.deckConfig.strategies.map((item) => item.cardId);
+    const distinctStrategyCardIds = distinctRow.deckConfig.strategies.map((item) => item.cardId);
+    assert.ok(reskinStrategyCardIds.includes(sameNameBaseCard));
+    assert.ok(reskinStrategyCardIds.includes(sameNameReskinCard));
+    assert.equal(reskinStrategyCardIds.includes(sameNameDistinctCard), false);
+    assert.deepEqual(distinctStrategyCardIds, [sameNameDistinctCard]);
+    assert.equal(JSON.stringify(output).includes("sameNameClusterIdentity"), false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1182,6 +1357,7 @@ async function testRefreshWritesManifestOnlyBattleFestivalSnapshot() {
 }
 
 await testRefreshWritesAtomicSnapshot();
+await testRefreshSeparatesDistinctSameNameCards();
 await testRefreshWritesCurrentVersionManifestByDefault();
 await testRefreshWritesAllVersionedArtifactsWhenEnabled();
 await testRefreshCliPrintsVersionManifest();
