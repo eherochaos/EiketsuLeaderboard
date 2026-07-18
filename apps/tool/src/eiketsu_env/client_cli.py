@@ -6,7 +6,7 @@ import argparse
 import json
 import sys
 
-from eiketsu_env.config import load_settings
+from eiketsu_env.config import load_client_settings
 from eiketsu_env.services.client_upload import bind_client, client_config_path, doctor_client, sync_client
 from eiketsu_env.services.progress import ProgressReporter
 
@@ -33,7 +33,7 @@ def main(argv: list[str] | None = None) -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     args = build_parser().parse_args(argv)
-    settings = load_settings()
+    settings = load_client_settings()
 
     if args.command == "bind":
         result = bind_client(

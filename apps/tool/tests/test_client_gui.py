@@ -1,15 +1,26 @@
 import queue
+import sqlite3
 from datetime import date
 
+from eiketsu_env import client_gui
 from eiketsu_env.client_gui import (
     GuiProgressReporter,
     _browser_doctor_warning_title,
     _messagebox_title_for_error,
     browser_label_to_source,
     browser_source_to_label,
+    configured_auto_tasks,
     default_sync_date_range,
+    format_auto_task_state,
     format_browser_doctor_message,
+    log_lines_to_trim,
+    migrate_legacy_database_for_gui,
+    parse_gui_args,
+    resolve_close_action,
+    update_install_instruction,
 )
+from eiketsu_env.config import Settings
+from eiketsu_env.services.auto_tasks import AutoTaskConfig, AutoTaskState
 from eiketsu_env.services.share import ShareConfig
 
 
@@ -37,6 +48,68 @@ def test_default_sync_date_range_keeps_within_server_dates():
 
     assert default_sync_date_range(capped, today=date(2026, 5, 16)) == ("2026-05-14", "2026-05-14")
     assert default_sync_date_range(floored, today=date(2026, 5, 16)) == ("2026-05-16", "2026-05-16")
+
+
+def test_background_args_and_close_policy_are_explicit():
+    assert parse_gui_args(["--background"]).background is True
+    assert parse_gui_args([]).background is False
+
+    disabled = AutoTaskConfig()
+    configured = AutoTaskConfig(daily_enabled=True)
+
+    assert configured_auto_tasks(disabled) is False
+    assert configured_auto_tasks(configured) is True
+    assert resolve_close_action(configured, tray_ready=True) == "hide"
+    assert resolve_close_action(configured, tray_ready=False) == "quit"
+    assert resolve_close_action(disabled, tray_ready=True) == "quit"
+
+
+def test_auto_task_state_message_prioritizes_auth_failure():
+    state = AutoTaskState(
+        auth_required=True,
+        last_status="failed",
+        last_error="sensitive low-level detail",
+    )
+
+    assert format_auto_task_state(state) == "需要重新登录后才能继续自动任务"
+
+
+def test_auto_task_state_formats_job_and_jst_time_for_users():
+    state = AutoTaskState(
+        last_job_kind="festival",
+        last_status="completed",
+        finished_at="2026-07-18T21:30:00+09:00",
+    )
+
+    assert format_auto_task_state(state) == "最近一次战祭任务完成（2026-07-18 21:30 JST）"
+
+
+def test_update_instruction_requires_full_exit_before_running_new_version():
+    text = update_install_instruction("EiketsuCollector_0.2.13.exe")
+
+    assert "彻底退出当前程序" in text
+    assert "托盘菜单" in text
+    assert "关闭当前窗口" not in text
+
+
+def test_log_trim_helper_bounds_long_resident_session():
+    assert log_lines_to_trim(1999) == 0
+    assert log_lines_to_trim(2000) == 0
+    assert log_lines_to_trim(2007) == 7
+
+
+def test_legacy_migration_failure_is_non_fatal_for_gui(tmp_path, monkeypatch):
+    settings = Settings(root_dir=tmp_path, db_url=f"sqlite:///{tmp_path / 'test.db'}")
+    monkeypatch.setattr(
+        client_gui,
+        "migrate_legacy_client_database",
+        lambda _settings: (_ for _ in ()).throw(sqlite3.DatabaseError("corrupt")),
+    )
+
+    migrated, warning = migrate_legacy_database_for_gui(settings, frozen=True)
+
+    assert migrated is None
+    assert "继续启动" in warning
 
 
 def test_browser_doctor_message_explains_missing_cookie_without_jargon():

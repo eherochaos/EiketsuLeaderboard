@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,7 @@ from eiketsu_env.db.models import CollectionRun, Match, RawSnapshot
 from eiketsu_env.db.session import make_engine
 from eiketsu_env.services import client_upload
 from eiketsu_env.services import collector
+from eiketsu_env.services import share
 from eiketsu_env.services.battle_festival import BattleFestivalPeriod, BattleFestivalProbeResult
 from eiketsu_env.services.client_upload import (
     apply_client_date_override,
@@ -24,11 +25,13 @@ from eiketsu_env.services.client_upload import (
     fetch_client_share_config_state,
     minimum_client_date_from,
     save_client_config,
+    sync_battle_festival_client,
     sync_client,
 )
 from eiketsu_env.services.collector import CollectResult
 from eiketsu_env.services.mode_filter import MODE_SCOPE_BATTLE_FESTIVAL, MODE_SCOPE_TIER_LIST
 from eiketsu_env.services.repository import EnvRepository
+from eiketsu_env.services.share import ShareConfig
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -316,6 +319,226 @@ def test_sync_client_collects_and_uploads_active_battle_festival_scope(tmp_path,
     assert manifests[0]["match_count"] == 0
     assert manifests[1]["mode_scope"] == MODE_SCOPE_TIER_LIST
     assert manifests[1]["festival_period_source"] == ""
+
+
+def test_sync_battle_festival_client_never_runs_tier_list(tmp_path, monkeypatch):
+    monkeypatch.setenv("EIKETSU_CLIENT_CONFIG_DIR", str(tmp_path / "client-config"))
+    settings = _settings(tmp_path)
+    save_client_config(
+        settings,
+        client_upload.ClientConfig(
+            server_url="http://127.0.0.1:8000",
+            api_token="token-secret",
+            contributor="alice",
+            user_public_id="u_test",
+        ),
+    )
+    transport = _FakeTransport()
+    seen_calls: list[dict[str, Any]] = []
+
+    def fake_collect(settings, date_from, date_to, **kwargs):
+        seen_calls.append(dict(kwargs))
+        return CollectResult(1, "completed", {"matches": 0}, [])
+
+    monkeypatch.setattr(client_upload, "collect_follow", fake_collect)
+    monkeypatch.setattr(
+        client_upload,
+        "probe_battle_festival_period",
+        lambda *args, **kwargs: BattleFestivalProbeResult(
+            BattleFestivalPeriod("2026-06-11", "2026-06-13"),
+            "active",
+            "festival active",
+        ),
+    )
+    monkeypatch.setattr(client_upload, "today_jst", lambda: date(2026, 6, 12))
+
+    result = sync_battle_festival_client(
+        settings,
+        interactive_auth=False,
+        transport=transport,
+        target_version="Ver.battle",
+    )
+
+    assert result.collect_result is not None
+    assert len(seen_calls) == 1
+    assert seen_calls[0]["mode_scope"] == MODE_SCOPE_BATTLE_FESTIVAL
+    assert seen_calls[0]["include_battle_festival"] is True
+    assert len(transport.upload_payloads) == 1
+    manifest = json.loads(transport.upload_payloads[0]["package_text"].splitlines()[0])
+    assert manifest["mode_scope"] == MODE_SCOPE_BATTLE_FESTIVAL
+
+
+def test_sync_battle_festival_client_skips_past_period_in_active_only_mode(tmp_path, monkeypatch):
+    monkeypatch.setenv("EIKETSU_CLIENT_CONFIG_DIR", str(tmp_path / "client-config"))
+    settings = _settings(tmp_path)
+    save_client_config(
+        settings,
+        client_upload.ClientConfig(
+            server_url="http://127.0.0.1:8000",
+            api_token="token-secret",
+            contributor="alice",
+            user_public_id="u_test",
+        ),
+    )
+    transport = _FakeTransport()
+    monkeypatch.setattr(
+        client_upload,
+        "probe_battle_festival_period",
+        lambda *args, **kwargs: BattleFestivalProbeResult(
+            BattleFestivalPeriod("2026-06-11", "2026-06-13"),
+            "inactive",
+            "festival ended",
+        ),
+    )
+    monkeypatch.setattr(client_upload, "today_jst", lambda: date(2026, 6, 14))
+    monkeypatch.setattr(
+        client_upload,
+        "collect_follow",
+        lambda *args, **kwargs: pytest.fail("非战祭期不应启动采集"),
+    )
+
+    result = sync_battle_festival_client(settings, transport=transport)
+
+    assert result.collect_result is None
+    assert result.upload is None
+    assert transport.upload_payloads == []
+
+
+def test_sync_battle_festival_client_uses_cached_period_override(tmp_path, monkeypatch):
+    monkeypatch.setenv("EIKETSU_CLIENT_CONFIG_DIR", str(tmp_path / "client-config"))
+    settings = _settings(tmp_path)
+    save_client_config(
+        settings,
+        client_upload.ClientConfig(
+            server_url="http://127.0.0.1:8000",
+            api_token="token-secret",
+            contributor="alice",
+            user_public_id="u_test",
+        ),
+    )
+    transport = _FakeTransport()
+    seen: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        client_upload,
+        "probe_battle_festival_period",
+        lambda *args, **kwargs: pytest.fail("周期覆盖时不应重新读取最新公告"),
+    )
+    monkeypatch.setattr(client_upload, "today_jst", lambda: date(2026, 6, 20))
+
+    def fake_collect(settings, date_from, date_to, **kwargs):
+        seen.append((date_from, date_to))
+        return CollectResult(1, "completed", {"matches": 0}, [])
+
+    monkeypatch.setattr(client_upload, "collect_follow", fake_collect)
+
+    result = sync_battle_festival_client(
+        settings,
+        transport=transport,
+        target_version="Ver.battle",
+        active_only=False,
+        period_override=BattleFestivalPeriod("2026-06-11", "2026-06-13"),
+    )
+
+    assert result.probe.status == "cached_period"
+    assert seen == [("2026-06-11", "2026-06-13")]
+    manifest = json.loads(transport.upload_payloads[0]["package_text"].splitlines()[0])
+    assert manifest["festival_date_from"] == "2026-06-11"
+    assert manifest["festival_date_to"] == "2026-06-13"
+
+
+def test_sync_client_reuses_identical_package_bytes(tmp_path, monkeypatch):
+    monkeypatch.setenv("EIKETSU_CLIENT_CONFIG_DIR", str(tmp_path / "client-config"))
+    settings = _settings(tmp_path)
+    save_client_config(
+        settings,
+        client_upload.ClientConfig(
+            server_url="http://127.0.0.1:8000",
+            api_token="token-secret",
+            contributor="alice",
+            user_public_id="u_test",
+        ),
+    )
+    transport = _FakeTransport()
+    monkeypatch.setattr(
+        client_upload,
+        "collect_follow",
+        lambda *args, **kwargs: CollectResult(1, "completed", {"matches": 0}, []),
+    )
+    generated_at = iter(
+        (
+            datetime.fromisoformat("2026-07-18T01:00:00+00:00"),
+            datetime.fromisoformat("2026-07-18T01:05:00+00:00"),
+        )
+    )
+    monkeypatch.setattr(share, "utc_now", lambda: next(generated_at))
+
+    sync_client(settings, interactive_auth=False, transport=transport)
+    sync_client(settings, interactive_auth=False, transport=transport)
+
+    assert len(transport.upload_payloads) == 2
+    assert transport.upload_payloads[0]["package_text"] == transport.upload_payloads[1]["package_text"]
+    assert transport.upload_payloads[0]["content_hash"] == transport.upload_payloads[1]["content_hash"]
+
+
+def test_stable_package_does_not_reuse_changed_festival_metadata(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    engine = make_engine(settings)
+    Base.metadata.create_all(engine)
+    client_config = client_upload.ClientConfig(
+        server_url="http://127.0.0.1:8000",
+        api_token="token-secret",
+        contributor="alice",
+    )
+    transport = _FakeTransport()
+    generated_at = iter(
+        (
+            datetime.fromisoformat("2026-07-18T01:00:00+00:00"),
+            datetime.fromisoformat("2026-07-18T01:05:00+00:00"),
+        )
+    )
+    monkeypatch.setattr(share, "utc_now", lambda: next(generated_at))
+    first = client_upload._battle_festival_share_config_for_window(
+        ShareConfig(target_version="Ver.battle", date_from="2026-06-10", date_to="2026-06-14"),
+        date_from="2026-06-11",
+        date_to="2026-06-12",
+        festival_date_from="2026-06-11",
+        festival_date_to="2026-06-13",
+        festival_period_source=client_upload.FESTIVAL_PERIOD_SOURCE_OFFICIAL,
+    )
+    corrected = client_upload._battle_festival_share_config_for_window(
+        ShareConfig(target_version="Ver.battle", date_from="2026-06-10", date_to="2026-06-14"),
+        date_from="2026-06-11",
+        date_to="2026-06-12",
+        festival_date_from="2026-06-11",
+        festival_date_to="2026-06-14",
+        festival_period_source=client_upload.FESTIVAL_PERIOD_SOURCE_OFFICIAL,
+    )
+
+    client_upload._upload_contribution(settings, client_config, transport, first)
+    client_upload._upload_contribution(settings, client_config, transport, corrected)
+
+    first_text = transport.upload_payloads[0]["package_text"]
+    corrected_text = transport.upload_payloads[1]["package_text"]
+    assert first_text != corrected_text
+    corrected_manifest = json.loads(corrected_text.splitlines()[0])
+    assert corrected_manifest["festival_date_to"] == "2026-06-14"
+
+
+def test_stable_package_cache_is_bounded(tmp_path):
+    cache_dir = tmp_path / "stable"
+    cache_dir.mkdir()
+    paths = []
+    for index in range(36):
+        path = cache_dir / f"{index:02d}.jsonl"
+        path.write_text(str(index), encoding="utf-8")
+        paths.append(path)
+    keep = paths[0]
+
+    client_upload._prune_stable_package_cache(cache_dir, keep=keep, limit=32)
+
+    assert keep.exists()
+    assert len(list(cache_dir.glob("*.jsonl"))) == 32
 
 
 def test_sync_client_warns_when_battle_festival_package_reuses_bad_local_data(tmp_path, monkeypatch):

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import os
+import sqlite3
+from contextlib import closing
 from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
 
 
 DEFAULT_AUTH_SOURCE = "auto"
+CLIENT_APP_DIR_NAME = "EiketsuCollector"
 VERSION_START_DATES = {
     "Ver.3.5.0C": "2026-06-17",
     "Ver.3.5.0B": "2026-05-27",
@@ -99,6 +102,50 @@ def load_settings(root_dir: Path | None = None) -> Settings:
         card_catalog_path=Path(catalog_path) if catalog_path else _first_existing_path(default_catalog, project_catalog, packaged_catalog),
         admin_token=admin_token,
     )
+
+
+def client_app_data_dir() -> Path:
+    appdata = os.environ.get("APPDATA")
+    base_dir = Path(appdata).expanduser() if appdata else Path.cwd()
+    return (base_dir / CLIENT_APP_DIR_NAME).resolve()
+
+
+def client_runtime_root() -> Path:
+    override = os.environ.get("EIKETSU_ENV_ROOT") or os.environ.get("EIKETSU_CLIENT_RUNTIME_ROOT")
+    if override:
+        return Path(override).expanduser().resolve()
+    return client_app_data_dir()
+
+
+def load_client_settings() -> Settings:
+    return load_settings(client_runtime_root())
+
+
+def migrate_legacy_client_database(
+    settings: Settings,
+    legacy_root: Path | None = None,
+) -> Path | None:
+    """首次升级时把旧工作目录数据库安全复制到固定客户端目录。"""
+
+    if os.environ.get("EIKETSU_ENV_ROOT") or os.environ.get("EIKETSU_CLIENT_RUNTIME_ROOT"):
+        return None
+    if not settings.db_url.startswith("sqlite:///"):
+        return None
+    source = (legacy_root or Path.cwd()).resolve() / "data" / "eiketsu_env.db"
+    target = Path(settings.db_url.removeprefix("sqlite:///")).resolve()
+    if source == target or target.exists() or not source.is_file():
+        return None
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(f"{target.suffix}.migrating")
+    temporary.unlink(missing_ok=True)
+    try:
+        with closing(sqlite3.connect(source)) as source_db, closing(sqlite3.connect(temporary)) as target_db:
+            source_db.backup(target_db)
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return target
 
 
 def _first_existing_path(*paths: Path | None) -> Path | None:

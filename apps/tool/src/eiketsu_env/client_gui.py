@@ -2,20 +2,42 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import queue
+import sqlite3
+import sys
 import threading
 import tkinter as tk
 import time
 import webbrowser
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from tkinter import messagebox, ttk
 from typing import Any, Callable
 
 from eiketsu_env import __version__
-from eiketsu_env.config import load_settings
+from eiketsu_env.config import Settings, load_client_settings, migrate_legacy_client_database
+from eiketsu_env.services.auto_tasks import (
+    AutoTaskConfig,
+    AutoTaskState,
+    load_auto_task_config,
+    load_auto_task_state,
+    save_auto_task_config,
+)
+from eiketsu_env.services.automation_runtime import (
+    AutoTaskOutcome,
+    AutoTaskScheduler,
+    clear_auto_task_auth_required,
+)
 from eiketsu_env.services.browser_session import doctor_browser, open_login_url
+from eiketsu_env.services.client_lock import (
+    ClientSyncBusyError,
+    clear_client_instance_signal,
+    client_instance_lock,
+    consume_client_instance_signal,
+    request_client_instance_show,
+)
 from eiketsu_env.services.client_upload import (
     bind_client,
     check_client_update,
@@ -28,10 +50,13 @@ from eiketsu_env.services.client_upload import (
     sync_client,
 )
 from eiketsu_env.services.share import ShareConfig
+from eiketsu_env.services.windows_startup import set_startup_enabled
+from eiketsu_env.services.windows_tray import WindowsTrayIcon, notify_existing_instance
 
 
 DEFAULT_SERVER_URL = os.environ.get("EIKETSU_CLIENT_SERVER_URL", "http://43.128.141.76:8000")
-STEP_TITLES = ["绑定", "登录", "同步", "查看"]
+STEP_TITLES = ["绑定", "登录", "同步", "自动", "查看"]
+FESTIVAL_INTERVAL_CHOICES = ("30", "60", "120", "180", "360")
 BROWSER_CHOICES = (
     ("自动检测（默认浏览器优先）", "auto"),
     ("Google Chrome", "chrome"),
@@ -41,6 +66,7 @@ BROWSER_CHOICES = (
 LOGIN_POLL_INITIAL_DELAY_MS = 1200
 LOGIN_POLL_INTERVAL_MS = 2500
 LOGIN_POLL_TIMEOUT_SECONDS = 300
+MAX_LOG_LINES = 2000
 BROWSER_LABEL_TO_SOURCE = dict(BROWSER_CHOICES)
 BROWSER_SOURCE_TO_LABEL = {source: label for label, source in BROWSER_CHOICES}
 BROWSER_SOURCE_TO_LABEL.update({"firefox": "Firefox", "firefox-profile": "Firefox"})
@@ -53,6 +79,78 @@ BROWSER_DISPLAY_NAMES = {
     "firefox": "Firefox",
     "firefox-profile": "Firefox",
 }
+
+
+def configured_auto_tasks(config: AutoTaskConfig) -> bool:
+    return bool(config.daily_enabled or config.festival_enabled)
+
+
+def resolve_close_action(config: AutoTaskConfig, tray_ready: bool) -> str:
+    return "hide" if configured_auto_tasks(config) and tray_ready else "quit"
+
+
+def log_lines_to_trim(line_count: int, limit: int = MAX_LOG_LINES) -> int:
+    return max(0, int(line_count) - max(1, int(limit)))
+
+
+def update_install_instruction(download_name: str) -> str:
+    return (
+        "下载完成后，请彻底退出当前程序"
+        "（如已启用托盘，请从托盘菜单选择“彻底退出”），"
+        f"再运行新版 {download_name}。"
+    )
+
+
+def migrate_legacy_database_for_gui(
+    settings: Settings,
+    *,
+    frozen: bool,
+) -> tuple[object | None, str]:
+    if not frozen:
+        return None, ""
+    try:
+        return migrate_legacy_client_database(settings), ""
+    except (OSError, sqlite3.Error):
+        return None, "旧版本地数据库迁移失败。程序将继续启动；请保留旧版数据并联系维护者。"
+
+
+def format_auto_task_state(state: AutoTaskState) -> str:
+    if state.auth_required:
+        return "需要重新登录后才能继续自动任务"
+    if not state.last_status:
+        return "尚未运行"
+    labels = {
+        "completed": "最近一次任务完成",
+        "failed": "最近一次任务失败",
+        "auth_required": "需要重新登录",
+        "ready": "等待下次任务",
+    }
+    text = labels.get(state.last_status, state.last_status)
+    job_labels = {
+        "daily": "每日",
+        "festival": "战祭",
+        "festival_final": "战祭结束补采",
+        "festival_probe": "战祭检查",
+    }
+    if state.last_job_kind in job_labels:
+        text = text.replace("任务", f"{job_labels[state.last_job_kind]}任务", 1)
+    if state.finished_at:
+        try:
+            finished = datetime.fromisoformat(state.finished_at)
+            display_time = finished.strftime("%Y-%m-%d %H:%M")
+        except ValueError:
+            display_time = state.finished_at
+        text += f"（{display_time} JST）"
+    if state.last_error:
+        text += f"：{state.last_error}"
+    return text
+
+
+def parse_gui_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--background", action="store_true")
+    args, _unknown = parser.parse_known_args(argv)
+    return args
 
 
 def browser_label_to_source(label: str) -> str:
@@ -320,16 +418,42 @@ class GuiState:
     sync_date_to: tk.StringVar
     progress_text: tk.StringVar
     status: tk.StringVar
+    auto_enabled: tk.BooleanVar
+    daily_enabled: tk.BooleanVar
+    daily_time_jst: tk.StringVar
+    festival_enabled: tk.BooleanVar
+    festival_interval_minutes: tk.StringVar
+    festival_window_from_jst: tk.StringVar
+    festival_window_to_jst: tk.StringVar
+    start_with_windows: tk.BooleanVar
+    auto_status: tk.StringVar
 
 
 class CollectorApp(tk.Tk):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        settings: Settings | None = None,
+        start_hidden: bool = False,
+        tray_factory: Callable[..., WindowsTrayIcon] = WindowsTrayIcon,
+    ) -> None:
         super().__init__()
         self.title("Eiketsu Collector")
         self.geometry("820x640")
         self.minsize(760, 580)
-        self.settings = load_settings()
+        self.settings = settings or load_client_settings()
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
+        startup_messages: list[str] = []
+        try:
+            self.auto_config = load_auto_task_config(self.settings)
+        except ValueError as exc:
+            self.auto_config = AutoTaskConfig()
+            startup_messages.append(f"自动任务配置无效，已暂停：{exc}")
+        try:
+            self.auto_state = load_auto_task_state(self.settings)
+        except ValueError as exc:
+            self.auto_state = AutoTaskState()
+            startup_messages.append(f"自动任务状态无效：{exc}")
         self.state_vars = GuiState(
             invite_code=tk.StringVar(value=""),
             contributor=tk.StringVar(value=""),
@@ -341,6 +465,15 @@ class CollectorApp(tk.Tk):
             sync_date_to=tk.StringVar(value=""),
             progress_text=tk.StringVar(value="等待开始"),
             status=tk.StringVar(value="准备就绪"),
+            auto_enabled=tk.BooleanVar(value=self.auto_config.enabled),
+            daily_enabled=tk.BooleanVar(value=self.auto_config.daily_enabled),
+            daily_time_jst=tk.StringVar(value=self.auto_config.daily_time_jst),
+            festival_enabled=tk.BooleanVar(value=self.auto_config.festival_enabled),
+            festival_interval_minutes=tk.StringVar(value=str(self.auto_config.festival_interval_minutes)),
+            festival_window_from_jst=tk.StringVar(value=self.auto_config.festival_window_from_jst),
+            festival_window_to_jst=tk.StringVar(value=self.auto_config.festival_window_to_jst),
+            start_with_windows=tk.BooleanVar(value=self.auto_config.start_with_windows),
+            auto_status=tk.StringVar(value=format_auto_task_state(self.auto_state)),
         )
         self.current_step = 0
         self.content_row = 0
@@ -358,9 +491,24 @@ class CollectorApp(tk.Tk):
         self.progress_value = tk.DoubleVar(value=0)
         self.action_buttons: list[ttk.Button] = []
         self.step_labels: list[tk.Label] = []
+        self.operation_busy = False
+        self.tray: WindowsTrayIcon | None = None
+        self.tray_ready = False
+        self.tray_factory = tray_factory
+        self.scheduler = AutoTaskScheduler(
+            self.settings,
+            progress_factory=lambda: GuiProgressReporter(self.events),
+            outcome_callback=lambda outcome: self.events.put(("automation_outcome", outcome)),
+        )
         self._build_shell()
         self._load_existing_config()
         self._render_step()
+        self.protocol("WM_DELETE_WINDOW", self._on_window_close)
+        for message in startup_messages:
+            self._log(message)
+        self._configure_automation_runtime()
+        if start_hidden and configured_auto_tasks(self.auto_config) and self.tray_ready:
+            self.withdraw()
         self.after(120, self._drain_events)
         self.after(800, self._check_update_on_startup)
 
@@ -404,6 +552,8 @@ class CollectorApp(tk.Tk):
             self._render_login_step()
         elif self.current_step == 2:
             self._render_sync_step()
+        elif self.current_step == 3:
+            self._render_auto_step()
         else:
             self._render_view_step()
 
@@ -506,10 +656,82 @@ class CollectorApp(tk.Tk):
         self._button("刷新日期范围", self.refresh_sync_config, parent=actions, column=0)
         self._button("开始同步", self.sync, parent=actions, column=1, enabled=self.share_config is not None)
         self._button("清理旧原网页缓存", self.cleanup_raw_cache)
+        self._button("设置自动任务", lambda: self._go_to_step(3))
         self._button("返回第 2 步", lambda: self._go_to_step(1))
 
+    def _render_auto_step(self) -> None:
+        self._heading("第 4 步：自动任务")
+        self._paragraph(
+            "配置任务后程序会留在系统托盘。暂停只停止执行，不退出托盘；每日任务按日本时间补采昨日。"
+        )
+
+        form = ttk.Frame(self.content)
+        form.grid(row=self._next_content_row(), column=0, sticky="ew", pady=(4, 8))
+        form.columnconfigure(1, weight=1)
+        ttk.Checkbutton(
+            form,
+            text="运行后台调度（取消后暂停，仍保留托盘）",
+            variable=self.state_vars.auto_enabled,
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=4)
+        ttk.Checkbutton(
+            form,
+            text="每日完整更新",
+            variable=self.state_vars.daily_enabled,
+        ).grid(row=1, column=0, sticky="w", pady=4)
+        daily_time = ttk.Frame(form)
+        daily_time.grid(
+            row=1,
+            column=1,
+            sticky="w",
+            pady=4,
+        )
+        ttk.Entry(daily_time, textvariable=self.state_vars.daily_time_jst, width=12).grid(row=0, column=0)
+        ttk.Label(daily_time, text="日本时间，格式 HH:MM").grid(row=0, column=1, sticky="w", padx=(8, 0))
+        ttk.Checkbutton(
+            form,
+            text="战祭持续更新",
+            variable=self.state_vars.festival_enabled,
+        ).grid(row=2, column=0, sticky="w", pady=4)
+        festival_interval = ttk.Frame(form)
+        festival_interval.grid(row=2, column=1, sticky="w", pady=4)
+        ttk.Combobox(
+            festival_interval,
+            textvariable=self.state_vars.festival_interval_minutes,
+            values=FESTIVAL_INTERVAL_CHOICES,
+            state="readonly",
+            width=9,
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Label(festival_interval, text="分钟一次").grid(row=0, column=1, sticky="w", padx=(8, 0))
+        ttk.Label(form, text="战祭运行时段").grid(row=3, column=0, sticky="w", pady=4)
+        window = ttk.Frame(form)
+        window.grid(row=3, column=1, sticky="w", pady=4)
+        ttk.Entry(window, textvariable=self.state_vars.festival_window_from_jst, width=8).grid(row=0, column=0)
+        ttk.Label(window, text=" 至 ").grid(row=0, column=1)
+        ttk.Entry(window, textvariable=self.state_vars.festival_window_to_jst, width=8).grid(row=0, column=2)
+        ttk.Label(window, text="（日本时间）").grid(row=0, column=3, padx=(8, 0))
+        ttk.Checkbutton(
+            form,
+            text="登录 Windows 后自动启动",
+            variable=self.state_vars.start_with_windows,
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=4)
+
+        ttk.Label(
+            self.content,
+            textvariable=self.state_vars.auto_status,
+            wraplength=700,
+            justify="left",
+        ).grid(row=self._next_content_row(), column=0, sticky="w", pady=(0, 8))
+
+        actions = ttk.Frame(self.content)
+        actions.grid(row=self._next_content_row(), column=0, sticky="ew", pady=(0, 8))
+        actions.columnconfigure(0, weight=1)
+        actions.columnconfigure(1, weight=1)
+        self._button("保存自动任务", self.save_auto_tasks, parent=actions, column=0)
+        self._button("立即检查并运行", self.run_auto_tasks_now, parent=actions, column=1)
+        self._button("返回手动同步", lambda: self._go_to_step(2))
+
     def _render_view_step(self) -> None:
-        self._heading("第 4 步：查看结果")
+        self._heading("第 5 步：查看结果")
         if self.last_upload_summary:
             self._paragraph(self.last_upload_summary)
         else:
@@ -521,6 +743,7 @@ class CollectorApp(tk.Tk):
         self._button("打开我的上传", self.open_me, parent=actions, column=0)
         self._button("打开排行榜", self.open_leaderboard, parent=actions, column=1)
         self._button("检查软件更新", self.check_update)
+        self._button("自动任务设置", lambda: self._go_to_step(3))
         self._button("再同步一次", lambda: self._go_to_step(2))
 
     def _heading(self, text: str) -> None:
@@ -620,6 +843,9 @@ class CollectorApp(tk.Tk):
         )
 
     def sync(self) -> None:
+        if self.scheduler.executing:
+            messagebox.showinfo("自动任务正在运行", "请等待当前自动任务完成后再手动同步。")
+            return
         try:
             date_from, date_to = self._validated_sync_dates()
         except ValueError as exc:
@@ -648,6 +874,49 @@ class CollectorApp(tk.Tk):
 
         self._run_background("同步上传", task, self._after_sync_success)
 
+    def save_auto_tasks(self) -> None:
+        try:
+            interval = int(self.state_vars.festival_interval_minutes.get().strip())
+            config = AutoTaskConfig(
+                enabled=bool(self.state_vars.auto_enabled.get()),
+                daily_enabled=bool(self.state_vars.daily_enabled.get()),
+                daily_time_jst=self.state_vars.daily_time_jst.get().strip(),
+                festival_enabled=bool(self.state_vars.festival_enabled.get()),
+                festival_interval_minutes=interval,
+                festival_window_from_jst=self.state_vars.festival_window_from_jst.get().strip(),
+                festival_window_to_jst=self.state_vars.festival_window_to_jst.get().strip(),
+                start_with_windows=bool(self.state_vars.start_with_windows.get()),
+                auth_source=self._selected_auth_source(),
+            )
+            config.validate()
+            if config.start_with_windows and not configured_auto_tasks(config):
+                raise ValueError("请先启用每日任务或战祭任务，再设置登录 Windows 后自动启动。")
+            set_startup_enabled(config.start_with_windows and configured_auto_tasks(config))
+            save_auto_task_config(self.settings, config)
+        except (OSError, RuntimeError, ValueError) as exc:
+            messagebox.showerror("自动任务未保存", str(exc))
+            return
+
+        self.auto_config = config
+        self._reload_auto_state()
+        self._configure_automation_runtime()
+        self.scheduler.wake()
+        self._log("自动任务已保存。启用后关闭窗口会继续留在系统托盘。")
+        self.state_vars.status.set("自动任务已保存")
+        self._render_step()
+
+    def run_auto_tasks_now(self) -> None:
+        if not configured_auto_tasks(self.auto_config):
+            messagebox.showwarning("还没有自动任务", "请先启用每日任务或战祭任务并保存。")
+            return
+        if not self.auto_config.enabled:
+            messagebox.showwarning("自动任务已暂停", "请先勾选“运行后台调度”并保存。")
+            return
+        self.scheduler.start()
+        self.scheduler.run_now()
+        self.state_vars.status.set("已请求立即运行")
+        self._log("已请求立即检查并运行一项自动任务。")
+
     def open_login_page(self) -> None:
         auth_source = self._selected_auth_source()
         opened_source = open_login_url(self.settings, auth_source)
@@ -663,6 +932,129 @@ class CollectorApp(tk.Tk):
                 f"{self.settings.login_url}"
             )
         self._start_login_poll()
+
+    def _configure_automation_runtime(self) -> None:
+        if configured_auto_tasks(self.auto_config):
+            self._ensure_tray()
+            self.scheduler.start()
+            if self.auto_config.start_with_windows:
+                try:
+                    set_startup_enabled(True)
+                except (OSError, RuntimeError) as exc:
+                    self._log(f"登录自启校正失败：{exc}")
+            return
+        self.scheduler.stop()
+        self._stop_tray()
+
+    def _ensure_tray(self) -> bool:
+        if self.tray is not None and self.tray.ready:
+            self.tray_ready = True
+            return True
+        if self.tray is not None:
+            self.tray.stop()
+        tray = self.tray_factory(
+            lambda command: self.events.put(("tray_command", command)),
+            tooltip=f"Eiketsu Collector {__version__}",
+        )
+        if not tray.start():
+            self.tray = tray
+            self.tray_ready = False
+            self._log(f"系统托盘启动失败：{tray.last_error}")
+            return False
+        self.tray = tray
+        self.tray_ready = True
+        self._log("系统托盘已启动；关闭窗口后自动任务会继续运行。")
+        return True
+
+    def _stop_tray(self) -> None:
+        tray = self.tray
+        self.tray = None
+        self.tray_ready = False
+        if tray is not None:
+            tray.stop()
+
+    def _toggle_auto_pause(self) -> None:
+        if not configured_auto_tasks(self.auto_config):
+            self.show_window()
+            messagebox.showwarning("还没有自动任务", "请先在“自动”步骤中配置任务。")
+            return
+        previous = self.auto_config.enabled
+        self.auto_config.enabled = not previous
+        try:
+            save_auto_task_config(self.settings, self.auto_config)
+        except (OSError, ValueError) as exc:
+            self.auto_config.enabled = previous
+            self.state_vars.auto_enabled.set(previous)
+            self.show_window()
+            self._log(f"暂停状态保存失败：{exc}")
+            messagebox.showerror("自动任务状态未保存", "无法保存暂停状态，请检查磁盘后重试。")
+            return
+        self.state_vars.auto_enabled.set(self.auto_config.enabled)
+        self.scheduler.wake()
+        status = "已继续自动任务" if self.auto_config.enabled else "已暂停自动任务"
+        self.state_vars.status.set(status)
+        self._log(status)
+        if self.current_step == 3:
+            self._render_step()
+
+    def _handle_tray_command(self, command: str) -> None:
+        if command == "show":
+            self.show_window()
+        elif command == "run_now":
+            self.scheduler.run_now()
+        elif command == "pause_toggle":
+            self._toggle_auto_pause()
+        elif command == "exit":
+            self.quit_app()
+
+    def _handle_automation_outcome(self, outcome: AutoTaskOutcome) -> None:
+        self._reload_auto_state()
+        job_name = outcome.job.kind if outcome.job else "任务"
+        if outcome.status == "completed":
+            self._log(f"自动任务完成：{job_name}；{outcome.message}")
+            self.state_vars.status.set("自动任务完成")
+        elif outcome.status == "busy":
+            self._log("自动任务等待：已有同步任务正在运行。")
+        elif outcome.status == "auth_required":
+            self._log("自动任务暂停：需要重新登录英杰大战.NET。")
+            self.state_vars.status.set("自动任务需要重新登录")
+        elif outcome.status == "failed":
+            self._log(f"自动任务失败：{outcome.message}")
+            self.state_vars.status.set("自动任务失败")
+        if self.current_step == 3:
+            self._render_step()
+
+    def _reload_auto_state(self) -> None:
+        try:
+            self.auto_state = load_auto_task_state(self.settings)
+        except ValueError as exc:
+            self.auto_state = AutoTaskState(last_status="failed", last_error=str(exc))
+            self._log(f"自动任务状态读取失败：{exc}")
+        self.state_vars.auto_status.set(format_auto_task_state(self.auto_state))
+
+    def show_window(self) -> None:
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+
+    def _on_window_close(self) -> None:
+        self.tray_ready = bool(self.tray is not None and self.tray.ready)
+        if resolve_close_action(self.auto_config, self.tray_ready) == "hide":
+            self.withdraw()
+            self._log("主窗口已隐藏，自动任务继续在系统托盘运行。")
+            return
+        self.quit_app()
+
+    def quit_app(self) -> None:
+        if (self.operation_busy or self.scheduler.executing) and not messagebox.askyesno(
+            "任务仍在运行",
+            "当前任务尚未完成。彻底退出会中断本次任务，确定退出吗？",
+        ):
+            return
+        self._cancel_login_poll()
+        self.scheduler.stop()
+        self._stop_tray()
+        self.destroy()
 
     def open_me(self) -> None:
         try:
@@ -778,6 +1170,12 @@ class CollectorApp(tk.Tk):
         browser = payload["browser"]
         if bool(browser.get("ok")):
             self.browser_ok = True
+            try:
+                clear_auto_task_auth_required(self.settings)
+            except ValueError as exc:
+                self._log(f"自动任务登录状态未能恢复：{exc}")
+            self._reload_auto_state()
+            self.scheduler.wake()
             readable_message = format_browser_doctor_message(browser, str(payload.get("selected_label") or self._selected_browser_label()))
             self._log(f"客户端：{client.get('message', '已检查')}")
             self._log(f"浏览器登录：{readable_message}")
@@ -840,7 +1238,7 @@ class CollectorApp(tk.Tk):
             f"发现新版 {result.latest_version}。\n"
             f"当前版本：{result.current_version or __version__}\n"
             f"文件大小：{size_mb:.1f} MB\n\n"
-            f"点击“是”会打开下载地址。下载完成后，请先关闭当前窗口，再运行新版 {download_name}。"
+            f"点击“是”会打开下载地址。{update_install_instruction(download_name)}"
             f"{notes}"
         )
         self._log(f"发现新版客户端：{result.latest_version}，下载地址 {result.download_url}")
@@ -856,7 +1254,7 @@ class CollectorApp(tk.Tk):
         self.progress_value.set(100)
         self.state_vars.progress_text.set("同步完成，可以关闭窗口或查看结果。")
         self._log(self.last_upload_summary)
-        self._go_to_step(3)
+        self._go_to_step(4)
 
     def _go_to_step(self, step: int) -> None:
         if step > 0 and not self.bound:
@@ -897,6 +1295,10 @@ class CollectorApp(tk.Tk):
         return date_from, date_to
 
     def _run_background(self, label: str, task: Callable, on_success: Callable | None = None) -> None:
+        if self.operation_busy:
+            messagebox.showinfo("任务正在运行", "请等待当前操作完成后再试。")
+            return
+        self.operation_busy = True
         self._set_busy(True, f"{label}中...")
         self._log(f"开始：{label}")
 
@@ -914,31 +1316,62 @@ class CollectorApp(tk.Tk):
 
     def _drain_events(self) -> None:
         try:
+            self._refresh_tray_health()
+            if consume_client_instance_signal(self.settings):
+                self.show_window()
             while True:
                 kind, payload = self.events.get_nowait()
-                if kind == "error":
-                    self._log(f"失败：{payload}")
-                    self._set_busy(False, "失败")
-                    message = str(payload)
-                    messagebox.showerror(_messagebox_title_for_error(message), message)
-                elif kind == "success":
-                    self._log(f"完成：{payload}")
-                    self._set_busy(False, "准备就绪")
-                elif kind == "callback":
-                    callback, result = payload  # type: ignore[misc]
-                    callback(result)
-                elif kind == "progress_message":
-                    self._log(str(payload))
-                    self.state_vars.progress_text.set(str(payload))
-                elif kind == "progress":
-                    self._update_progress(payload)  # type: ignore[arg-type]
-                elif kind == "login_poll_result":
-                    self._handle_login_poll_result(payload)  # type: ignore[arg-type]
-                elif kind == "update_check":
-                    self._after_update_check(payload, quiet=True)
+                try:
+                    if kind == "error":
+                        self.operation_busy = False
+                        self._log(f"失败：{payload}")
+                        self._set_busy(False, "失败")
+                        message = str(payload)
+                        messagebox.showerror(_messagebox_title_for_error(message), message)
+                    elif kind == "success":
+                        self.operation_busy = False
+                        self._log(f"完成：{payload}")
+                        self._set_busy(False, "准备就绪")
+                    elif kind == "callback":
+                        callback, result = payload  # type: ignore[misc]
+                        callback(result)
+                    elif kind == "progress_message":
+                        self._log(str(payload))
+                        self.state_vars.progress_text.set(str(payload))
+                    elif kind == "progress":
+                        self._update_progress(payload)  # type: ignore[arg-type]
+                    elif kind == "login_poll_result":
+                        self._handle_login_poll_result(payload)  # type: ignore[arg-type]
+                    elif kind == "update_check":
+                        self._after_update_check(payload, quiet=True)
+                    elif kind == "tray_command":
+                        self._handle_tray_command(str(payload))
+                    elif kind == "automation_outcome":
+                        self._handle_automation_outcome(payload)  # type: ignore[arg-type]
+                except Exception as exc:  # noqa: BLE001 - 单个后台事件失败不能终止 GUI 事件泵。
+                    self._log(f"后台事件处理失败：{exc}")
         except queue.Empty:
             pass
-        self.after(120, self._drain_events)
+        except Exception as exc:  # noqa: BLE001 - 托盘健康检查失败也必须继续轮询。
+            self._log(f"后台状态检查失败：{exc}")
+        finally:
+            try:
+                self.after(120, self._drain_events)
+            except tk.TclError:
+                pass
+
+    def _refresh_tray_health(self) -> None:
+        ready = bool(self.tray is not None and self.tray.ready)
+        if ready == self.tray_ready:
+            return
+        was_ready = self.tray_ready
+        self.tray_ready = ready
+        if was_ready and not ready:
+            self._log("系统托盘已失效，主窗口已恢复；关闭窗口将彻底退出。")
+            if self.state() == "withdrawn":
+                self.show_window()
+        elif ready:
+            self._log("系统托盘已恢复。")
 
     def _set_busy(self, busy: bool, status: str) -> None:
         self.state_vars.status.set(status)
@@ -963,6 +1396,10 @@ class CollectorApp(tk.Tk):
 
     def _log(self, message: str) -> None:
         self.log.insert("end", message + "\n")
+        line_count = int(self.log.index("end-1c").split(".", 1)[0])
+        trim = log_lines_to_trim(line_count)
+        if trim:
+            self.log.delete("1.0", f"{trim + 1}.0")
         self.log.see("end")
 
     def _check_update_on_startup(self) -> None:
@@ -976,9 +1413,45 @@ class CollectorApp(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
 
-def main() -> None:
-    app = CollectorApp()
-    app.mainloop()
+def main(argv: list[str] | None = None) -> None:
+    args = parse_gui_args(argv)
+    settings = load_client_settings()
+    if args.background:
+        try:
+            config = load_auto_task_config(settings)
+        except ValueError:
+            return
+        if not config.start_with_windows or not configured_auto_tasks(config):
+            return
+    try:
+        with client_instance_lock(settings):
+            clear_client_instance_signal(settings)
+            migrated, migration_warning = migrate_legacy_database_for_gui(
+                settings,
+                frozen=bool(getattr(sys, "frozen", False)),
+            )
+            app = CollectorApp(settings=settings, start_hidden=bool(args.background))
+            if migrated is not None:
+                app._log("已将旧版本地对局数据库迁移到固定客户端目录。")
+            if migration_warning:
+                app._log(migration_warning)
+                app.after(
+                    0,
+                    lambda: messagebox.showwarning("旧数据迁移失败", migration_warning),
+                )
+            app.mainloop()
+    except ClientSyncBusyError:
+        if not args.background:
+            notified = False
+            try:
+                notified = notify_existing_instance("show")
+            except (OSError, RuntimeError):
+                pass
+            if not notified:
+                try:
+                    request_client_instance_show(settings)
+                except OSError:
+                    pass
 
 
 if __name__ == "__main__":
