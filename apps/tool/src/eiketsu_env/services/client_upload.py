@@ -22,11 +22,13 @@ from eiketsu_env.db.models import RawSnapshot
 from eiketsu_env.db.session import make_engine
 from eiketsu_env.services.battle_festival import (
     BattleFestivalPeriod,
+    BattleFestivalProbeResult,
     detect_battle_festival_period,
     is_battle_festival_active,
     probe_battle_festival_period,
     today_jst,
 )
+from eiketsu_env.services.client_lock import client_sync_lock
 from eiketsu_env.services.collector import CollectResult, collect_follow
 from eiketsu_env.services.mode_filter import MODE_SCOPE_BATTLE_FESTIVAL, MODE_SCOPE_TIER_LIST
 from eiketsu_env.services.progress import ProgressReporter
@@ -78,6 +80,17 @@ class ClientSyncResult:
     battle_festival_collect_result: CollectResult | None = None
     battle_festival_package_path: Path | None = None
     battle_festival_upload: dict[str, Any] | None = None
+    effective_date_from: str = ""
+    effective_date_to: str = ""
+
+
+@dataclass(slots=True)
+class ClientBattleFestivalSyncResult:
+    probe: BattleFestivalProbeResult
+    plan: BattleFestivalCollectPlan
+    collect_result: CollectResult | None
+    package_path: Path | None
+    upload: dict[str, Any] | None
 
 
 @dataclass(slots=True)
@@ -196,6 +209,29 @@ def sync_client(
     date_to: str = "",
     target_version: str = "",
 ) -> ClientSyncResult:
+    with client_sync_lock(settings):
+        return _sync_client_unlocked(
+            settings,
+            auth_source=auth_source,
+            interactive_auth=interactive_auth,
+            transport=transport,
+            progress=progress,
+            date_from=date_from,
+            date_to=date_to,
+            target_version=target_version,
+        )
+
+
+def _sync_client_unlocked(
+    settings: Settings,
+    auth_source: str = "",
+    interactive_auth: bool = True,
+    transport: JsonTransport | None = None,
+    progress: ProgressReporter | None = None,
+    date_from: str = "",
+    date_to: str = "",
+    target_version: str = "",
+) -> ClientSyncResult:
     config = load_client_config(settings)
     transport = transport or UrllibJsonTransport()
     share_config = _request_share_config(config, transport, target_version=target_version)
@@ -206,56 +242,23 @@ def sync_client(
     if progress:
         progress.message("快速同步模式：并发采集详情，自动跳过已完整采集的旧详情")
         progress.message("战祭检测需要会员登录态：请保持“打开登录页”弹出的 Chrome/Edge/Brave 窗口打开直到同步完成")
-    battle_collect = None
-    battle_upload = None
-    battle_package_path = None
+    battle_result = None
     battle_probe = probe_battle_festival_period(settings, auth_source=auth_source, interactive_auth=interactive_auth)
-    if progress:
-        progress.message(f"战祭页探测状态：{battle_probe.status}")
-        if battle_probe.message:
-            progress.message(battle_probe.message)
-    battle_plan = battle_festival_collect_plan(share_config, battle_probe)
-    battle_config = battle_plan.config
-    if battle_config is not None:
+    try:
+        battle_result = _sync_battle_festival_unlocked(
+            settings,
+            config,
+            transport,
+            share_config,
+            battle_probe,
+            auth_source=auth_source,
+            interactive_auth=interactive_auth,
+            progress=progress,
+            active_only=False,
+        )
+    except Exception as exc:  # noqa: BLE001 - 战祭补采失败不能阻断普通 TierList 上传。
         if progress:
-            progress.message(
-                f"battle_festival 采集启动：{battle_config.date_from} 至 {battle_config.date_to}，来源 {battle_plan.source}"
-            )
-        try:
-            battle_collect = collect_follow(
-                settings,
-                battle_config.date_from,
-                battle_config.date_to,
-                include_solo=False,
-                include_battle_festival=True,
-                mode_scope=battle_config.mode_scope,
-                auth_source=auth_source,
-                interactive_auth=interactive_auth,
-                skip_existing=True,
-                skip_inactive=True,
-                concurrency_profile="aggressive",
-                progress=progress,
-                save_raw_snapshots=False,
-            )
-            if progress:
-                progress.message(_battle_festival_collect_summary(battle_collect.counts))
-            if battle_plan.upload_when_empty or _battle_festival_collect_has_evidence(battle_collect.counts):
-                battle_upload, battle_package_path, battle_uploaded_matches = _upload_contribution(
-                    settings,
-                    config,
-                    transport,
-                    battle_config,
-                    progress,
-                )
-                if progress:
-                    progress.message(f"battle_festival 上传场数：{battle_uploaded_matches}")
-            elif progress:
-                progress.message("battle_festival 未上传：旧 history 接口未发现 戦祭り seeds/details")
-        except Exception as exc:  # noqa: BLE001 - 战祭补采失败不能阻断普通 TierList 上传。
-            if progress:
-                progress.message(f"battle_festival 采集失败：{exc}")
-    elif progress:
-        progress.message(f"battle_festival 采集未启动：{battle_plan.reason}")
+            progress.message(f"battle_festival 采集失败：{exc}")
 
     collect_result = collect_follow(
         settings,
@@ -272,6 +275,7 @@ def sync_client(
         progress=progress,
         save_raw_snapshots=False,
     )
+    _require_collect_success(collect_result, MODE_SCOPE_TIER_LIST)
     upload, package_path, _upload_match_count = _upload_contribution(settings, config, transport, tier_config, progress)
 
     return ClientSyncResult(
@@ -279,10 +283,120 @@ def sync_client(
         package_path=package_path,
         upload=upload,
         viewer_url=f"{config.server_url}/me?token={urllib.parse.quote(config.api_token)}",
-        battle_festival_collect_result=battle_collect,
-        battle_festival_package_path=battle_package_path,
-        battle_festival_upload=battle_upload,
+        battle_festival_collect_result=battle_result.collect_result if battle_result else None,
+        battle_festival_package_path=battle_result.package_path if battle_result else None,
+        battle_festival_upload=battle_result.upload if battle_result else None,
+        effective_date_from=tier_config.date_from,
+        effective_date_to=tier_config.date_to,
     )
+
+
+def sync_battle_festival_client(
+    settings: Settings,
+    auth_source: str = "",
+    interactive_auth: bool = False,
+    transport: JsonTransport | None = None,
+    progress: ProgressReporter | None = None,
+    target_version: str = "",
+    active_only: bool = True,
+    period_override: BattleFestivalPeriod | None = None,
+) -> ClientBattleFestivalSyncResult:
+    """只同步战祭数据，供常驻高频任务使用。"""
+
+    with client_sync_lock(settings):
+        config = load_client_config(settings)
+        transport = transport or UrllibJsonTransport()
+        share_config = _request_share_config(config, transport, target_version=target_version)
+        _ensure_client_database(settings)
+        if period_override is None:
+            probe = probe_battle_festival_period(
+                settings,
+                auth_source=auth_source,
+                interactive_auth=interactive_auth,
+            )
+        else:
+            probe = BattleFestivalProbeResult(
+                period_override,
+                "cached_period",
+                "使用自动任务已确认的战祭周期",
+                source="cached_period",
+            )
+        return _sync_battle_festival_unlocked(
+            settings,
+            config,
+            transport,
+            share_config,
+            probe,
+            auth_source=auth_source,
+            interactive_auth=interactive_auth,
+            progress=progress,
+            active_only=active_only,
+        )
+
+
+def _sync_battle_festival_unlocked(
+    settings: Settings,
+    config: ClientConfig,
+    transport: JsonTransport,
+    share_config: ShareConfig,
+    probe: BattleFestivalProbeResult,
+    *,
+    auth_source: str,
+    interactive_auth: bool,
+    progress: ProgressReporter | None,
+    active_only: bool,
+) -> ClientBattleFestivalSyncResult:
+    if progress:
+        progress.message(f"战祭页探测状态：{probe.status}")
+        if probe.message:
+            progress.message(probe.message)
+    if active_only and not is_battle_festival_active(probe.period, today=today_jst()):
+        plan = BattleFestivalCollectPlan(None, "official_inactive", False, "当前不在官方战祭开放期")
+    else:
+        plan = battle_festival_collect_plan(share_config, probe)
+    battle_config = plan.config
+    if battle_config is None:
+        if progress:
+            progress.message(f"battle_festival 采集未启动：{plan.reason}")
+        return ClientBattleFestivalSyncResult(probe, plan, None, None, None)
+
+    if progress:
+        progress.message(
+            f"battle_festival 采集启动：{battle_config.date_from} 至 {battle_config.date_to}，来源 {plan.source}"
+        )
+    collect_result = collect_follow(
+        settings,
+        battle_config.date_from,
+        battle_config.date_to,
+        include_solo=False,
+        include_battle_festival=True,
+        mode_scope=battle_config.mode_scope,
+        auth_source=auth_source,
+        interactive_auth=interactive_auth,
+        skip_existing=True,
+        skip_inactive=True,
+        concurrency_profile="aggressive",
+        progress=progress,
+        save_raw_snapshots=False,
+    )
+    _require_collect_success(collect_result, MODE_SCOPE_BATTLE_FESTIVAL)
+    if progress:
+        progress.message(_battle_festival_collect_summary(collect_result.counts))
+    upload = None
+    package_path = None
+    if plan.upload_when_empty or _battle_festival_collect_has_evidence(collect_result.counts):
+        upload, package_path, uploaded_matches = _upload_contribution(
+            settings,
+            config,
+            transport,
+            battle_config,
+            progress,
+        )
+        if progress:
+            progress.message(f"battle_festival 上传场数：{uploaded_matches}")
+    elif progress:
+        progress.message("battle_festival 未上传：旧 history 接口未发现 戦祭り seeds/details")
+    return ClientBattleFestivalSyncResult(probe, plan, collect_result, package_path, upload)
 
 
 def fetch_client_share_config(settings: Settings, transport: JsonTransport | None = None, target_version: str = "") -> ShareConfig:
@@ -499,6 +613,13 @@ def _battle_festival_collect_summary(counts: dict[str, Any]) -> str:
     )
 
 
+def _require_collect_success(result: CollectResult, mode_scope: str) -> None:
+    if result.status != "failed":
+        return
+    detail = str(result.errors[0] if result.errors else "采集未返回可用结果")
+    raise RuntimeError(f"{mode_scope} 采集失败，已停止上传：{detail}")
+
+
 def _upload_contribution(
     settings: Settings,
     config: ClientConfig,
@@ -513,9 +634,15 @@ def _upload_contribution(
         / f"{share_config.mode_scope}_{share_config.target_version}_{share_config.date_from}_{share_config.date_to}.jsonl"
     )
     export_result = export_contribution(settings, share_config, config.contributor, package_path)
-    package_text = export_result.path.read_text(encoding="utf-8")
-    assert_safe_contribution_payload(package_text)
-    package_summary = _summarize_contribution_package(package_text)
+    candidate_text = export_result.path.read_text(encoding="utf-8")
+    assert_safe_contribution_payload(candidate_text)
+    package_summary = _summarize_contribution_package(candidate_text)
+    stable_path, package_text = _reuse_or_store_stable_package(
+        settings,
+        share_config,
+        package_summary,
+        candidate_text,
+    )
     if progress:
         progress.message(_format_package_summary(package_summary))
         if package_summary.mode_scope == MODE_SCOPE_BATTLE_FESTIVAL and package_summary.match_count > 0 and package_summary.player_merit_sample_count == 0:
@@ -530,11 +657,86 @@ def _upload_contribution(
     )
     if progress and upload.get("already_uploaded"):
         progress.message("服务器提示 already_uploaded=true：本次是同内容重复上传，内容未变化；请重新采集生成新包后再上传。")
-    try:
-        export_result.path.unlink()
-    except OSError:
-        pass
+    if export_result.path != stable_path:
+        try:
+            export_result.path.unlink()
+        except OSError:
+            pass
     return upload, export_result.path, export_result.match_count
+
+
+def _reuse_or_store_stable_package(
+    settings: Settings,
+    share_config: ShareConfig,
+    summary: ContributionPackageSummary,
+    candidate_text: str,
+) -> tuple[Path, str]:
+    """同一采集窗口内容未变化时复用原字节，让服务端 content_hash 真正幂等。"""
+
+    candidate_semantics = _stable_package_semantics(candidate_text)
+    cache_key = "|".join(
+        (
+            share_config.mode_scope,
+            share_config.target_version,
+            share_config.date_from,
+            share_config.date_to,
+        )
+    )
+    stable_dir = _client_tmp_dir(settings) / "stable"
+    stable_dir.mkdir(parents=True, exist_ok=True)
+    stable_path = stable_dir / f"{sha256_text(cache_key)[:24]}.jsonl"
+    if stable_path.exists():
+        try:
+            cached_text = stable_path.read_text(encoding="utf-8")
+            assert_safe_contribution_payload(cached_text)
+            cached_summary = _summarize_contribution_package(cached_text)
+            if (
+                cached_summary.package_id == summary.package_id
+                and _stable_package_semantics(cached_text) == candidate_semantics
+            ):
+                _prune_stable_package_cache(stable_dir, keep=stable_path)
+                return stable_path, cached_text
+        except (OSError, ValueError, json.JSONDecodeError):
+            pass
+    temp_path = stable_path.with_suffix(".tmp")
+    temp_path.write_text(candidate_text, encoding="utf-8")
+    os.replace(temp_path, stable_path)
+    _prune_stable_package_cache(stable_dir, keep=stable_path)
+    return stable_path, candidate_text
+
+
+def _stable_package_semantics(package_text: str) -> str:
+    """比较除生成时间外的完整 manifest 与记录内容。"""
+
+    lines = [line for line in package_text.splitlines() if line.strip()]
+    if not lines:
+        raise ValueError("贡献包为空")
+    manifest = json.loads(lines[0])
+    manifest.pop("created_at", None)
+    records = [json.loads(line) for line in lines[1:]]
+    normalized = json.dumps(
+        [manifest, *records],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return sha256_text(normalized)
+
+
+def _prune_stable_package_cache(directory: Path, keep: Path, limit: int = 32) -> None:
+    try:
+        candidates = sorted(
+            (path for path in directory.glob("*.jsonl") if path != keep),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError:
+        return
+    for path in candidates[max(0, limit - 1) :]:
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
 
 def _summarize_contribution_package(package_text: str) -> ContributionPackageSummary:
@@ -646,6 +848,11 @@ def client_config_path(settings: Settings) -> Path:
 
 
 def cleanup_raw_snapshots(settings: Settings) -> ClientCleanupResult:
+    with client_sync_lock(settings):
+        return _cleanup_raw_snapshots_unlocked(settings)
+
+
+def _cleanup_raw_snapshots_unlocked(settings: Settings) -> ClientCleanupResult:
     raw_dir = settings.raw_dir
     files_removed = 0
     bytes_removed = 0
