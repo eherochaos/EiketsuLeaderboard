@@ -642,6 +642,23 @@ ensure_battle_festival_scope() {
   fi
 }
 
+patch_battle_festival_period_source_runtime() {
+  local script='apps/api/data-migration/patch_battle_festival_period_source_runtime.py'
+  if docker_container_running "$DEPLOY_FASTAPI_CONTAINER"; then
+    local container_script='/tmp/patch_battle_festival_period_source_runtime.py'
+    local status=0
+    docker cp "$script" "$DEPLOY_FASTAPI_CONTAINER:$container_script"
+    docker exec "$DEPLOY_FASTAPI_CONTAINER" python "$container_script" --apply || status=$?
+    if [ "$status" -eq 0 ]; then
+      docker exec "$DEPLOY_FASTAPI_CONTAINER" python "$container_script" --check || status=$?
+    fi
+    docker exec "$DEPLOY_FASTAPI_CONTAINER" rm -f "$container_script" || true
+    return "$status"
+  fi
+  python3 "$script" --apply
+  python3 "$script" --check
+}
+
 decode_env() {
   if [ -z "${1:-}" ]; then
     printf ''
@@ -819,6 +836,8 @@ log 'stop leaderboard node api before restart'
 stop_leaderboard_node_api
 log 'restart service before route install'
 restart_service
+log 'patch battle festival period source runtime'
+patch_battle_festival_period_source_runtime
 log 'install fastapi routes'
 install_fastapi_routes
 log 'reload fastapi routes'

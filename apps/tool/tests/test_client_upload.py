@@ -286,7 +286,7 @@ def test_sync_client_collects_and_uploads_active_battle_festival_scope(tmp_path,
     )
     monkeypatch.setattr(client_upload, "today_jst", lambda: date(2026, 6, 12))
 
-    result = sync_client(settings, interactive_auth=False, transport=transport, target_version="Ver.battle", progress=progress)
+    result = sync_client(settings, interactive_auth=True, transport=transport, target_version="Ver.battle", progress=progress)
 
     assert result.battle_festival_collect_result is not None
     assert result.battle_festival_upload is not None
@@ -301,6 +301,7 @@ def test_sync_client_collects_and_uploads_active_battle_festival_scope(tmp_path,
     ]
     assert seen_calls[0][2]["mode_scope"] == MODE_SCOPE_BATTLE_FESTIVAL
     assert seen_calls[0][2]["include_battle_festival"] is True
+    assert seen_calls[0][2]["interactive_auth"] is True
     assert seen_calls[1][2]["mode_scope"] == MODE_SCOPE_TIER_LIST
     assert seen_calls[1][2]["include_battle_festival"] is False
     assert len(transport.upload_payloads) == 2

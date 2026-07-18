@@ -4,6 +4,8 @@ from datetime import date
 from http.cookiejar import CookieJar
 from pathlib import Path
 
+import pytest
+
 from eiketsu_env.config import Settings
 from eiketsu_env.services import battle_festival
 from eiketsu_env.services.battle_festival import (
@@ -14,6 +16,18 @@ from eiketsu_env.services.battle_festival import (
     probe_battle_festival_period,
 )
 from eiketsu_env.services.browser_session import BrowserCookieResult, BrowserPageResult
+
+
+PUBLIC_EVENT_INDEX_URL = "https://info-eiketsu-taisen.sega.jp/archives/category/event"
+
+
+@pytest.fixture(autouse=True)
+def _disable_live_public_requests(monkeypatch):
+    monkeypatch.setattr(
+        battle_festival,
+        "fetch_public_page",
+        lambda url, timeout=20: ("<html><body><div class='site-articles-list news'></div></body></html>", url),
+    )
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -80,6 +94,168 @@ def test_probe_battle_festival_period_reports_active(tmp_path, monkeypatch):
 
     assert result.period == BattleFestivalPeriod("2026-06-11", "2026-06-13")
     assert result.status == "active"
+    assert result.source == "member_page"
+
+
+def test_parse_battle_festival_period_ignores_time_range_before_dates():
+    html = """
+    <html><body>
+      <p>戦祭り 開催時間 10:20～11:30</p>
+      <p>開催期間 2026年7月18日～7月20日</p>
+    </body></html>
+    """
+
+    assert parse_battle_festival_period(html) == BattleFestivalPeriod(
+        "2026-07-18",
+        "2026-07-20",
+    )
+
+
+def test_probe_battle_festival_period_prefers_current_public_announcement(tmp_path, monkeypatch):
+    calls: list[str] = []
+    index_html = """
+    <html><body><div class="site-articles-list news">
+      <a href="/archives/7600">英傑大戦 公式生放送</a>
+      <a href="https://info-eiketsu-taisen.sega.jp/news/7601">戦祭り「偽パス」開催のお知らせ</a>
+      <a href="https://info-eiketsu-taisen.sega.jp.example/archives/7602">戦祭り「偽ホスト」開催のお知らせ</a>
+      <a href="/archives/7592?tracking=private">戦祭り「樊城の戦い」開催のお知らせ</a>
+      <a href="/archives/7487">戦祭り「牧野の戦い・封神」開催のお知らせ</a>
+    </div></body></html>
+    """
+    article_html = """
+    <html><body>
+      <h1>戦祭り「樊城の戦い」開催のお知らせ</h1>
+      <p>2026年7月18日（土）から7月20日（月）までの3日間、戦祭りを開催いたします。</p>
+    </body></html>
+    """
+
+    def fake_public_fetch(url: str, timeout: int = 20):
+        calls.append(url)
+        if url == PUBLIC_EVENT_INDEX_URL:
+            return index_html, url
+        assert url == "https://info-eiketsu-taisen.sega.jp/archives/7592"
+        return article_html, f"{url}?preview=private"
+
+    def fail_member_session(*args, **kwargs):
+        pytest.fail("公开公告命中时不应创建会员会话")
+
+    monkeypatch.setattr(battle_festival, "fetch_public_page", fake_public_fetch)
+    monkeypatch.setattr(battle_festival, "create_member_session", fail_member_session)
+    monkeypatch.setattr(battle_festival, "today_jst", lambda: date(2026, 7, 18))
+
+    result = probe_battle_festival_period(_settings(tmp_path))
+
+    assert result.period == BattleFestivalPeriod("2026-07-18", "2026-07-20")
+    assert result.status == "active"
+    assert result.source == "public_announcement"
+    assert result.final_url == "https://info-eiketsu-taisen.sega.jp/archives/7592"
+    assert "private" not in result.message
+    assert calls == [PUBLIC_EVENT_INDEX_URL, "https://info-eiketsu-taisen.sega.jp/archives/7592"]
+
+
+def test_probe_battle_festival_period_falls_back_after_public_article_redirect(tmp_path, monkeypatch):
+    index_html = """
+    <html><body><div class="site-articles-list news">
+      <a href="/archives/7592">戦祭り「樊城の戦い」開催のお知らせ</a>
+    </div></body></html>
+    """
+
+    class FakeMember:
+        def fetch_text(self, url, timeout=20):
+            return (
+                "<html><body><p>戦祭り 開催期間 2026年7月18日 ～ 7月20日</p></body></html>",
+                "https://eiketsu-taisen.net/members/festival/",
+            )
+
+    def fake_public_fetch(url: str, timeout: int = 20):
+        if url == PUBLIC_EVENT_INDEX_URL:
+            return index_html, url
+        return "<html><body>redirected</body></html>", "https://info-eiketsu-taisen.sega.jp/archives/category/event"
+
+    monkeypatch.setattr(battle_festival, "fetch_public_page", fake_public_fetch)
+    monkeypatch.setattr(battle_festival, "today_jst", lambda: date(2026, 7, 18))
+
+    result = probe_battle_festival_period(_settings(tmp_path), member_session=FakeMember())
+
+    assert result.period == BattleFestivalPeriod("2026-07-18", "2026-07-20")
+    assert result.status == "active"
+    assert result.source == "member_page"
+    assert "public_redirected" in result.message
+
+
+def test_probe_battle_festival_period_falls_back_when_public_has_no_announcement(tmp_path, monkeypatch):
+    class FakeMember:
+        def fetch_text(self, url, timeout=20):
+            return (
+                "<html><body><p>戦祭り 開催期間 2026年7月18日 ～ 7月20日</p></body></html>",
+                "https://eiketsu-taisen.net/members/festival/",
+            )
+
+    monkeypatch.setattr(battle_festival, "today_jst", lambda: date(2026, 7, 18))
+
+    result = probe_battle_festival_period(_settings(tmp_path), member_session=FakeMember())
+
+    assert result.period == BattleFestivalPeriod("2026-07-18", "2026-07-20")
+    assert result.status == "active"
+    assert result.source == "member_page"
+    assert "public_no_announcement" in result.message
+
+
+def test_probe_battle_festival_period_falls_back_after_public_network_failure(tmp_path, monkeypatch):
+    class FakeMember:
+        def fetch_text(self, url, timeout=20):
+            return (
+                "<html><body><p>戦祭り 開催期間 2026年7月18日 ～ 7月20日</p></body></html>",
+                "https://eiketsu-taisen.net/members/festival/",
+            )
+
+    def fail_public_fetch(url: str, timeout: int = 20):
+        raise OSError("failed https://info-eiketsu-taisen.sega.jp/?token=private")
+
+    monkeypatch.setattr(battle_festival, "fetch_public_page", fail_public_fetch)
+    monkeypatch.setattr(battle_festival, "today_jst", lambda: date(2026, 7, 18))
+
+    result = probe_battle_festival_period(_settings(tmp_path), member_session=FakeMember())
+
+    assert result.period == BattleFestivalPeriod("2026-07-18", "2026-07-20")
+    assert result.status == "active"
+    assert result.source == "member_page"
+    assert "public_fetch_failed" in result.message
+    assert "token" not in result.message
+    assert "private" not in result.message
+
+
+def test_probe_battle_festival_period_returns_expired_latest_public_announcement(tmp_path, monkeypatch):
+    calls: list[str] = []
+    index_html = """
+    <html><body><div class="site-articles-list news">
+      <a href="/archives/7592">戦祭り「樊城の戦い」開催のお知らせ</a>
+      <a href="/archives/7487">戦祭り「牧野の戦い・封神」開催のお知らせ</a>
+    </div></body></html>
+    """
+
+    def fake_public_fetch(url: str, timeout: int = 20):
+        calls.append(url)
+        if url == PUBLIC_EVENT_INDEX_URL:
+            return index_html, url
+        return (
+            "<html><body><p>戦祭り 開催期間 2026年7月18日 ～ 7月20日</p></body></html>",
+            url,
+        )
+
+    def fail_member_session(*args, **kwargs):
+        pytest.fail("公开公告可解析但已过期时不应回退会员页")
+
+    monkeypatch.setattr(battle_festival, "fetch_public_page", fake_public_fetch)
+    monkeypatch.setattr(battle_festival, "create_member_session", fail_member_session)
+    monkeypatch.setattr(battle_festival, "today_jst", lambda: date(2026, 7, 21))
+
+    result = probe_battle_festival_period(_settings(tmp_path))
+
+    assert result.period == BattleFestivalPeriod("2026-07-18", "2026-07-20")
+    assert result.status == "inactive"
+    assert result.source == "public_announcement"
+    assert calls == [PUBLIC_EVENT_INDEX_URL, "https://info-eiketsu-taisen.sega.jp/archives/7592"]
 
 
 def test_probe_battle_festival_period_uses_live_browser_when_http_redirects(tmp_path, monkeypatch):
@@ -94,7 +270,7 @@ def test_probe_battle_festival_period_uses_live_browser_when_http_redirects(tmp_
         "fetch_live_browser_page",
         lambda _settings, _source, _url: BrowserPageResult(
             "chrome",
-            "https://eiketsu-taisen.net/members/festival/",
+            "https://eiketsu-taisen.net/members/festival/?token=private",
             "<html><body><p>戦祭り 開催期間 2026年6月11日 ～ 6月13日</p></body></html>",
         ),
     )
@@ -105,6 +281,7 @@ def test_probe_battle_festival_period_uses_live_browser_when_http_redirects(tmp_
     assert result.period == BattleFestivalPeriod("2026-06-11", "2026-06-13")
     assert result.status == "active"
     assert result.final_url == "https://eiketsu-taisen.net/members/festival/"
+    assert "private" not in result.message
     assert "浏览器上下文" in result.message
 
 
