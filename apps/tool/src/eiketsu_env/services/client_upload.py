@@ -230,7 +230,7 @@ def sync_client(
                 include_battle_festival=True,
                 mode_scope=battle_config.mode_scope,
                 auth_source=auth_source,
-                interactive_auth=False,
+                interactive_auth=interactive_auth,
                 skip_existing=True,
                 skip_inactive=True,
                 concurrency_profile="aggressive",

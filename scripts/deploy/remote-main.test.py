@@ -65,6 +65,22 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
             "log 'refresh leaderboard snapshot'",
         )
 
+    def test_deploy_patches_battle_festival_period_source_after_restart(self) -> None:
+        patch = self.function_body("patch_battle_festival_period_source_runtime")
+        self.assertIn("patch_battle_festival_period_source_runtime.py", patch)
+        self.assertIn('docker cp "$script" "$DEPLOY_FASTAPI_CONTAINER:$container_script"', patch)
+        self.assertIn('python "$container_script" --apply', patch)
+        self.assertIn('python "$container_script" --check', patch)
+        self.assertIn('rm -f "$container_script"', patch)
+        self.assertIn('python3 "$script" --apply', patch)
+        self.assertIn('python3 "$script" --check', patch)
+        self.assert_order(
+            "log 'ensure battle festival schema'",
+            "log 'restart service before route install'",
+            "log 'patch battle festival period source runtime'",
+            "log 'install fastapi routes'",
+        )
+
     def test_deploy_sets_server_share_config_before_refresh(self) -> None:
         setter = self.function_body("set_server_share_config")
         self.assertIn("set_server_share_config.py", setter)
