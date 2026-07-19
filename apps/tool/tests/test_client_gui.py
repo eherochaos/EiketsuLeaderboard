@@ -1,9 +1,14 @@
 import queue
 import sqlite3
+from contextlib import contextmanager
 from datetime import date
+from types import SimpleNamespace
+
+import pytest
 
 from eiketsu_env import client_gui
 from eiketsu_env.client_gui import (
+    CollectorApp,
     GuiProgressReporter,
     _browser_doctor_warning_title,
     _messagebox_title_for_error,
@@ -17,6 +22,7 @@ from eiketsu_env.client_gui import (
     migrate_legacy_database_for_gui,
     parse_gui_args,
     resolve_close_action,
+    should_start_hidden,
     update_install_instruction,
 )
 from eiketsu_env.config import Settings
@@ -62,6 +68,195 @@ def test_background_args_and_close_policy_are_explicit():
     assert resolve_close_action(configured, tray_ready=True) == "hide"
     assert resolve_close_action(configured, tray_ready=False) == "quit"
     assert resolve_close_action(disabled, tray_ready=True) == "quit"
+    assert should_start_hidden(True, configured, tray_ready=True, browser_ready=True, auth_required=False) is True
+    assert should_start_hidden(True, configured, tray_ready=True, browser_ready=True, auth_required=True) is False
+
+
+def test_automation_runtime_prepares_background_browser_before_scheduler():
+    calls: list[str] = []
+    app = object.__new__(CollectorApp)
+    app.auto_config = AutoTaskConfig(daily_enabled=True, auth_source="chrome")
+    app.browser_runtime = SimpleNamespace(
+        ensure_background=lambda source: calls.append(f"browser:{source}"),
+    )
+    app.scheduler = SimpleNamespace(start=lambda: calls.append("scheduler"))
+    app._ensure_tray = lambda: calls.append("tray")
+    app.background_browser_ready = False
+    app.state_vars = SimpleNamespace(status=SimpleNamespace(set=lambda _value: None))
+
+    app._configure_automation_runtime()
+
+    assert calls == ["tray", "browser:chrome", "scheduler"]
+    assert app.background_browser_ready is True
+
+
+def test_close_to_tray_keeps_managed_browser_running():
+    calls: list[str] = []
+    app = object.__new__(CollectorApp)
+    app.auto_config = AutoTaskConfig(daily_enabled=True)
+    app.tray = SimpleNamespace(ready=True)
+    app.tray_ready = True
+    app.withdraw = lambda: calls.append("withdraw")
+    app._log = lambda _message: calls.append("log")
+    app.browser_runtime = SimpleNamespace(close=lambda: calls.append("browser-close"))
+    app.quit_app = lambda: calls.append("quit")
+
+    app._on_window_close()
+
+    assert calls == ["withdraw", "log"]
+
+
+def test_shutdown_services_stops_scheduler_then_browser_and_is_idempotent():
+    calls: list[str] = []
+    app = object.__new__(CollectorApp)
+    app.services_shutdown = False
+    app._cancel_login_poll = lambda: calls.append("cancel-poll")
+    app.scheduler = SimpleNamespace(stop=lambda: calls.append("scheduler-stop"))
+    app.browser_runtime = SimpleNamespace(close=lambda: calls.append("browser-close") or True)
+    app._stop_tray = lambda: calls.append("tray-stop")
+
+    app._shutdown_services()
+    app._shutdown_services()
+
+    assert calls == ["cancel-poll", "scheduler-stop", "browser-close", "tray-stop"]
+
+
+def test_shutdown_services_retries_when_browser_did_not_close():
+    calls: list[str] = []
+    close_results = iter([False, True])
+    app = object.__new__(CollectorApp)
+    app.services_shutdown = False
+    app._cancel_login_poll = lambda: calls.append("cancel-poll")
+    app.scheduler = SimpleNamespace(stop=lambda: calls.append("scheduler-stop"))
+    app.browser_runtime = SimpleNamespace(
+        close=lambda: calls.append("browser-close") or next(close_results),
+    )
+    app._stop_tray = lambda: calls.append("tray-stop")
+
+    assert app._shutdown_services() is False
+    assert app.services_shutdown is False
+    assert app._shutdown_services() is True
+    assert app.services_shutdown is True
+    assert calls.count("browser-close") == 2
+
+
+def test_constructor_failure_closes_started_browser_runtime(tmp_path, monkeypatch):
+    calls: list[str] = []
+
+    class DummyVar:
+        def __init__(self, value=None, **_kwargs):
+            self.value = value
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+
+    runtime = SimpleNamespace(
+        close=lambda: calls.append("browser-close") or True,
+        ensure_background=lambda _source: None,
+    )
+    scheduler = SimpleNamespace(stop=lambda: calls.append("scheduler-stop"))
+    monkeypatch.setattr(client_gui.tk.Tk, "__init__", lambda self: None)
+    monkeypatch.setattr(CollectorApp, "title", lambda self, _value: None)
+    monkeypatch.setattr(CollectorApp, "geometry", lambda self, _value: None)
+    monkeypatch.setattr(CollectorApp, "minsize", lambda self, *_args: None)
+    monkeypatch.setattr(CollectorApp, "destroy", lambda self: calls.append("destroy"))
+    monkeypatch.setattr(CollectorApp, "_build_shell", lambda self: (_ for _ in ()).throw(RuntimeError("shell failed")))
+    monkeypatch.setattr(client_gui.tk, "StringVar", DummyVar)
+    monkeypatch.setattr(client_gui.tk, "BooleanVar", DummyVar)
+    monkeypatch.setattr(client_gui.tk, "DoubleVar", DummyVar)
+    monkeypatch.setattr(client_gui, "load_auto_task_config", lambda _settings: AutoTaskConfig())
+    monkeypatch.setattr(client_gui, "load_auto_task_state", lambda _settings: AutoTaskState())
+    monkeypatch.setattr(client_gui, "AutoTaskScheduler", lambda *args, **kwargs: scheduler)
+
+    with pytest.raises(RuntimeError, match="shell failed"):
+        CollectorApp(
+            settings=Settings(root_dir=tmp_path, db_url="sqlite:///:memory:"),
+            browser_runtime_factory=lambda _settings: runtime,
+        )
+
+    assert calls == ["scheduler-stop", "browser-close", "destroy"]
+
+
+def test_login_success_switches_to_background_before_waking_tasks(monkeypatch):
+    calls: list[str] = []
+    app = object.__new__(CollectorApp)
+    app.login_poll_active = True
+    app.login_poll_generation = 3
+    app.login_poll_attempts = 1
+    app.login_poll_inflight = True
+    app.browser_ok = False
+    app.auto_config = AutoTaskConfig(daily_enabled=True)
+    app.browser_runtime = SimpleNamespace(
+        switch_to_background=lambda source: calls.append(f"switch:{source}"),
+    )
+    app.scheduler = SimpleNamespace(executing=False, wake=lambda: calls.append("wake"))
+    app._selected_auth_source = lambda: "chrome"
+    app._selected_browser_label = lambda: "Google Chrome"
+    app._cancel_login_poll = lambda: calls.append("cancel-poll")
+    app._reload_auto_state = lambda: calls.append("reload-state")
+    app._log = lambda _message: None
+    app._go_to_step = lambda step: calls.append(f"step:{step}")
+    app.state_vars = SimpleNamespace(status=SimpleNamespace(set=lambda _value: None))
+    monkeypatch.setattr(
+        client_gui,
+        "clear_auto_task_auth_required",
+        lambda _settings: calls.append("clear-auth"),
+    )
+    app.settings = Settings(root_dir=SimpleNamespace(), db_url="sqlite:///:memory:")
+
+    app._handle_login_poll_result(
+        {
+            "generation": 3,
+            "attempt": 1,
+            "selected_label": "Google Chrome",
+            "client": {"message": "ok"},
+            "browser": {"ok": True, "auth_source": "chrome"},
+        }
+    )
+
+    assert calls == [
+        "switch:chrome",
+        "cancel-poll",
+        "clear-auth",
+        "reload-state",
+        "wake",
+        "step:2",
+    ]
+
+
+def test_mainloop_exception_still_closes_runtime(monkeypatch):
+    calls: list[str] = []
+    settings = Settings(root_dir=SimpleNamespace(), db_url="sqlite:///:memory:")
+
+    @contextmanager
+    def fake_lock(_settings):
+        yield
+
+    class FakeApp:
+        def __init__(self, **_kwargs):
+            calls.append("app-created")
+
+        def mainloop(self):
+            calls.append("mainloop")
+            raise RuntimeError("boom")
+
+        def _shutdown_services(self):
+            calls.append("shutdown")
+            return True
+
+    monkeypatch.setattr(client_gui, "load_client_settings", lambda: settings)
+    monkeypatch.setattr(client_gui, "client_instance_lock", fake_lock)
+    monkeypatch.setattr(client_gui, "clear_client_instance_signal", lambda _settings: None)
+    monkeypatch.setattr(client_gui, "migrate_legacy_database_for_gui", lambda *args, **kwargs: (None, ""))
+    monkeypatch.setattr(client_gui, "CollectorApp", FakeApp)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        client_gui.main([])
+
+    assert calls == ["app-created", "mainloop", "shutdown"]
 
 
 def test_auto_task_state_message_prioritizes_auth_failure():
@@ -85,7 +280,7 @@ def test_auto_task_state_formats_job_and_jst_time_for_users():
 
 
 def test_update_instruction_requires_full_exit_before_running_new_version():
-    text = update_install_instruction("EiketsuCollector_0.2.13.exe")
+    text = update_install_instruction("EiketsuCollector_0.2.14.exe")
 
     assert "彻底退出当前程序" in text
     assert "托盘菜单" in text

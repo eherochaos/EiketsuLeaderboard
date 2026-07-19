@@ -67,6 +67,7 @@ def run_auto_task_once(
     force: bool = False,
     progress=None,
     clock: Callable[[], datetime] | None = None,
+    prepare_browser: Callable[[str], object] | None = None,
 ) -> AutoTaskOutcome:
     """检查并最多执行一项任务；失败时不推进完成游标。"""
 
@@ -87,6 +88,8 @@ def run_auto_task_once(
         save_auto_task_state(settings, state)
 
     try:
+        if prepare_browser is not None:
+            prepare_browser(config.auth_source)
         execution = _execute_job(settings, config, job, progress)
     except ClientSyncBusyError:
         return AutoTaskOutcome("busy", job, "已有同步任务正在运行，稍后重试")
@@ -130,11 +133,13 @@ class AutoTaskScheduler:
         *,
         progress_factory: ProgressReporterFactory | None = None,
         outcome_callback: Callable[[AutoTaskOutcome], None] | None = None,
+        prepare_browser: Callable[[str], object] | None = None,
         poll_seconds: float = AUTO_TASK_POLL_SECONDS,
     ) -> None:
         self.settings = settings
         self.progress_factory = progress_factory
         self.outcome_callback = outcome_callback
+        self.prepare_browser = prepare_browser
         self.poll_seconds = max(1.0, float(poll_seconds))
         self._thread: threading.Thread | None = None
         self._wake = threading.Event()
@@ -206,6 +211,7 @@ class AutoTaskScheduler:
                             self.settings,
                             force=self._consume_force(),
                             progress=progress,
+                            prepare_browser=self.prepare_browser,
                         )
                     except Exception as exc:  # noqa: BLE001 - 坏配置也不能让常驻线程静默死亡。
                         outcome = AutoTaskOutcome("failed", message=_safe_error(exc))

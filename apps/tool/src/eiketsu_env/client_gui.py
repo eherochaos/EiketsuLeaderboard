@@ -30,7 +30,7 @@ from eiketsu_env.services.automation_runtime import (
     AutoTaskScheduler,
     clear_auto_task_auth_required,
 )
-from eiketsu_env.services.browser_session import doctor_browser, open_login_url
+from eiketsu_env.services.browser_session import BrowserAuthError, ManagedChromiumRuntime, doctor_browser
 from eiketsu_env.services.client_lock import (
     ClientSyncBusyError,
     clear_client_instance_signal,
@@ -87,6 +87,23 @@ def configured_auto_tasks(config: AutoTaskConfig) -> bool:
 
 def resolve_close_action(config: AutoTaskConfig, tray_ready: bool) -> str:
     return "hide" if configured_auto_tasks(config) and tray_ready else "quit"
+
+
+def should_start_hidden(
+    requested: bool,
+    config: AutoTaskConfig,
+    *,
+    tray_ready: bool,
+    browser_ready: bool,
+    auth_required: bool,
+) -> bool:
+    return bool(
+        requested
+        and configured_auto_tasks(config)
+        and tray_ready
+        and browser_ready
+        and not auth_required
+    )
 
 
 def log_lines_to_trim(line_count: int, limit: int = MAX_LOG_LINES) -> int:
@@ -436,6 +453,7 @@ class CollectorApp(tk.Tk):
         settings: Settings | None = None,
         start_hidden: bool = False,
         tray_factory: Callable[..., WindowsTrayIcon] = WindowsTrayIcon,
+        browser_runtime_factory: Callable[[Settings], ManagedChromiumRuntime] = ManagedChromiumRuntime,
     ) -> None:
         super().__init__()
         self.title("Eiketsu Collector")
@@ -495,22 +513,46 @@ class CollectorApp(tk.Tk):
         self.tray: WindowsTrayIcon | None = None
         self.tray_ready = False
         self.tray_factory = tray_factory
+        self.browser_runtime = browser_runtime_factory(self.settings)
+        self.background_browser_ready = True
+        self.services_shutdown = False
         self.scheduler = AutoTaskScheduler(
             self.settings,
             progress_factory=lambda: GuiProgressReporter(self.events),
             outcome_callback=lambda outcome: self.events.put(("automation_outcome", outcome)),
+            prepare_browser=self.browser_runtime.ensure_background,
         )
-        self._build_shell()
-        self._load_existing_config()
-        self._render_step()
-        self.protocol("WM_DELETE_WINDOW", self._on_window_close)
-        for message in startup_messages:
-            self._log(message)
-        self._configure_automation_runtime()
-        if start_hidden and configured_auto_tasks(self.auto_config) and self.tray_ready:
-            self.withdraw()
-        self.after(120, self._drain_events)
-        self.after(800, self._check_update_on_startup)
+        try:
+            self._build_shell()
+            self._load_existing_config()
+            self._render_step()
+            self.protocol("WM_DELETE_WINDOW", self._on_window_close)
+            for message in startup_messages:
+                self._log(message)
+            if self.auto_state.auth_required:
+                self.state_vars.status.set("自动任务需要重新登录")
+                self._log("自动任务仍在等待重新登录；本次启动不会隐藏主窗口。")
+            self._configure_automation_runtime()
+            if should_start_hidden(
+                start_hidden,
+                self.auto_config,
+                tray_ready=self.tray_ready,
+                browser_ready=self.background_browser_ready,
+                auth_required=self.auto_state.auth_required,
+            ):
+                self.withdraw()
+            self.after(120, self._drain_events)
+            self.after(800, self._check_update_on_startup)
+        except BaseException:
+            try:
+                if not self._shutdown_services():
+                    self._shutdown_services()
+            finally:
+                try:
+                    self.destroy()
+                except tk.TclError:
+                    pass
+            raise
 
     def _build_shell(self) -> None:
         self.columnconfigure(0, weight=1)
@@ -875,6 +917,9 @@ class CollectorApp(tk.Tk):
         self._run_background("同步上传", task, self._after_sync_success)
 
     def save_auto_tasks(self) -> None:
+        if self.scheduler.executing:
+            messagebox.showinfo("自动任务正在运行", "请等待当前自动任务完成后再保存浏览器或调度设置。")
+            return
         try:
             interval = int(self.state_vars.festival_interval_minutes.get().strip())
             config = AutoTaskConfig(
@@ -918,8 +963,17 @@ class CollectorApp(tk.Tk):
         self._log("已请求立即检查并运行一项自动任务。")
 
     def open_login_page(self) -> None:
+        if self.scheduler.executing:
+            messagebox.showinfo("自动任务正在运行", "请等待当前自动任务完成后再打开登录页。")
+            return
         auth_source = self._selected_auth_source()
-        opened_source = open_login_url(self.settings, auth_source)
+        try:
+            opened_source = self.browser_runtime.open_login(auth_source)
+        except (BrowserAuthError, OSError) as exc:
+            self._log(f"打开登录页失败：{exc}")
+            self.state_vars.status.set("登录页打开失败")
+            messagebox.showerror("无法打开登录页", str(exc))
+            return
         selected = self._selected_browser_label()
         opened_label = BROWSER_DISPLAY_NAMES.get(opened_source, selected)
         if opened_source == "default-browser":
@@ -936,6 +990,13 @@ class CollectorApp(tk.Tk):
     def _configure_automation_runtime(self) -> None:
         if configured_auto_tasks(self.auto_config):
             self._ensure_tray()
+            try:
+                self.browser_runtime.ensure_background(self.auto_config.auth_source)
+                self.background_browser_ready = True
+            except (BrowserAuthError, OSError) as exc:
+                self.background_browser_ready = False
+                self._log(f"后台浏览器启动失败：{exc}")
+                self.state_vars.status.set("后台浏览器需要处理")
             self.scheduler.start()
             if self.auto_config.start_with_windows:
                 try:
@@ -943,6 +1004,7 @@ class CollectorApp(tk.Tk):
                 except (OSError, RuntimeError) as exc:
                     self._log(f"登录自启校正失败：{exc}")
             return
+        self.background_browser_ready = True
         self.scheduler.stop()
         self._stop_tray()
 
@@ -1018,6 +1080,8 @@ class CollectorApp(tk.Tk):
         elif outcome.status == "auth_required":
             self._log("自动任务暂停：需要重新登录英杰大战.NET。")
             self.state_vars.status.set("自动任务需要重新登录")
+            self.show_window()
+            self._go_to_step(1)
         elif outcome.status == "failed":
             self._log(f"自动任务失败：{outcome.message}")
             self.state_vars.status.set("自动任务失败")
@@ -1051,10 +1115,25 @@ class CollectorApp(tk.Tk):
             "当前任务尚未完成。彻底退出会中断本次任务，确定退出吗？",
         ):
             return
+        if not self._shutdown_services():
+            messagebox.showerror(
+                "专用浏览器仍在运行",
+                "程序未能关闭自己启动的专用浏览器。请先手动关闭该浏览器，再次选择“彻底退出”。",
+            )
+            return
+        self.destroy()
+
+    def _shutdown_services(self) -> bool:
+        if self.services_shutdown:
+            return True
         self._cancel_login_poll()
         self.scheduler.stop()
-        self._stop_tray()
-        self.destroy()
+        try:
+            browser_closed = self.browser_runtime.close()
+        finally:
+            self._stop_tray()
+        self.services_shutdown = browser_closed
+        return browser_closed
 
     def open_me(self) -> None:
         try:
@@ -1170,6 +1249,25 @@ class CollectorApp(tk.Tk):
         browser = payload["browser"]
         if bool(browser.get("ok")):
             self.browser_ok = True
+            if configured_auto_tasks(self.auto_config):
+                if self.scheduler.executing:
+                    self.state_vars.status.set("登录成功，等待自动任务结束")
+                    self._schedule_login_poll()
+                    return
+                try:
+                    self.browser_runtime.switch_to_background(self._selected_auth_source())
+                    self.background_browser_ready = True
+                except (BrowserAuthError, OSError) as exc:
+                    self.browser_ok = False
+                    self.background_browser_ready = False
+                    self._log(f"登录已确认，但后台浏览器启动失败：{exc}")
+                    self.state_vars.status.set("后台浏览器启动失败")
+                    messagebox.showerror(
+                        "无法切换到后台运行",
+                        f"登录已经成功，但浏览器无法转到后台运行。\n\n{exc}\n\n请重新点击“打开登录页”后再试。",
+                    )
+                    return
+            self._cancel_login_poll()
             try:
                 clear_auto_task_auth_required(self.settings)
             except ValueError as exc:
@@ -1179,7 +1277,6 @@ class CollectorApp(tk.Tk):
             readable_message = format_browser_doctor_message(browser, str(payload.get("selected_label") or self._selected_browser_label()))
             self._log(f"客户端：{client.get('message', '已检查')}")
             self._log(f"浏览器登录：{readable_message}")
-            self._cancel_login_poll()
             self.state_vars.status.set("登录成功，进入同步步骤")
             self._go_to_step(2)
             return
@@ -1425,21 +1522,27 @@ def main(argv: list[str] | None = None) -> None:
             return
     try:
         with client_instance_lock(settings):
-            clear_client_instance_signal(settings)
-            migrated, migration_warning = migrate_legacy_database_for_gui(
-                settings,
-                frozen=bool(getattr(sys, "frozen", False)),
-            )
-            app = CollectorApp(settings=settings, start_hidden=bool(args.background))
-            if migrated is not None:
-                app._log("已将旧版本地对局数据库迁移到固定客户端目录。")
-            if migration_warning:
-                app._log(migration_warning)
-                app.after(
-                    0,
-                    lambda: messagebox.showwarning("旧数据迁移失败", migration_warning),
+            app: CollectorApp | None = None
+            try:
+                clear_client_instance_signal(settings)
+                migrated, migration_warning = migrate_legacy_database_for_gui(
+                    settings,
+                    frozen=bool(getattr(sys, "frozen", False)),
                 )
-            app.mainloop()
+                app = CollectorApp(settings=settings, start_hidden=bool(args.background))
+                if migrated is not None:
+                    app._log("已将旧版本地对局数据库迁移到固定客户端目录。")
+                if migration_warning:
+                    app._log(migration_warning)
+                    app.after(
+                        0,
+                        lambda: messagebox.showwarning("旧数据迁移失败", migration_warning),
+                    )
+                app.mainloop()
+            finally:
+                if app is not None:
+                    if not app._shutdown_services():
+                        app._shutdown_services()
     except ClientSyncBusyError:
         if not args.background:
             notified = False
