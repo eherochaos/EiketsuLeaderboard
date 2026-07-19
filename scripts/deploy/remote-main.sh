@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+REFRESH_LOCK_FILE=''
+REFRESH_LOCK_TOKEN=''
+REFRESH_LOCK_OWNED=0
+
 log() {
   printf '[deploy] %s\n' "$*"
 }
@@ -26,6 +30,45 @@ ensure_deploy_owner() {
   local path="$1"
   [ -e "$path" ] || return 0
   sudo -n chown -R "$(id -u):$(id -g)" "$path" 2>/dev/null || chown -R "$(id -u):$(id -g)" "$path"
+}
+
+acquire_refresh_lock() {
+  local wait_seconds="${DEPLOY_REFRESH_LOCK_WAIT_SECONDS:-900}"
+  case "$wait_seconds" in
+    ''|*[!0-9]*)
+      fail 'DEPLOY_REFRESH_LOCK_WAIT_SECONDS must be a non-negative integer'
+      ;;
+  esac
+
+  local deadline=$((SECONDS + wait_seconds))
+  local wait_logged=0
+  REFRESH_LOCK_TOKEN="deploy:$$:$(date +%s)"
+  while true; do
+    if (set -o noclobber; printf '%s\n' "$REFRESH_LOCK_TOKEN" > "$REFRESH_LOCK_FILE") 2>/dev/null; then
+      REFRESH_LOCK_OWNED=1
+      return 0
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      fail "snapshot refresh lock is still held after ${wait_seconds}s"
+    fi
+    if [ "$wait_logged" -eq 0 ]; then
+      log 'wait for running snapshot refresh'
+      wait_logged=1
+    fi
+    sleep 2
+  done
+}
+
+release_refresh_lock() {
+  [ "$REFRESH_LOCK_OWNED" -eq 1 ] || return 0
+  local current_token=''
+  if [ -f "$REFRESH_LOCK_FILE" ]; then
+    IFS= read -r current_token < "$REFRESH_LOCK_FILE" || true
+  fi
+  if [ "$current_token" = "$REFRESH_LOCK_TOKEN" ]; then
+    rm -f "$REFRESH_LOCK_FILE" || true
+  fi
+  REFRESH_LOCK_OWNED=0
 }
 
 to_work_path() {
@@ -713,6 +756,13 @@ DIST_ARCHIVE='/tmp/eiketsu-web-dist.tgz'
 [ -f "$SOURCE_ARCHIVE" ] || fail 'deploy source archive is missing'
 [ -f "$DIST_ARCHIVE" ] || fail 'web dist archive is missing'
 
+DATA_ROOT='apps/api/data'
+REFRESH_LOCK_FILE="$DATA_ROOT/.leaderboard-snapshot.json.refresh.lock"
+ensure_writable_dir "$DATA_ROOT"
+trap release_refresh_lock EXIT
+log 'acquire snapshot refresh lock'
+acquire_refresh_lock
+
 log 'publish source'
 tar -xzf "$SOURCE_ARCHIVE" -C "$DEPLOY_PATH"
 rm -f "$SOURCE_ARCHIVE"
@@ -731,7 +781,6 @@ if [ -d apps/web/dist ]; then
 fi
 mv apps/web/dist.next apps/web/dist
 
-DATA_ROOT='apps/api/data'
 LEGACY_ROOT="$DATA_ROOT/legacy-service"
 STATUS_FILE="$DATA_ROOT/leaderboard-refresh-status.json"
 MATCH_SEARCH_INDEX_FILE="$DATA_ROOT/match-search-index.json"

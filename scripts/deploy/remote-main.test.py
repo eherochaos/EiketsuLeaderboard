@@ -103,6 +103,35 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
             "log 'refresh leaderboard snapshot'",
         )
 
+    def test_deploy_holds_worker_refresh_lock_for_the_whole_publish(self) -> None:
+        acquire = self.function_body("acquire_refresh_lock")
+        self.assertIn('DEPLOY_REFRESH_LOCK_WAIT_SECONDS:-900', acquire)
+        self.assertIn("set -o noclobber", acquire)
+        self.assertIn('sleep 2', acquire)
+        self.assertIn('snapshot refresh lock is still held after ${wait_seconds}s', acquire)
+        self.assertIn(
+            'REFRESH_LOCK_FILE="$DATA_ROOT/.leaderboard-snapshot.json.refresh.lock"',
+            self.text,
+        )
+        self.assert_order(
+            "trap release_refresh_lock EXIT",
+            "log 'acquire snapshot refresh lock'",
+            "\nacquire_refresh_lock\n",
+            "log 'publish source'",
+            "log 'stop leaderboard node api before heavy deploy work'",
+            "log 'refresh leaderboard snapshot'",
+            "log 'smoke check live routes'",
+            "log 'done'",
+        )
+
+    def test_refresh_lock_release_is_owner_guarded(self) -> None:
+        release = self.function_body("release_refresh_lock")
+        owner_check = 'if [ "$current_token" = "$REFRESH_LOCK_TOKEN" ]; then'
+        remove = 'rm -f "$REFRESH_LOCK_FILE" || true'
+        self.assertIn(owner_check, release)
+        self.assertIn(remove, release)
+        self.assertLess(release.index(owner_check), release.index(remove))
+
     def test_node_api_has_writable_analytics_data_mount(self) -> None:
         start_node = self.function_body("start_leaderboard_node_api")
         self.assertIn('-v "$DEPLOY_PATH:/work:ro"', start_node)

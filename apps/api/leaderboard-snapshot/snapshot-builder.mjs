@@ -2614,6 +2614,12 @@ async function buildSnapshotFromData(options = {}) {
         (row.row_type === "archetype" && toNumber(row.cluster_enabled) === 1)
       )
     );
+    const declaredRowCount = toNumber(formalRun.row_count);
+    if (declaredRowCount > 0 && formalRows.length === 0) {
+      throw new Error(
+        `Ready leaderboard run ${formalRun.id} declares ${declaredRowCount} rows but no eligible deck or archetype rows were exported.`
+      );
+    }
     const cardCatalog = await loadCardCatalog();
     const strategyTypes = await readOptionalJson(resolve(legacyRoot, "cards/card_strategy_types.json"), []);
     const snapshot = await buildFormalSnapshot(formalRun, formalRows, cardCatalog, strategyTypes, {

@@ -26,6 +26,72 @@ def load_export_module():
 
 
 class ExportLegacyServiceFromPostgresTests(unittest.TestCase):
+    def test_export_uses_one_read_only_repeatable_read_transaction(self) -> None:
+        module = load_export_module()
+
+        class FakeRows:
+            def mappings(self):
+                return iter(())
+
+        class FakeTransaction:
+            def __init__(self, session):
+                self.session = session
+
+            def __enter__(self):
+                self.session.transaction_active = True
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                self.session.transaction_active = False
+
+        class FakeSession:
+            def __init__(self):
+                self.begin_count = 0
+                self.calls = []
+                self.transaction_active = False
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                return None
+
+            def begin(self):
+                self.begin_count += 1
+                return FakeTransaction(self)
+
+            def execute(self, statement, params=None):
+                self.calls.append((statement, self.transaction_active))
+                return FakeRows()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            session = FakeSession()
+            module.SNAPSHOT_RUNTIME_TABLES = ["server_share_config", "server_users"]
+            module.load_settings = lambda: types.SimpleNamespace(root_dir=root)
+            module.make_session_factory = lambda settings: lambda: session
+            module.copy_card_file = lambda *args, **kwargs: True
+
+            manifest = module.export_legacy_service_from_postgres(root / "output")
+
+            self.assertEqual(session.begin_count, 1)
+            self.assertEqual(
+                session.calls[0][0],
+                "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY",
+            )
+            self.assertTrue(all(transaction_active for _, transaction_active in session.calls))
+            self.assertEqual(
+                [statement for statement, _ in session.calls[1:]],
+                [
+                    'SELECT * FROM "server_share_config" ORDER BY "id"',
+                    'SELECT * FROM "server_users" ORDER BY "id"',
+                ],
+            )
+            self.assertEqual(
+                manifest["tables"],
+                {"server_share_config": 0, "server_users": 0},
+            )
+
     def test_runtime_tables_include_upload_users(self) -> None:
         module = load_export_module()
 

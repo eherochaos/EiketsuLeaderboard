@@ -778,6 +778,45 @@ async function testRefreshWritesAtomicSnapshot() {
   }
 }
 
+async function testRefreshRejectsMissingDeclaredFormalRowsButAllowsDeclaredZeroRows() {
+  const root = await mkdtemp(join(tmpdir(), "leaderboard-missing-formal-rows-"));
+  const legacyRoot = join(root, "legacy-service");
+  const outputPath = join(root, "published", "leaderboard-snapshot.json");
+  const runsPath = join(legacyRoot, "tables", "server_leaderboard_runs.jsonl");
+  const rowsPath = join(legacyRoot, "tables", "server_leaderboard_rows.jsonl");
+
+  try {
+    await createLegacyFixture(legacyRoot);
+    const runs = (await readFile(runsPath, "utf8"))
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    runs[0].row_count = 0;
+    await writeJsonl(runsPath, runs);
+    await writeJsonl(rowsPath, []);
+
+    const { snapshot } = await refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: false });
+    assert.equal(snapshot.tierRows.length, 0);
+    assert.equal(snapshot.clusterRows.length, 0);
+
+    const publishedBefore = await readFile(outputPath, "utf8");
+    const tierListPath = join(root, "published", "tier-list-snapshot.json");
+    const tierListBefore = await readFile(tierListPath, "utf8");
+    runs[0].row_count = 5;
+    await writeJsonl(runsPath, runs);
+
+    await assert.rejects(
+      refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: false }),
+      /Ready leaderboard run 1 declares 5 rows but no eligible deck or archetype rows were exported\./
+    );
+    assert.equal(await readFile(outputPath, "utf8"), publishedBefore);
+    assert.equal(await readFile(tierListPath, "utf8"), tierListBefore);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 async function testRefreshWritesCurrentVersionManifestByDefault() {
   const root = await mkdtemp(join(tmpdir(), "leaderboard-version-refresh-"));
   const legacyRoot = join(root, "legacy-service");
@@ -1361,6 +1400,7 @@ async function testRefreshWritesManifestOnlyBattleFestivalSnapshot() {
 }
 
 await testRefreshWritesAtomicSnapshot();
+await testRefreshRejectsMissingDeclaredFormalRowsButAllowsDeclaredZeroRows();
 await testRefreshSeparatesDistinctSameNameCards();
 await testRefreshWritesCurrentVersionManifestByDefault();
 await testRefreshWritesAllVersionedArtifactsWhenEnabled();

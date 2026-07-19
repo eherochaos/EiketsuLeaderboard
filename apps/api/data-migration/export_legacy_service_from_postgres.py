@@ -118,8 +118,10 @@ def export_legacy_service_from_postgres(output_dir: Path) -> dict[str, Any]:
     settings = load_settings()
     exported_tables = {}
     with make_session_factory(settings)() as session:
-        for table_name in SNAPSHOT_RUNTIME_TABLES:
-            exported_tables[table_name] = export_table(session, table_name, table_dir / f"{table_name}.jsonl")
+        with session.begin():
+            session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+            for table_name in SNAPSHOT_RUNTIME_TABLES:
+                exported_tables[table_name] = export_table(session, table_name, table_dir / f"{table_name}.jsonl")
 
     asset_root = settings.root_dir / "assets"
     card_outputs = {
