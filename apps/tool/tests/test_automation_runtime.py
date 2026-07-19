@@ -450,6 +450,76 @@ def test_probe_auth_failure_pauses_scheduler(tmp_path, monkeypatch):
     assert load_auto_task_state(settings).auth_required is True
 
 
+def test_due_task_prepares_selected_browser_before_collection(tmp_path, monkeypatch):
+    settings = _configure_paths(tmp_path, monkeypatch)
+    save_auto_task_config(
+        settings,
+        AutoTaskConfig(enabled=True, daily_enabled=True, daily_time_jst="05:30", auth_source="chrome"),
+    )
+    calls: list[str] = []
+    monkeypatch.setattr(
+        automation_runtime,
+        "doctor_browser",
+        lambda *args, **kwargs: calls.append("doctor") or {"ok": True},
+    )
+    monkeypatch.setattr(
+        automation_runtime,
+        "sync_client",
+        lambda *args, **kwargs: calls.append("sync")
+        or SimpleNamespace(
+            effective_date_from="2026-07-17",
+            effective_date_to="2026-07-17",
+            collect_result=SimpleNamespace(status="completed"),
+        ),
+    )
+
+    outcome = automation_runtime.run_auto_task_once(
+        settings,
+        now=_now("2026-07-18T05:30:00"),
+        prepare_browser=lambda source: calls.append(f"prepare:{source}"),
+    )
+
+    assert outcome.status == "completed"
+    assert calls == ["prepare:chrome", "doctor", "sync"]
+
+
+def test_idle_or_auth_paused_task_does_not_prepare_browser(tmp_path, monkeypatch):
+    settings = _configure_paths(tmp_path, monkeypatch)
+    save_auto_task_config(settings, AutoTaskConfig(enabled=False, daily_enabled=True))
+    calls: list[str] = []
+
+    assert automation_runtime.run_auto_task_once(
+        settings,
+        now=_now("2026-07-18T05:30:00"),
+        prepare_browser=lambda source: calls.append(source),
+    ).status == "idle"
+
+    save_auto_task_config(settings, AutoTaskConfig(enabled=True, daily_enabled=True))
+    save_auto_task_state(settings, AutoTaskState(auth_required=True))
+    assert automation_runtime.run_auto_task_once(
+        settings,
+        now=_now("2026-07-18T05:30:00"),
+        prepare_browser=lambda source: calls.append(source),
+    ).status == "idle"
+    assert calls == []
+
+
+def test_browser_prepare_failure_pauses_due_task(tmp_path, monkeypatch):
+    settings = _configure_paths(tmp_path, monkeypatch)
+    save_auto_task_config(settings, AutoTaskConfig(enabled=True, daily_enabled=True, daily_time_jst="05:30"))
+
+    outcome = automation_runtime.run_auto_task_once(
+        settings,
+        now=_now("2026-07-18T05:30:00"),
+        prepare_browser=lambda _source: (_ for _ in ()).throw(
+            automation_runtime.BrowserAuthError("browser unavailable")
+        ),
+    )
+
+    assert outcome.status == "auth_required"
+    assert load_auto_task_state(settings).auth_required is True
+
+
 def test_scheduler_restarts_after_stop_times_out_during_long_task(tmp_path, monkeypatch):
     settings = _settings(tmp_path)
     first_started = threading.Event()

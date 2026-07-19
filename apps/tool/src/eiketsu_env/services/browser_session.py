@@ -12,6 +12,7 @@ import socket
 import sqlite3
 import subprocess
 import tempfile
+import threading
 import time
 import webbrowser
 from configparser import ConfigParser
@@ -37,8 +38,9 @@ SUPPORTED_AUTH_SOURCES = {"auto", "default-browser", "chrome", "edge", "brave", 
 CHROME_EPOCH_OFFSET_SECONDS = 11_644_473_600
 CHROMIUM_PROTECTED_LOGIN_ERROR = "Chrome/Edge/Brave 新版登录数据受浏览器保护，当前无法直接读取"
 LIVE_CHROMIUM_BROWSERS = ("edge", "chrome", "brave")
-LIVE_BROWSER_PORTS = {"edge": 49381, "chrome": 49382, "brave": 49383}
 LIVE_BROWSER_TIMEOUT_SECONDS = 2.0
+LIVE_BROWSER_START_TIMEOUT_SECONDS = 10.0
+LIVE_BROWSER_STOP_TIMEOUT_SECONDS = 5.0
 BROWSER_NAME_FOR_USER = {"edge": "Microsoft Edge", "chrome": "Google Chrome", "brave": "Brave"}
 LOGIN_WINDOW_KEEP_OPEN_HINT = (
     "请点击“打开登录页”，在程序打开的 Chrome/Edge/Brave 窗口完成会员区登录，"
@@ -78,6 +80,14 @@ class BrowserPageResult:
     source: str
     final_url: str
     html: str
+
+
+@dataclass(frozen=True, slots=True)
+class _LiveBrowserEndpoint:
+    port: int
+    browser_websocket_url: str
+    marker_path: Path
+    marker_value: str
 
 
 @dataclass(slots=True)
@@ -129,6 +139,172 @@ class BrowserMemberSession:
             final_url = response.geturl()
             encoding = response.headers.get_content_charset() or "utf-8"
         return payload.decode(encoding, errors="replace"), final_url
+
+
+class ManagedChromiumRuntime:
+    """让 Collector 专用 Chromium 与应用保持同一生命周期。"""
+
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        launch_process: Callable[[Sequence[str]], Any] | None = None,
+    ) -> None:
+        self.settings = settings
+        self._launch_process = launch_process or _launch_browser_process
+        self._lock = threading.RLock()
+        self._browser = ""
+        self._mode = ""
+        self._process: Any | None = None
+        self._endpoint: _LiveBrowserEndpoint | None = None
+        self._closed = False
+
+    def open_login(self, auth_source: str | None = None, url: str | None = None) -> str:
+        """切到可见登录窗口；系统浏览器和 Firefox 不纳入进程管理。"""
+
+        selected_source = _normalize_auth_source(auth_source or self.settings.auth_source)
+        target_url = str(url or self.settings.login_url)
+        browser = _browser_kind_for_open(selected_source)
+        executable = _browser_executable_path(browser) if browser else None
+        if browser not in LIVE_CHROMIUM_BROWSERS or executable is None:
+            with self._lock:
+                self._assert_open()
+                self._stop_current_or_raise()
+            return open_login_url(
+                self.settings,
+                selected_source,
+                url=target_url,
+                launch_process=self._launch_process,
+            )
+        self._replace(browser, executable, target_url, mode="visible")
+        return browser
+
+    def ensure_background(self, auth_source: str | None = None, url: str | None = None) -> str:
+        """确保后台 Chromium 可用；可见登录期间不抢切窗口。"""
+
+        selected_source = _normalize_auth_source(auth_source or self.settings.auth_source)
+        target_url = str(url or self.settings.login_url)
+        browser = _live_chromium_browser_for_auth_source(selected_source)
+        executable = _browser_executable_path(browser) if browser else None
+        with self._lock:
+            self._assert_open()
+            if (
+                browser
+                and browser == self._browser
+                and self._mode == "visible"
+                and self._current_is_ready()
+            ):
+                return browser
+            if (
+                browser
+                and browser == self._browser
+                and self._mode == "headless"
+                and self._current_is_ready()
+            ):
+                return browser
+            if browser not in LIVE_CHROMIUM_BROWSERS or executable is None:
+                self._stop_current_or_raise()
+                return ""
+        self._replace(browser, executable, target_url, mode="headless")
+        return browser
+
+    def switch_to_background(self, auth_source: str | None = None, url: str | None = None) -> str:
+        """登录确认后，将可见窗口替换为同 profile 的无界面实例。"""
+
+        selected_source = _normalize_auth_source(auth_source or self.settings.auth_source)
+        target_url = str(url or self.settings.login_url)
+        browser = _live_chromium_browser_for_auth_source(selected_source)
+        executable = _browser_executable_path(browser) if browser else None
+        if browser not in LIVE_CHROMIUM_BROWSERS or executable is None:
+            return ""
+        with self._lock:
+            self._assert_open()
+            if browser == self._browser and self._mode == "headless" and self._current_is_ready():
+                return browser
+        self._replace(browser, executable, target_url, mode="headless")
+        return browser
+
+    def close(self) -> bool:
+        """幂等关闭本 runtime 管理的浏览器；关闭开始后禁止再次启动。"""
+
+        with self._lock:
+            if self._closed and self._process is None and self._endpoint is None:
+                return True
+            self._closed = True
+            return self._stop_current()
+
+    def _replace(self, browser: str, executable: Path, target_url: str, *, mode: str) -> None:
+        with self._lock:
+            self._assert_open()
+            self._stop_current_or_raise()
+            self._close_recoverable_orphan(browser)
+            marker_path = _live_browser_active_port_path(self.settings, browser)
+            _remove_active_port_marker(marker_path)
+            args = _browser_launch_args(
+                self.settings,
+                browser,
+                executable,
+                target_url,
+                headless=mode == "headless",
+            )
+            process = self._launch_process(args)
+            try:
+                endpoint = _wait_for_live_browser_endpoint(self.settings, browser)
+            except Exception:
+                pending_endpoint = _try_live_browser_endpoint(self.settings, browser)
+                self._browser = browser
+                self._mode = mode
+                self._process = process
+                self._endpoint = pending_endpoint
+                # 回收失败时保留本次句柄和精确 endpoint，让应用退出路径继续重试。
+                self._stop_current()
+                raise
+            self._browser = browser
+            self._mode = mode
+            self._process = process
+            self._endpoint = endpoint
+
+    def _close_recoverable_orphan(self, browser: str) -> None:
+        endpoint = _try_live_browser_endpoint(self.settings, browser)
+        if endpoint is None:
+            return
+        _request_browser_close(endpoint)
+        if not _wait_for_endpoint_close(endpoint):
+            raise BrowserAuthError(
+                f"上一次程序打开的 {BROWSER_NAME_FOR_USER.get(browser, browser)} 仍在运行。"
+                "请先关闭该专用浏览器窗口，再重试。"
+            )
+        _remove_active_port_marker(endpoint.marker_path, expected=endpoint.marker_value)
+
+    def _current_is_ready(self) -> bool:
+        return self._endpoint is not None and _endpoint_is_ready(self._endpoint)
+
+    def _stop_current_or_raise(self) -> None:
+        if not self._stop_current():
+            raise BrowserAuthError("程序打开的专用浏览器未能正常退出，请关闭该浏览器后重试。")
+
+    def _stop_current(self) -> bool:
+        browser = self._browser
+        mode = self._mode
+        process = self._process
+        endpoint = self._endpoint or (_try_live_browser_endpoint(self.settings, browser) if browser else None)
+        self._browser = ""
+        self._mode = ""
+        self._process = None
+        self._endpoint = None
+        if process is None and endpoint is None:
+            return True
+        stopped = _shutdown_owned_browser(process, endpoint)
+        if not stopped:
+            self._browser = browser
+            self._mode = mode
+            self._process = process
+            self._endpoint = endpoint
+        return stopped
+
+    def _assert_open(self) -> None:
+        if self._closed:
+            raise BrowserAuthError("浏览器运行环境已经关闭")
 
 
 def create_member_session(
@@ -381,9 +557,8 @@ def _doctor_live_chromium_browser(settings: Settings, browser: str) -> dict[str,
 def load_live_browser_cookiejar(settings: Settings, browser: str) -> BrowserCookieResult:
     if browser not in LIVE_CHROMIUM_BROWSERS:
         raise BrowserAuthError("浏览器内登录态只支持 Chrome、Edge 或 Brave")
-    port = _live_browser_port(browser)
     try:
-        websocket_url = _devtools_page_websocket_url(port, settings.login_url)
+        websocket_url = _live_browser_page_websocket_url(settings, browser, settings.login_url)
     except BrowserAuthError as exc:
         raise BrowserAuthError(
             f"请先点击“打开登录页”，在程序打开的 {BROWSER_NAME_FOR_USER.get(browser, browser)} 窗口完成登录后再检查。"
@@ -411,7 +586,7 @@ def fetch_live_browser_page(settings: Settings, auth_source: str | None, url: st
     if browser not in LIVE_CHROMIUM_BROWSERS:
         raise BrowserAuthError("浏览器上下文读取只支持程序打开的 Chrome、Edge 或 Brave 窗口")
     try:
-        websocket_url = _devtools_page_websocket_url(_live_browser_port(browser), settings.login_url)
+        websocket_url = _live_browser_page_websocket_url(settings, browser, settings.login_url)
     except BrowserAuthError as exc:
         raise BrowserAuthError(
             f"请先点击“打开登录页”，并保持程序打开的 {BROWSER_NAME_FOR_USER.get(browser, browser)} 窗口打开。"
@@ -944,23 +1119,28 @@ def _browser_profile_args(settings: Settings, browser: str) -> list[str]:
     return []
 
 
-def _browser_launch_args(settings: Settings, browser: str, executable: Path, target_url: str) -> list[str]:
+def _browser_launch_args(
+    settings: Settings,
+    browser: str,
+    executable: Path,
+    target_url: str,
+    *,
+    headless: bool = False,
+) -> list[str]:
     if browser in LIVE_CHROMIUM_BROWSERS:
         user_data_dir = _live_browser_user_data_dir(settings, browser)
         user_data_dir.mkdir(parents=True, exist_ok=True)
         return [
             str(executable),
-            f"--remote-debugging-port={_live_browser_port(browser)}",
+            "--remote-debugging-port=0",
+            "--remote-debugging-address=127.0.0.1",
             f"--user-data-dir={user_data_dir}",
             "--no-first-run",
-            "--new-window",
+            "--disable-background-mode",
+            "--headless=new" if headless else "--new-window",
             target_url,
         ]
     return [str(executable), *_browser_profile_args(settings, browser), target_url]
-
-
-def _live_browser_port(browser: str) -> int:
-    return LIVE_BROWSER_PORTS.get(browser, 49380)
 
 
 def _live_browser_user_data_dir(settings: Settings, browser: str) -> Path:
@@ -972,6 +1152,71 @@ def _live_browser_user_data_dir(settings: Settings, browser: str) -> Path:
     if appdata:
         return Path(appdata) / "EiketsuCollector" / "browser_login" / browser
     return settings.root_dir / ".tmp" / "browser_login" / browser
+
+
+def _live_browser_active_port_path(settings: Settings, browser: str) -> Path:
+    return _live_browser_user_data_dir(settings, browser) / "DevToolsActivePort"
+
+
+def _read_live_browser_endpoint(settings: Settings, browser: str) -> _LiveBrowserEndpoint:
+    marker_path = _live_browser_active_port_path(settings, browser)
+    try:
+        marker_value = marker_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise BrowserAuthError("程序打开的浏览器还没有准备好") from exc
+    lines = marker_value.splitlines()
+    if len(lines) < 2:
+        raise BrowserAuthError("浏览器调试标记不完整")
+    try:
+        port = int(lines[0].strip())
+    except ValueError as exc:
+        raise BrowserAuthError("浏览器调试端口无效") from exc
+    browser_path = lines[1].strip()
+    if not 1 <= port <= 65535:
+        raise BrowserAuthError("浏览器调试端口无效")
+    if (
+        not browser_path.startswith("/devtools/browser/")
+        or browser_path == "/devtools/browser/"
+        or any(char in browser_path for char in ("?", "#", "\r", "\n"))
+    ):
+        raise BrowserAuthError("浏览器调试标识无效")
+    return _LiveBrowserEndpoint(
+        port=port,
+        browser_websocket_url=f"ws://127.0.0.1:{port}{browser_path}",
+        marker_path=marker_path,
+        marker_value=marker_value,
+    )
+
+
+def _try_live_browser_endpoint(settings: Settings, browser: str) -> _LiveBrowserEndpoint | None:
+    try:
+        return _read_live_browser_endpoint(settings, browser)
+    except BrowserAuthError:
+        return None
+
+
+def _wait_for_live_browser_endpoint(
+    settings: Settings,
+    browser: str,
+    timeout: float = LIVE_BROWSER_START_TIMEOUT_SECONDS,
+) -> _LiveBrowserEndpoint:
+    deadline = time.monotonic() + max(0.1, timeout)
+    while time.monotonic() < deadline:
+        endpoint = _try_live_browser_endpoint(settings, browser)
+        if endpoint is not None and _endpoint_is_ready(endpoint):
+            return endpoint
+        time.sleep(0.1)
+    raise BrowserAuthError(
+        f"{BROWSER_NAME_FOR_USER.get(browser, browser)} 后台启动超时。"
+        "如果是从 0.2.13 升级，请先手动关闭旧版留下的专用浏览器窗口。"
+    )
+
+
+def _live_browser_page_websocket_url(settings: Settings, browser: str, preferred_url: str) -> str:
+    endpoint = _read_live_browser_endpoint(settings, browser)
+    if not _endpoint_is_ready(endpoint):
+        raise BrowserAuthError("程序打开的浏览器还没有准备好")
+    return _devtools_page_websocket_url(endpoint.port, preferred_url)
 
 
 def _devtools_page_websocket_url(port: int, preferred_url: str) -> str:
@@ -1187,12 +1432,108 @@ class _DevToolsConnection:
         return b"".join(chunks)
 
 
+def _endpoint_is_ready(endpoint: _LiveBrowserEndpoint) -> bool:
+    try:
+        with _DevToolsConnection(endpoint.browser_websocket_url) as devtools:
+            devtools.call("Browser.getVersion")
+    except (BrowserAuthError, OSError):
+        return False
+    return True
+
+
+def _request_browser_close(endpoint: _LiveBrowserEndpoint) -> None:
+    try:
+        with _DevToolsConnection(endpoint.browser_websocket_url) as devtools:
+            devtools.call("Browser.close")
+    except (BrowserAuthError, OSError):
+        # Chromium 可能在返回 Browser.close 响应前主动断开 WebSocket；后续以 endpoint/Popen 是否退出为准。
+        pass
+
+
+def _wait_for_endpoint_close(
+    endpoint: _LiveBrowserEndpoint,
+    timeout: float = LIVE_BROWSER_STOP_TIMEOUT_SECONDS,
+) -> bool:
+    deadline = time.monotonic() + max(0.0, timeout)
+    while time.monotonic() < deadline:
+        if not _endpoint_is_ready(endpoint):
+            return True
+        time.sleep(0.1)
+    return not _endpoint_is_ready(endpoint)
+
+
+def _process_has_exited(process: Any | None, timeout: float = 0.0) -> bool:
+    if process is None:
+        return True
+    try:
+        process.wait(timeout=max(0.0, timeout))
+        return True
+    except subprocess.TimeoutExpired:
+        return False
+    except (AttributeError, OSError):
+        try:
+            return process.poll() is not None
+        except (AttributeError, OSError):
+            return False
+
+
+def _terminate_owned_process(process: Any | None) -> None:
+    if process is None or _process_has_exited(process):
+        return
+    try:
+        process.terminate()
+    except (AttributeError, OSError):
+        return
+    if _process_has_exited(process, timeout=2.0):
+        return
+    try:
+        process.kill()
+    except (AttributeError, OSError):
+        return
+    _process_has_exited(process, timeout=2.0)
+
+
+def _shutdown_owned_browser(
+    process: Any | None,
+    endpoint: _LiveBrowserEndpoint | None,
+) -> bool:
+    if endpoint is not None:
+        _request_browser_close(endpoint)
+        endpoint_closed = _wait_for_endpoint_close(endpoint)
+    else:
+        endpoint_closed = True
+    process_exited = _process_has_exited(process, timeout=LIVE_BROWSER_STOP_TIMEOUT_SECONDS)
+    if not process_exited:
+        _terminate_owned_process(process)
+        process_exited = _process_has_exited(process)
+    if endpoint is not None:
+        endpoint_closed = endpoint_closed or not _endpoint_is_ready(endpoint)
+        if endpoint_closed:
+            _remove_active_port_marker(endpoint.marker_path, expected=endpoint.marker_value)
+    return endpoint_closed and process_exited
+
+
+def _remove_active_port_marker(marker_path: Path, *, expected: str | None = None) -> None:
+    try:
+        if expected is not None and marker_path.read_text(encoding="utf-8") != expected:
+            return
+        marker_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _webbrowser_controller_name(browser: str) -> str:
     return {"chrome": "chrome", "firefox": "firefox"}.get(browser, "")
 
 
-def _launch_browser_process(args: Sequence[str]) -> None:
-    subprocess.Popen(list(args), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+def _launch_browser_process(args: Sequence[str]) -> subprocess.Popen:
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    return subprocess.Popen(
+        list(args),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=creationflags,
+    )
 
 
 def _env_path(name: str) -> Path | None:

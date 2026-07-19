@@ -13,6 +13,7 @@ from eiketsu_env.services.browser_session import (
     BrowserAuthError,
     BrowserCookieResult,
     BrowserProfileCandidate,
+    ManagedChromiumRuntime,
     browser_kind_from_progid,
     create_member_session,
     discover_chromium_profiles,
@@ -403,8 +404,11 @@ def test_open_login_url_uses_selected_edge_executable(tmp_path, monkeypatch):
 
     assert opened == "edge"
     assert launches[0][0] == str(edge)
-    assert "--remote-debugging-port=49381" in launches[0]
+    assert "--remote-debugging-port=0" in launches[0]
+    assert "--remote-debugging-address=127.0.0.1" in launches[0]
     assert f"--user-data-dir={appdata / 'EiketsuCollector' / 'browser_login' / 'edge'}" in launches[0]
+    assert "--new-window" in launches[0]
+    assert "--headless=new" not in launches[0]
     assert launches[0][-1] == "https://eiketsu-taisen.net/members/"
     assert default_opened == []
 
@@ -433,7 +437,7 @@ def test_open_login_url_auto_uses_installed_chrome_when_default_is_unknown(tmp_p
 
     assert opened == "chrome"
     assert launches[0][0] == str(chrome)
-    assert "--remote-debugging-port=49382" in launches[0]
+    assert "--remote-debugging-port=0" in launches[0]
 
 
 def test_open_login_url_auto_uses_detected_edge_login_window(tmp_path, monkeypatch):
@@ -471,7 +475,7 @@ def test_open_login_url_supports_brave_login_window(tmp_path, monkeypatch):
 
     assert opened == "brave"
     assert launches[0][0] == str(brave)
-    assert "--remote-debugging-port=49383" in launches[0]
+    assert "--remote-debugging-port=0" in launches[0]
 
 
 def test_doctor_browser_uses_live_edge_session(tmp_path, monkeypatch):
@@ -527,7 +531,7 @@ def test_doctor_browser_edge_prompts_open_login_without_offline_cookie_jargon(tm
 
 
 def test_live_browser_cookiejar_requires_member_api_confirmation(tmp_path, monkeypatch):
-    monkeypatch.setattr(browser_session, "_devtools_page_websocket_url", lambda _port, _url: "ws://test")
+    monkeypatch.setattr(browser_session, "_live_browser_page_websocket_url", lambda _settings, _browser, _url: "ws://test")
     monkeypatch.setattr(browser_session, "_DevToolsConnection", _FakeDevToolsConnection)
     monkeypatch.setattr(browser_session, "_devtools_cookies", lambda _devtools: [_make_devtools_cookie()])
     monkeypatch.setattr(
@@ -545,7 +549,7 @@ def test_live_browser_cookiejar_requires_member_api_confirmation(tmp_path, monke
 
 
 def test_live_browser_cookiejar_accepts_confirmed_member_api(tmp_path, monkeypatch):
-    monkeypatch.setattr(browser_session, "_devtools_page_websocket_url", lambda _port, _url: "ws://test")
+    monkeypatch.setattr(browser_session, "_live_browser_page_websocket_url", lambda _settings, _browser, _url: "ws://test")
     monkeypatch.setattr(browser_session, "_DevToolsConnection", _FakeDevToolsConnection)
     monkeypatch.setattr(browser_session, "_devtools_cookies", lambda _devtools: [_make_devtools_cookie()])
 
@@ -564,7 +568,7 @@ def test_live_browser_cookiejar_accepts_confirmed_member_api(tmp_path, monkeypat
 
 
 def test_member_api_success_still_requires_members_home(tmp_path, monkeypatch):
-    monkeypatch.setattr(browser_session, "_devtools_page_websocket_url", lambda _port, _url: "ws://test")
+    monkeypatch.setattr(browser_session, "_live_browser_page_websocket_url", lambda _settings, _browser, _url: "ws://test")
     monkeypatch.setattr(browser_session, "_DevToolsConnection", _FakeDevToolsConnection)
     monkeypatch.setattr(browser_session, "_devtools_cookies", lambda _devtools: [_make_devtools_cookie()])
 
@@ -582,7 +586,7 @@ def test_member_api_success_still_requires_members_home(tmp_path, monkeypatch):
 
 
 def test_fetch_live_browser_page_returns_final_url_and_html(tmp_path, monkeypatch):
-    monkeypatch.setattr(browser_session, "_devtools_page_websocket_url", lambda _port, _url: "ws://test")
+    monkeypatch.setattr(browser_session, "_live_browser_page_websocket_url", lambda _settings, _browser, _url: "ws://test")
     monkeypatch.setattr(browser_session, "_DevToolsConnection", _FakePageDevToolsConnection)
 
     result = fetch_live_browser_page(
@@ -594,3 +598,165 @@ def test_fetch_live_browser_page_returns_final_url_and_html(tmp_path, monkeypatc
     assert result.source == "edge"
     assert result.final_url == "https://eiketsu-taisen.net/members/festival/"
     assert "戦祭り" in result.html
+
+
+def test_live_browser_endpoint_uses_exact_active_port_marker(tmp_path, monkeypatch):
+    monkeypatch.setenv("EIKETSU_BROWSER_LOGIN_DIR", str(tmp_path / "login"))
+    marker = tmp_path / "login" / "edge" / "DevToolsActivePort"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("53127\n/devtools/browser/collector-runtime\n", encoding="utf-8")
+
+    endpoint = browser_session._read_live_browser_endpoint(_settings(tmp_path), "edge")
+
+    assert endpoint.port == 53127
+    assert endpoint.browser_websocket_url == "ws://127.0.0.1:53127/devtools/browser/collector-runtime"
+    assert endpoint.marker_path == marker
+
+
+@pytest.mark.parametrize(
+    "marker_value",
+    [
+        "",
+        "53127\n",
+        "0\n/devtools/browser/runtime\n",
+        "65536\n/devtools/browser/runtime\n",
+        "53127\n/devtools/page/not-a-browser\n",
+    ],
+)
+def test_live_browser_endpoint_rejects_invalid_marker(tmp_path, monkeypatch, marker_value):
+    monkeypatch.setenv("EIKETSU_BROWSER_LOGIN_DIR", str(tmp_path / "login"))
+    marker = tmp_path / "login" / "chrome" / "DevToolsActivePort"
+    marker.parent.mkdir(parents=True)
+    marker.write_text(marker_value, encoding="utf-8")
+
+    with pytest.raises(BrowserAuthError):
+        browser_session._read_live_browser_endpoint(_settings(tmp_path), "chrome")
+
+
+def test_managed_runtime_keeps_visible_login_until_explicit_background_switch(tmp_path, monkeypatch):
+    chrome = tmp_path / "chrome.exe"
+    launches: list[list[str]] = []
+    shutdowns: list[tuple[object, object]] = []
+    endpoints = [
+        browser_session._LiveBrowserEndpoint(53121, "ws://visible", tmp_path / "visible", "visible"),
+        browser_session._LiveBrowserEndpoint(53122, "ws://headless", tmp_path / "headless", "headless"),
+    ]
+
+    monkeypatch.setattr(browser_session, "_browser_executable_path", lambda browser: chrome if browser == "chrome" else None)
+    monkeypatch.setattr(browser_session, "_try_live_browser_endpoint", lambda _settings, _browser: None)
+    monkeypatch.setattr(browser_session, "_wait_for_live_browser_endpoint", lambda _settings, _browser: endpoints.pop(0))
+    monkeypatch.setattr(browser_session, "_endpoint_is_ready", lambda _endpoint: True)
+    monkeypatch.setattr(
+        browser_session,
+        "_shutdown_owned_browser",
+        lambda process, endpoint: shutdowns.append((process, endpoint)) or True,
+    )
+
+    runtime = ManagedChromiumRuntime(
+        _settings(tmp_path),
+        launch_process=lambda args: launches.append(list(args)) or object(),
+    )
+
+    assert runtime.open_login("chrome") == "chrome"
+    assert "--new-window" in launches[0]
+    assert "--headless=new" not in launches[0]
+    assert runtime.ensure_background("chrome") == "chrome"
+    assert len(launches) == 1
+
+    assert runtime.switch_to_background("chrome") == "chrome"
+    assert len(shutdowns) == 1
+    assert "--headless=new" in launches[1]
+    assert "--new-window" not in launches[1]
+    assert "--remote-debugging-port=0" in launches[1]
+
+    runtime.close()
+    runtime.close()
+    assert len(shutdowns) == 2
+    with pytest.raises(BrowserAuthError):
+        runtime.ensure_background("chrome")
+
+
+def test_managed_runtime_launch_failure_terminates_only_new_process(tmp_path, monkeypatch):
+    chrome = tmp_path / "chrome.exe"
+    terminated: list[object] = []
+    marker_removals: list[Path] = []
+
+    class FakeProcess:
+        def __init__(self):
+            self.terminated = False
+
+        def wait(self, timeout=0):
+            if not self.terminated:
+                raise browser_session.subprocess.TimeoutExpired("chrome", timeout)
+            return 0
+
+        def poll(self):
+            return 0 if self.terminated else None
+
+        def terminate(self):
+            self.terminated = True
+            terminated.append(self)
+
+        def kill(self):
+            self.terminated = True
+
+    process = FakeProcess()
+    monkeypatch.setattr(browser_session, "_browser_executable_path", lambda browser: chrome if browser == "chrome" else None)
+    monkeypatch.setattr(browser_session, "_try_live_browser_endpoint", lambda _settings, _browser: None)
+    monkeypatch.setattr(
+        browser_session,
+        "_remove_active_port_marker",
+        lambda marker, **_kwargs: marker_removals.append(marker),
+    )
+    monkeypatch.setattr(
+        browser_session,
+        "_wait_for_live_browser_endpoint",
+        lambda _settings, _browser: (_ for _ in ()).throw(BrowserAuthError("timeout")),
+    )
+
+    runtime = ManagedChromiumRuntime(_settings(tmp_path), launch_process=lambda _args: process)
+
+    with pytest.raises(BrowserAuthError, match="timeout"):
+        runtime.ensure_background("chrome")
+    assert terminated == [process]
+    assert len(marker_removals) == 1
+    assert runtime.close() is True
+
+
+def test_managed_runtime_retains_failed_launch_until_shutdown_succeeds(tmp_path, monkeypatch):
+    chrome = tmp_path / "chrome.exe"
+    process = object()
+    endpoint = browser_session._LiveBrowserEndpoint(
+        53129,
+        "ws://pending",
+        tmp_path / "DevToolsActivePort",
+        "pending",
+    )
+    discovered = iter([None, endpoint])
+    shutdown_results = iter([False, True])
+    shutdowns: list[tuple[object, object]] = []
+
+    monkeypatch.setattr(browser_session, "_browser_executable_path", lambda browser: chrome if browser == "chrome" else None)
+    monkeypatch.setattr(
+        browser_session,
+        "_try_live_browser_endpoint",
+        lambda _settings, _browser: next(discovered),
+    )
+    monkeypatch.setattr(
+        browser_session,
+        "_wait_for_live_browser_endpoint",
+        lambda _settings, _browser: (_ for _ in ()).throw(BrowserAuthError("timeout")),
+    )
+    monkeypatch.setattr(
+        browser_session,
+        "_shutdown_owned_browser",
+        lambda owned, active: shutdowns.append((owned, active)) or next(shutdown_results),
+    )
+
+    runtime = ManagedChromiumRuntime(_settings(tmp_path), launch_process=lambda _args: process)
+
+    with pytest.raises(BrowserAuthError, match="timeout"):
+        runtime.ensure_background("chrome")
+    assert shutdowns == [(process, endpoint)]
+    assert runtime.close() is True
+    assert shutdowns == [(process, endpoint), (process, endpoint)]
