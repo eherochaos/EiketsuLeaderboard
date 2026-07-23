@@ -41,9 +41,9 @@ class SetServerShareConfigTests(unittest.TestCase):
 
             self.assertEqual(result["status"], "completed")
             self.assertEqual(result["configId"], 2)
-            self.assertEqual(result["current"]["targetVersion"], "Ver.3.5.0D")
-            self.assertEqual(result["current"]["dateFrom"], "2026-07-01")
-            self.assertEqual(result["current"]["dateTo"], "2026-07-01")
+            self.assertEqual(result["current"]["targetVersion"], "Ver.3.5.0E")
+            self.assertEqual(result["current"]["dateFrom"], "2026-07-22")
+            self.assertEqual(result["current"]["dateTo"], "2026-07-22")
             with closing(sqlite3.connect(db_path)) as connection:
                 rows = connection.execute(
                     """
@@ -57,7 +57,7 @@ class SetServerShareConfigTests(unittest.TestCase):
                 rows,
                 [
                     (1, "Ver.old", "2026-05-01", "2026-05-31", 0, 0),
-                    (2, "Ver.3.5.0D", "2026-07-01", "2026-07-01", 0, 0),
+                    (2, "Ver.3.5.0E", "2026-07-22", "2026-07-22", 0, 0),
                 ],
             )
 
@@ -84,7 +84,7 @@ class SetServerShareConfigTests(unittest.TestCase):
                         """
                     )
 
-            result = module.set_server_share_config_sqlite(db_path, date_to="2026-07-03")
+            result = module.set_server_share_config_sqlite(db_path, date_to="2026-07-24")
 
             self.assertEqual(result["updatedRows"], 1)
             with closing(sqlite3.connect(db_path)) as connection:
@@ -94,7 +94,7 @@ class SetServerShareConfigTests(unittest.TestCase):
                     FROM server_share_config
                     """
                 ).fetchone()
-            self.assertEqual(row, ("share_v1", "Ver.3.5.0D", "2026-07-01", "2026-07-03", 100))
+            self.assertEqual(row, ("share_v1", "Ver.3.5.0E", "2026-07-22", "2026-07-24", 100))
 
     def test_does_not_downgrade_newer_current_version(self) -> None:
         with temporary_db_path() as db_path:
@@ -104,12 +104,16 @@ class SetServerShareConfigTests(unittest.TestCase):
                     connection.execute(
                         """
                         UPDATE server_share_config
-                        SET target_version = 'Ver.3.5.0E', date_from = '2026-07-08', date_to = '2026-07-08'
+                        SET target_version = 'Ver.3.5.0E', date_from = '2026-07-22', date_to = '2026-07-22'
                         WHERE id = 2
                         """
                     )
 
-            result = module.set_server_share_config_sqlite(db_path)
+            result = module.set_server_share_config_sqlite(
+                db_path,
+                target_version="Ver.3.5.0D",
+                date_from="2026-07-01",
+            )
 
             self.assertEqual(result["status"], "skipped")
             self.assertEqual(result["reason"], "current target version is newer")
@@ -122,7 +126,7 @@ class SetServerShareConfigTests(unittest.TestCase):
                     WHERE id = 2
                     """
                 ).fetchone()
-            self.assertEqual(row, ("Ver.3.5.0E", "2026-07-08", "2026-07-08"))
+            self.assertEqual(row, ("Ver.3.5.0E", "2026-07-22", "2026-07-22"))
 
     def _create_database(self, db_path: Path) -> None:
         with closing(sqlite3.connect(db_path)) as connection:
