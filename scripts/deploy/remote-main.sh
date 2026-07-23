@@ -4,6 +4,7 @@ set -euo pipefail
 REFRESH_LOCK_FILE=''
 REFRESH_LOCK_TOKEN=''
 REFRESH_LOCK_OWNED=0
+NODE_API_WAS_RUNNING=0
 
 log() {
   printf '[deploy] %s\n' "$*"
@@ -69,6 +70,22 @@ release_refresh_lock() {
     rm -f "$REFRESH_LOCK_FILE" || true
   fi
   REFRESH_LOCK_OWNED=0
+}
+
+cleanup_deploy() {
+  local exit_status=$?
+  trap - EXIT
+  set +e
+  if [ "$exit_status" -ne 0 ] \
+    && [ "$NODE_API_WAS_RUNNING" -eq 1 ] \
+    && ! docker_container_running "$DEPLOY_NODE_API_CONTAINER"; then
+    log 'deploy failed; restore leaderboard node api'
+    if ! ( start_leaderboard_node_api ); then
+      log 'failed to restore leaderboard node api'
+    fi
+  fi
+  release_refresh_lock
+  exit "$exit_status"
 }
 
 to_work_path() {
@@ -759,7 +776,7 @@ DIST_ARCHIVE='/tmp/eiketsu-web-dist.tgz'
 DATA_ROOT='apps/api/data'
 REFRESH_LOCK_FILE="$DATA_ROOT/.leaderboard-snapshot.json.refresh.lock"
 ensure_writable_dir "$DATA_ROOT"
-trap release_refresh_lock EXIT
+trap cleanup_deploy EXIT
 log 'acquire snapshot refresh lock'
 acquire_refresh_lock
 
@@ -793,6 +810,9 @@ if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ] && ! postgres_export_python_ready; then
   DEPLOY_EXPORT_POSTGRES=0
 fi
 log 'stop leaderboard node api before heavy deploy work'
+if docker_container_running "$DEPLOY_NODE_API_CONTAINER"; then
+  NODE_API_WAS_RUNNING=1
+fi
 stop_leaderboard_node_api
 if [ "$DEPLOY_EXPORT_POSTGRES" = '1' ]; then
   log 'ensure battle festival schema'

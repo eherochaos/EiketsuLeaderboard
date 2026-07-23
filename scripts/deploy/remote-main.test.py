@@ -103,6 +103,38 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
             "log 'refresh leaderboard snapshot'",
         )
 
+    def test_deploy_records_node_api_state_before_first_stop(self) -> None:
+        self.assertIn("NODE_API_WAS_RUNNING=0", self.text)
+        stop_start = self.text.index("log 'stop leaderboard node api before heavy deploy work'")
+        stop_end = self.text.index("if [ \"$DEPLOY_EXPORT_POSTGRES\" = '1' ]; then", stop_start)
+        stop_block = self.text[stop_start:stop_end]
+        self.assertIn('if docker_container_running "$DEPLOY_NODE_API_CONTAINER"; then', stop_block)
+        self.assertIn("NODE_API_WAS_RUNNING=1", stop_block)
+        self.assertLess(
+            stop_block.index('docker_container_running "$DEPLOY_NODE_API_CONTAINER"'),
+            stop_block.index("stop_leaderboard_node_api"),
+        )
+
+    def test_failed_deploy_restores_running_node_api_before_unlock(self) -> None:
+        cleanup = self.function_body("cleanup_deploy")
+        self.assertIn("local exit_status=$?", cleanup)
+        self.assertIn("trap - EXIT", cleanup)
+        self.assertIn("set +e", cleanup)
+        self.assertIn('[ "$exit_status" -ne 0 ]', cleanup)
+        self.assertIn('[ "$NODE_API_WAS_RUNNING" -eq 1 ]', cleanup)
+        self.assertIn('! docker_container_running "$DEPLOY_NODE_API_CONTAINER"', cleanup)
+        self.assertIn("if ! ( start_leaderboard_node_api ); then", cleanup)
+        self.assertLess(cleanup.index("( start_leaderboard_node_api )"), cleanup.index("release_refresh_lock"))
+        self.assertLess(cleanup.index("release_refresh_lock"), cleanup.index('exit "$exit_status"'))
+
+    def test_cleanup_does_not_restore_after_success_or_preexisting_stop(self) -> None:
+        cleanup = self.function_body("cleanup_deploy")
+        failure_guard = cleanup.index('[ "$exit_status" -ne 0 ]')
+        previous_state_guard = cleanup.index('[ "$NODE_API_WAS_RUNNING" -eq 1 ]')
+        restore = cleanup.index("( start_leaderboard_node_api )")
+        self.assertLess(failure_guard, restore)
+        self.assertLess(previous_state_guard, restore)
+
     def test_deploy_holds_worker_refresh_lock_for_the_whole_publish(self) -> None:
         acquire = self.function_body("acquire_refresh_lock")
         self.assertIn('DEPLOY_REFRESH_LOCK_WAIT_SECONDS:-900', acquire)
@@ -114,7 +146,7 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
             self.text,
         )
         self.assert_order(
-            "trap release_refresh_lock EXIT",
+            "trap cleanup_deploy EXIT",
             "log 'acquire snapshot refresh lock'",
             "\nacquire_refresh_lock\n",
             "log 'publish source'",

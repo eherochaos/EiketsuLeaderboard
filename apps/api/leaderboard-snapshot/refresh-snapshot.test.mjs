@@ -817,6 +817,50 @@ async function testRefreshRejectsMissingDeclaredFormalRowsButAllowsDeclaredZeroR
   }
 }
 
+async function testRefreshAllowsDeclaredRowsWithoutDisplayableRows() {
+  const root = await mkdtemp(join(tmpdir(), "leaderboard-nondisplayable-formal-rows-"));
+  const legacyRoot = join(root, "legacy-service");
+  const outputPath = join(root, "published", "leaderboard-snapshot.json");
+  const runsPath = join(legacyRoot, "tables", "server_leaderboard_runs.jsonl");
+  const rowsPath = join(legacyRoot, "tables", "server_leaderboard_rows.jsonl");
+
+  try {
+    await createLegacyFixture(legacyRoot);
+    const runs = (await readFile(runsPath, "utf8"))
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const rows = (await readFile(rowsPath, "utf8"))
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .slice(0, 4);
+    runs[0].row_count = 4;
+    rows[0].rank_scope = "top";
+    rows[1].cluster_enabled = 1;
+    rows[2].cluster_enabled = 0;
+    rows[3].row_type = "summary";
+    await writeJsonl(runsPath, runs);
+    await writeJsonl(rowsPath, rows);
+
+    const { snapshot } = await refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: false });
+    const tierList = JSON.parse(await readFile(join(root, "published", "tier-list-snapshot.json"), "utf8"));
+
+    assert.equal(snapshot.metadata.sourceRunId, 1);
+    assert.equal(snapshot.metadata.targetVersion, "Ver.test");
+    assert.equal(snapshot.metadata.sampleSize, 0);
+    assert.deepEqual(snapshot.tierRows, []);
+    assert.deepEqual(snapshot.clusterRows, []);
+    assert.deepEqual(snapshot.home.tierRows, []);
+    assert.deepEqual(tierList.tierRows, []);
+    assert.deepEqual(tierList.clusterRows, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 async function testRefreshWritesCurrentVersionManifestByDefault() {
   const root = await mkdtemp(join(tmpdir(), "leaderboard-version-refresh-"));
   const legacyRoot = join(root, "legacy-service");
@@ -1401,6 +1445,7 @@ async function testRefreshWritesManifestOnlyBattleFestivalSnapshot() {
 
 await testRefreshWritesAtomicSnapshot();
 await testRefreshRejectsMissingDeclaredFormalRowsButAllowsDeclaredZeroRows();
+await testRefreshAllowsDeclaredRowsWithoutDisplayableRows();
 await testRefreshSeparatesDistinctSameNameCards();
 await testRefreshWritesCurrentVersionManifestByDefault();
 await testRefreshWritesAllVersionedArtifactsWhenEnabled();

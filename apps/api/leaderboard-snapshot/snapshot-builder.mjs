@@ -2607,15 +2607,16 @@ async function buildSnapshotFromData(options = {}) {
   });
 
   if (formalRun) {
-    const formalRows = await readJsonl(
+    const runRows = await readJsonl(
       resolve(legacyRoot, "tables/server_leaderboard_rows.jsonl"),
-      (row) => row.run_id === formalRun.id && row.rank_scope === "all" && (
-        (row.row_type === "deck" && toNumber(row.cluster_enabled) === 0) ||
-        (row.row_type === "archetype" && toNumber(row.cluster_enabled) === 1)
-      )
+      (row) => row.run_id === formalRun.id
     );
+    const formalRows = runRows.filter((row) => row.rank_scope === "all" && (
+      (row.row_type === "deck" && toNumber(row.cluster_enabled) === 0) ||
+      (row.row_type === "archetype" && toNumber(row.cluster_enabled) === 1)
+    ));
     const declaredRowCount = toNumber(formalRun.row_count);
-    if (declaredRowCount > 0 && formalRows.length === 0) {
+    if (declaredRowCount > 0 && runRows.length === 0) {
       throw new Error(
         `Ready leaderboard run ${formalRun.id} declares ${declaredRowCount} rows but no eligible deck or archetype rows were exported.`
       );
