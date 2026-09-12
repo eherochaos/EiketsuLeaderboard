@@ -153,6 +153,41 @@ def test_probe_battle_festival_period_prefers_current_public_announcement(tmp_pa
     assert calls == [PUBLIC_EVENT_INDEX_URL, "https://info-eiketsu-taisen.sega.jp/archives/7592"]
 
 
+@pytest.mark.parametrize(
+    ("current_day", "expected_status"),
+    [(10, "inactive"), (11, "active"), (12, "active"), (13, "active"), (14, "inactive")],
+)
+def test_probe_cannae_festival_period(tmp_path, monkeypatch, current_day, expected_status):
+    announcement_url = "https://info-eiketsu-taisen.sega.jp/archives/7822"
+    pages = {
+        PUBLIC_EVENT_INDEX_URL: """
+            <div class="site-articles-list news">
+              <a href="/archives/7822">戦祭り「カンナエの戦い」開催のお知らせ</a>
+              <a href="/archives/7592">戦祭り「樊城の戦い」開催のお知らせ</a>
+            </div>
+        """,
+        announcement_url: """
+            <h1>戦祭り「カンナエの戦い」開催のお知らせ</h1>
+            <p>2026年9月11日（金）から9月13日（日）までの3日間、戦祭りを開催いたします。</p>
+            <h3>◆開催日時</h3>
+            <p>2026年9月11日（金）～ 9月13日（日）</p>
+            <p>※開催時間は全日 10:00 ～ 23:59 となります。</p>
+        """,
+    }
+    monkeypatch.setattr(battle_festival, "fetch_public_page", lambda url, timeout=20: (pages[url], url))
+    monkeypatch.setattr(battle_festival, "today_jst", lambda: date(2026, 9, current_day))
+    monkeypatch.setattr(
+        battle_festival, "create_member_session", lambda *args, **kwargs: pytest.fail("公开公告命中时不应读取会员页")
+    )
+
+    result = probe_battle_festival_period(_settings(tmp_path))
+
+    assert result.period == BattleFestivalPeriod("2026-09-11", "2026-09-13")
+    assert result.status == expected_status
+    assert result.source == "public_announcement"
+    assert result.final_url == announcement_url
+
+
 def test_probe_battle_festival_period_falls_back_after_public_article_redirect(tmp_path, monkeypatch):
     index_html = """
     <html><body><div class="site-articles-list news">
