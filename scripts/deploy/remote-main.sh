@@ -552,7 +552,22 @@ wait_for_live_health() {
 }
 
 tier_list_smoke_deck_id() {
-  python3 -c 'import json,sys,urllib.parse; data=json.load(open(sys.argv[1], encoding="utf-8")); rows=data.get("tierRows") or []; print(urllib.parse.quote(str(rows[0].get("deckId") or ""), safe="") if rows else "")' "$TIER_LIST_SNAPSHOT_FILE"
+  python3 - "$TIER_LIST_SNAPSHOT_FILE" <<'PY'
+import json
+import sys
+import urllib.parse
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    data = json.load(handle)
+rows = data.get("tierRows") if isinstance(data, dict) else None
+if not isinstance(rows, list):
+    raise SystemExit("tier list snapshot tierRows must be an array")
+if rows:
+    deck_id = rows[0].get("deckId") if isinstance(rows[0], dict) else None
+    if not isinstance(deck_id, str) or not deck_id.strip():
+        raise SystemExit("tier list smoke deck id is missing")
+    print(urllib.parse.quote(deck_id, safe=""))
+PY
 }
 
 battle_festival_smoke_deck_id() {
@@ -617,9 +632,12 @@ smoke_check_api_routes() {
   curl -fsS "$base/api/version-options" >/dev/null || fail 'version options api is not live'
   curl -fsS "$base/api/tier-list-snapshot" >/dev/null || fail 'tier list snapshot api is not live'
   local tier_deck_id
-  tier_deck_id="$(tier_list_smoke_deck_id)"
-  [ -n "$tier_deck_id" ] || fail 'tier list smoke deck id is missing'
-  curl -fsS "$base/api/tier-list-deck-config?scope=deck&deckId=$tier_deck_id" >/dev/null || fail 'tier list deck config api is not live'
+  tier_deck_id="$(tier_list_smoke_deck_id)" || fail 'tier list snapshot is invalid'
+  if [ -n "$tier_deck_id" ]; then
+    curl -fsS "$base/api/tier-list-deck-config?scope=deck&deckId=$tier_deck_id" >/dev/null || fail 'tier list deck config api is not live'
+  else
+    log 'tier list is empty; skip deck config smoke'
+  fi
   if [ -f "$BATTLE_FESTIVAL_SNAPSHOT_FILE" ]; then
     curl -fsS "$base/api/battle-festival-snapshot" >/dev/null || fail 'battle festival snapshot api is not live'
     local battle_festival_deck_id

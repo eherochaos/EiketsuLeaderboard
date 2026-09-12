@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -53,6 +59,124 @@ class RemoteMainDeployScriptTests(unittest.TestCase):
         self.assertIn("include_battle_festival", client_config)
         self.assertIn("battle festival client config field is missing", self.text)
         self.assertNotIn("include_battle_festival is not true", client_config)
+
+    def test_empty_tier_list_continues_remaining_api_smoke(self) -> None:
+        result, calls = self.run_api_smoke('{"tierRows": []}')
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("tier list is empty; skip deck config smoke", result.stdout)
+        self.assertNotIn("/api/tier-list-deck-config", calls)
+        self.assertIn("/api/battle-festival-deck-config", calls)
+        self.assertIn("/api/match-search", calls)
+        self.assertIn("/api/site-analytics-event", calls)
+        self.assertIn("run:http://smoke.test/api/leaderboard-refresh-status", calls)
+        self.assertIn("finished", result.stdout)
+
+    def test_populated_tier_list_checks_url_encoded_deck(self) -> None:
+        result, calls = self.run_api_smoke(json.dumps({"tierRows": [{"deckId": "card-a,card/b &c"}]}))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("/api/tier-list-deck-config?scope=deck&deckId=card-a%2Ccard%2Fb%20%26c", calls)
+        self.assertNotIn("skip deck config smoke", result.stdout)
+
+    def test_populated_tier_list_rejects_missing_deck_id(self) -> None:
+        for row in ({}, {"deckId": ""}, {"deckId": "  "}, {"deckId": None}, {"deckId": 1}, None):
+            with self.subTest(row=row):
+                result, calls = self.run_api_smoke(json.dumps({"tierRows": [row]}))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("tier list smoke deck id is missing", result.stderr)
+                self.assertNotIn("/api/tier-list-deck-config", calls)
+                self.assertNotIn("finished", result.stdout)
+
+    def test_invalid_tier_snapshot_is_not_treated_as_empty(self) -> None:
+        for snapshot in (None, "{broken", "null", "[]", "{}", '{"tierRows": null}', '{"tierRows": {}}'):
+            with self.subTest(snapshot=snapshot):
+                result, _ = self.run_api_smoke(snapshot)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("tier list snapshot is invalid", result.stderr)
+                self.assertNotIn("skip deck config smoke", result.stdout)
+                self.assertNotIn("finished", result.stdout)
+
+    def test_empty_tier_list_still_rejects_api_failures(self) -> None:
+        for path in ("/api/tier-list-snapshot", "/api/match-search-options"):
+            with self.subTest(path=path):
+                result, _ = self.run_api_smoke('{"tierRows": []}', fail_path=path)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("api is not live", result.stderr)
+                self.assertNotIn("finished", result.stdout)
+
+    def test_empty_tier_list_still_rejects_run_mismatch(self) -> None:
+        result, _ = self.run_api_smoke('{"tierRows": []}', mismatch_run=True)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("match search index run does not match leaderboard snapshot", result.stderr)
+        self.assertNotIn("finished", result.stdout)
+
+    def test_populated_tier_list_still_rejects_deck_config_failure(self) -> None:
+        result, _ = self.run_api_smoke('{"tierRows": [{"deckId": "card-a"}]}', fail_path="/api/tier-list-deck-config")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("tier list deck config api is not live", result.stderr)
+        self.assertNotIn("finished", result.stdout)
+
+    def run_api_smoke(
+        self, snapshot_text: str | None, *, fail_path: str = "", mismatch_run: bool = False
+    ) -> tuple[subprocess.CompletedProcess[str], str]:
+        bash = shutil.which("bash")
+        if not bash and os.name == "nt":
+            git = shutil.which("git")
+            candidate = Path(git).parent.parent / "bin" / "bash.exe" if git else None
+            if candidate and candidate.is_file():
+                bash = str(candidate)
+        if not bash:
+            self.fail("Bash is required to run deployment smoke behavior tests")
+
+        # 只执行验收函数；所有网络和服务操作均由本地替身接管。
+        functions = "\n".join(self.function_body(name) + "\n}\n" for name in (
+            "log", "fail", "tier_list_smoke_deck_id", "battle_festival_smoke_deck_id",
+            "smoke_check_run_consistency", "smoke_check_api_routes",
+        ))
+        stubs = r'''
+python3() { "$SMOKE_PYTHON" "$@"; }
+wait_for_live_health() { return 0; }
+smoke_check_client_config() { return 0; }
+curl() {
+  printf '%s\n' "$*" >> "$SMOKE_TRACE"
+  if [ -n "$SMOKE_FAIL_PATH" ] && [[ "$*" == *"$SMOKE_FAIL_PATH"* ]]; then
+    return 22
+  fi
+  if [[ "$*" == *"-w %{http_code}"* ]]; then
+    printf '401'
+  fi
+  return 0
+}
+api_source_run() {
+  printf 'run:%s\n' "$1" >> "$SMOKE_TRACE"
+  if [ "$SMOKE_MISMATCH_RUN" = '1' ] && [[ "$1" == */api/match-search-options ]]; then
+    printf '870\n'
+  else
+    printf '869\n'
+  fi
+}
+'''
+        with tempfile.TemporaryDirectory(prefix="deploy-smoke-test-") as temp_dir:
+            root = Path(temp_dir)
+            snapshot = root / "tier-list-snapshot.json"
+            if snapshot_text is not None:
+                snapshot.write_text(snapshot_text, encoding="utf-8")
+            battle = root / "battle-festival-snapshot.json"
+            battle.write_text('{"tierRows": [{"deckId": "battle-deck"}]}', encoding="utf-8")
+            trace = root / "calls.txt"
+            env = {**os.environ, "DEPLOY_SMOKE_URL_BASE": "http://smoke.test", "SITE_ANALYTICS_ADMIN_TOKEN": "",
+                   "TIER_LIST_SNAPSHOT_FILE": snapshot.as_posix(), "BATTLE_FESTIVAL_SNAPSHOT_FILE": battle.as_posix(),
+                   "SMOKE_PYTHON": Path(sys.executable).as_posix(), "SMOKE_TRACE": trace.as_posix(),
+                   "SMOKE_FAIL_PATH": fail_path, "SMOKE_MISMATCH_RUN": "1" if mismatch_run else "0"}
+            result = subprocess.run(
+                [bash, "--noprofile", "--norc", "-s"],
+                input="set -euo pipefail\n" + functions + stubs + "\nsmoke_check_api_routes\nprintf 'finished\\n'\n",
+                env=env, capture_output=True, text=True, encoding="utf-8", timeout=30, check=False,
+            )
+            return result, trace.read_text(encoding="utf-8") if trace.exists() else ""
 
     def test_deploy_ensures_battle_festival_schema_before_refresh(self) -> None:
         scope = self.function_body("ensure_battle_festival_scope")
