@@ -1170,6 +1170,87 @@ async function testRefreshBuildsCannaeFestivalWithOnlyCurrentPeriodMatches() {
   }
 }
 
+async function testRefreshBuildsSuikodenUnifiedFestivalWithElevenCostDecks() {
+  const root = await mkdtemp(join(tmpdir(), "battle-festival-suikoden-refresh-"));
+  const legacyRoot = join(root, "legacy-service");
+  const tableRoot = join(legacyRoot, "tables");
+  const outputPath = join(root, "published", "leaderboard-snapshot.json");
+  const unifiedDeck = [battleCardA, battleCardB, battleCardC, battleCardD].join(",");
+
+  try {
+    await createLegacyFixture(legacyRoot, {
+      battleFestivalUploadScopes: [
+        {
+          upload: { id: 76, target_version: "Ver.3.5.0G", date_from: "2026-09-11", date_to: "2026-09-13" },
+          package: { target_version: "Ver.3.5.0G", festival_date_from: "2026-09-11", festival_date_to: "2026-09-13" }
+        },
+        {
+          upload: { id: 75, target_version: "Ver.3.5.0J", date_from: "2026-10-17", date_to: "2026-10-17" },
+          package: { target_version: "Ver.3.5.0J", festival_date_from: "2026-10-16", festival_date_to: "2026-10-18" }
+        }
+      ]
+    });
+    await writeJsonl(join(tableRoot, "server_share_config.jsonl"), [
+      { id: 1, target_version: "Ver.3.5.0J", date_from: "2026-10-08", date_to: "2026-10-17" }
+    ]);
+    await writeJsonl(join(tableRoot, "server_leaderboard_runs.jsonl"), [
+      { id: 1, status: "ready", target_version: "Ver.3.5.0J", date_from: "2026-10-08", date_to: "2026-10-17", include_solo: 0, include_battle_festival: 0 }
+    ]);
+    // 统一战不要求阵营；只统计本期 J 版战祭，并保留完整官方周期。
+    const matches = [
+      [2, "Ver.3.5.0J", "2026-10-16", "戦祭り"],
+      [3, "Ver.3.5.0J", "2026-10-17", "戦祭り"],
+      [4, "Ver.3.5.0J", "2026-10-18", "戦祭り"],
+      [5, "Ver.3.5.0G", "2026-09-12", "戦祭り"],
+      [6, "Ver.3.5.0J", "2026-10-15", "戦祭り"],
+      [7, "Ver.3.5.0J", "2026-10-19", "戦祭り"],
+      [8, "Ver.3.5.0H", "2026-10-17", "戦祭り"],
+      [9, "Ver.3.5.0J", "2026-10-17", "全国対戦"]
+    ].map(([id, version, day, mode]) => ({ id, version, mode, played_at: `${day} 12:00` }));
+    await writeJsonl(join(tableRoot, "matches.jsonl"), matches);
+    const decks = matches.flatMap((match) => [0, 1].map((sideIndex) => ({
+      id: match.id * 2 + sideIndex, match_id: match.id, side_index: sideIndex, deck_fingerprint: unifiedDeck
+    })));
+    await writeJsonl(join(tableRoot, "match_decks.jsonl"), decks);
+    await writeJsonl(join(tableRoot, "match_deck_units.jsonl"), decks.flatMap((deck) => (
+      deckUnitRows(deck.id * 4, deck.id, unifiedDeck)
+    )));
+    await writeJsonl(join(tableRoot, "match_sides.jsonl"), matches.flatMap((match) => [
+      matchSide(match.id * 2, match.id, 0, "win", `suikoden-${match.id}`),
+      matchSide(match.id * 2 + 1, match.id, 1, "loss", `opponent-${match.id}`)
+    ]));
+    const catalogPath = join(legacyRoot, "cards", "card_catalog.json");
+    const catalog = JSON.parse(await readFile(catalogPath, "utf8"));
+    const costs = { [battleCardA]: "3.0", [battleCardB]: "3.0", [battleCardC]: "3.0", [battleCardD]: "2.0" };
+    for (const card of catalog.cards) {
+      if (costs[card.hash_id]) card.cost = costs[card.hash_id];
+    }
+    await writeJson(catalogPath, catalog);
+
+    const { battleFestival } = await refreshLeaderboardSnapshot({ legacyRoot, outputPath, logDiagnostics: false });
+    const snapshot = JSON.parse(await readFile(join(root, "published", "battle-festival-snapshot.json"), "utf8"));
+
+    assert.equal(battleFestival.status, "completed");
+    assert.equal(snapshot.metadata.targetVersion, "Ver.3.5.0J");
+    assert.equal(snapshot.metadata.sourceUploadId, 75);
+    assert.equal(snapshot.metadata.periodStatus, "official");
+    assert.equal(snapshot.metadata.festivalPeriodSource, "official");
+    assert.equal(snapshot.metadata.dateFrom, "2026-10-16");
+    assert.equal(snapshot.metadata.dateTo, "2026-10-18");
+    assert.equal(snapshot.metadata.sampleSize, 6);
+    assert.deepEqual(snapshot.battleFestival.camps, []);
+    assert.deepEqual(snapshot.battleFestival.campShare, []);
+    assert.deepEqual(snapshot.battleFestival.rowsByCamp, {});
+    assert.equal(snapshot.tierRows.length, 1);
+    assert.equal(snapshot.tierRows[0].deckId, unifiedDeck);
+    assert.equal(snapshot.tierRows[0].winRate, 50);
+    assert.equal(snapshot.tierRows[0].deckCards.length, 4);
+    assert.equal(snapshot.tierRows[0].deckCards.reduce((sum, card) => sum + Number(card.cost), 0), 11);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 async function testRefreshSkipsSingleDayBattleFestivalWithoutOfficialPeriod() {
   const root = await mkdtemp(join(tmpdir(), "battle-festival-single-day-skip-refresh-"));
   const legacyRoot = join(root, "legacy-service");
@@ -1532,6 +1613,7 @@ await testRefreshCliPrintsVersionManifest();
 await testRefreshWritesBattleFestivalSnapshot();
 await testRefreshBuildsBattleFestivalSnapshotFromMatches();
 await testRefreshBuildsCannaeFestivalWithOnlyCurrentPeriodMatches();
+await testRefreshBuildsSuikodenUnifiedFestivalWithElevenCostDecks();
 await testRefreshSkipsSingleDayBattleFestivalWithoutOfficialPeriod();
 await testRefreshSkipsMultiDayBattleFestivalWithoutOfficialSource();
 await testRefreshUsesEarlierOfficialPeriodForLatestSingleDayBattleFestivalUpload();
